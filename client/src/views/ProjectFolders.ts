@@ -91,3 +91,48 @@ export function referenceCandidates(
         .filter(p => !referenced.has(bareGuid(p.guid)))
         .map(p => ({ name: p.name, guid: p.guid, include: includeFor(folder, p.cwproj) }));
 }
+
+/**
+ * #810 — a project's sources as the Solution View lists them: its Compile items, by name and the
+ * path the .cwproj holds. A project with none has none: an empty list is not a reason to ask the
+ * server, whose parse is the one made when the solution loaded.
+ */
+export function projectSourceFiles(cwprojText: string): { name: string; relativePath: string }[] {
+    const files: { name: string; relativePath: string }[] = [];
+    const compileRe = /<Compile\s+Include\s*=\s*"([^"]+)"/gi;
+    let m: RegExpExecArray | null;
+    while ((m = compileRe.exec(cwprojText)) !== null) {
+        files.push({ name: path.win32.basename(m[1]), relativePath: m[1] });
+    }
+    return files;
+}
+
+/**
+ * #810 — the .cwproj text each project's source nodes were built from. The tree keeps those nodes
+ * across redraws and refreshes (#296, #297), so a source added or removed (on the Project
+ * Properties page, in the Clarion IDE, by hand) never showed until the solution was reloaded.
+ * Keyed without case: Windows paths may arrive spelled either way.
+ */
+export class ProjectSourceStamps {
+    private readonly texts = new Map<string, string>();
+
+    record(cwproj: string, text: string): void {
+        this.texts.set(cwproj.toLowerCase(), text);
+    }
+
+    /**
+     * True when the file now holds other text than the sources shown were built from, or they were
+     * never built from it (the server's list). A file that cannot be read keeps what is shown.
+     */
+    stale(cwproj: string, text: string | null): boolean {
+        if (text === null) return false;
+        return this.texts.get(cwproj.toLowerCase()) !== text;
+    }
+}
+
+/** #810: the file is the .cwproj of one of the solution's projects. */
+export function isSolutionProjectFile(file: string, projects: { path?: string; filename?: string }[]): boolean {
+    if (!/\.cwproj$/i.test(file)) return false;
+    const target = path.win32.normalize(file).toLowerCase();
+    return projects.some(p => !!p?.path && !!p.filename && path.win32.normalize(path.win32.join(p.path, p.filename)).toLowerCase() === target);
+}

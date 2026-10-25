@@ -5,7 +5,7 @@ import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { includeFor, ItemKind, listItems, removeItem } from '../project/CwprojItems';
 import { FILE_DRIVERS } from '../project/ProjectPropertyFields';
 import { applyText } from '../project/ProjectPropertiesEditor';
-import { folderAddition, referenceCandidates } from '../views/ProjectFolders';
+import { folderAddition, isSolutionProjectFile, referenceCandidates } from '../views/ProjectFolders';
 import LoggerManager from '../utils/LoggerManager';
 
 const logger = LoggerManager.getLogger("ProjectFolderCommands");
@@ -25,7 +25,7 @@ export function registerProjectFolderCommands(solutionTreeDataProvider: Solution
      * The change, saved at once as the IDE does. When the .cwproj already has unsaved changes (the
      * Project Properties page leaves its edits unsaved), saving would write them too: ask first, and
      * otherwise leave this change unsaved beside them. The tree reads the .cwproj from disk, so it
-     * is redrawn after a save; a refresh would rebuild every node and can be skipped while one runs.
+     * is redrawn when the save lands (the save hook below, #810).
      */
     const edit = async (data: FolderNodeData, change: (text: string) => string): Promise<'saved' | 'unsaved' | 'unchanged'> => {
         const document = await workspace.openTextDocument(Uri.file(data.cwproj));
@@ -44,7 +44,6 @@ export function registerProjectFolderCommands(solutionTreeDataProvider: Solution
             }
         }
         await document.save();
-        solutionTreeDataProvider?.redraw();
         return 'saved';
     };
 
@@ -114,6 +113,14 @@ export function registerProjectFolderCommands(solutionTreeDataProvider: Solution
                 logger.error(`❌ Remove from ${data.projectName}: ${err instanceof Error ? err.message : String(err)}`);
                 window.showErrorMessage(`Could not change ${data.projectName}: ${err instanceof Error ? err.message : String(err)}`);
             }
+        }),
+        // #810: one of the solution's .cwproj files saved, however it was edited (the Project
+        // Properties page, whose edits the user saves; the folder commands above; the XML in a
+        // text editor), redraws the tree, which reads each project's folders and sources from disk.
+        // A redraw only: the .cwproj watcher still reloads the solution for the language server.
+        workspace.onDidSaveTextDocument(document => {
+            const projects = SolutionCache.getInstance().getSolutionInfo()?.projects ?? [];
+            if (isSolutionProjectFile(document.uri.fsPath, projects)) solutionTreeDataProvider?.redraw();
         }),
     ];
 }

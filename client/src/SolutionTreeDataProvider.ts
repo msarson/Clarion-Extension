@@ -13,7 +13,7 @@ import { SolutionScanner, DetectedSolution } from './utils/SolutionScanner';
 import { ClarionInstallationDetector } from './utils/ClarionInstallationDetector';
 import { GlobalSolutionHistory } from './utils/GlobalSolutionHistory';
 import { ProjectDependencyResolver } from './utils/ProjectDependencyResolver';
-import { isProjectNodeData, projectFolders } from './views/ProjectFolders';
+import { isProjectNodeData, projectFolders, projectSourceFiles, ProjectSourceStamps } from './views/ProjectFolders';
 
 /** #803: each IDE folder's icon, for the folder and its entries. */
 const FOLDER_ICONS: Record<string, string> = {
@@ -78,6 +78,8 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     // validator pass — see #295), the local cwproj fallback below takes over, so a long wait
     // buys nothing.
     private static readonly PROJECT_FILES_TIMEOUT_MS = 5_000;
+    /** #810: the .cwproj text each project's source nodes were built from. */
+    private readonly _sourceStamps = new ProjectSourceStamps();
 
     /**
      * #297: last-resort expansion path that makes the tree independent of server load — parse
@@ -114,6 +116,17 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         });
     }
 
+    /** #810: the project's .cwproj holds other text than its source nodes were built from. */
+    private sourcesStale(projectData: any): boolean {
+        const projectPath = projectData?.path ?? projectData?.projectPath;
+        const filename = projectData?.filename;
+        if (!projectPath || !filename) return false;
+        const cwprojPath = path.join(String(projectPath), String(filename));
+        let text: string | null = null;
+        try { text = fs.readFileSync(cwprojPath, 'utf-8'); } catch { /* unreadable: keep what is shown */ }
+        return this._sourceStamps.stale(cwprojPath, text);
+    }
+
     private parseProjectFilesLocally(projectData: any, label: string): { files: any[] } | null {
         try {
             const projectPath = projectData?.path ?? projectData?.projectPath;
@@ -122,14 +135,11 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             const cwprojPath = path.join(String(projectPath), String(filename));
             if (!fs.existsSync(cwprojPath)) return null;
             const content = fs.readFileSync(cwprojPath, 'utf-8');
-            const files: { name: string; relativePath: string }[] = [];
-            const compileRe = /<Compile\s+Include\s*=\s*"([^"]+)"/gi;
-            let m: RegExpExecArray | null;
-            while ((m = compileRe.exec(content)) !== null) {
-                files.push({ name: path.basename(m[1]), relativePath: m[1] });
-            }
+            // #810: a project with no sources has none; the server's list is the one from load.
+            const files = projectSourceFiles(content);
+            this._sourceStamps.record(cwprojPath, content);
             treePerf.perf("Tree expand: local cwproj fallback", { project: label, files: files.length });
-            return files.length > 0 ? { files } : null;
+            return { files };
         } catch (error) {
             logger.error(`❌ Local cwproj parse failed for ${label}: ${error instanceof Error ? error.message : String(error)}`);
             return null;
@@ -619,11 +629,12 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 // getProjectFiles for every expanded project and rebuilt all its nodes.
                 // Solution reloads rebuild the root with fresh TreeNode objects (empty
                 // children), so invalidation comes free via node replacement.
-                if (element.children && element.children.length > 0) {
+                // #810: but a refresh carries them across (#297 fix 1), so they are read again
+                // when the .cwproj no longer holds what they were built from.
+                const projectData = element.data as any;
+                if (element.children && element.children.length > 0 && !this.sourcesStale(projectData)) {
                     return element.children;
                 }
-                // This is a project node that needs to load its details from the server
-                const projectData = element.data as any;
 
                 // Get project information from the data payload
                 const { projectId } = projectData;
