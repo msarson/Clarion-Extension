@@ -2,15 +2,15 @@ import * as vscode from 'vscode';
 import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from '../utils/LoggerManager';
-import { SmartSolutionOpener } from '../utils/SmartSolutionOpener';
 import { writeIdePreferences } from '../solution/ClarionIdePreferences';
 import { buildCwprojContent, buildMinimalExpContent, buildSlnContent, generateGuid } from '../solution/SolutionFiles';
-import { classifySource, FolderInference, findLibraryFiles, inferProjects, SourceFile } from '../solution/FolderProjectInference';
-import { CONFIGURATIONS, NewProjectSpec, ReviewInput, ReviewResult, solutionNameError } from '../solution/NewSolutionReview';
-import { showNewSolutionReview } from '../solution/NewSolutionReviewPanel';
+import { classifySource, findLibraryFiles, inferProjects, SourceFile } from '../solution/FolderProjectInference';
+import { NewProjectSpec, ReviewInput } from '../solution/NewSolutionReview';
+import { showNewSolutionForm } from '../solution/NewSolutionReviewPanel';
 import { getLanguageClient, isClientReady } from '../LanguageClientManager';
 import { versionPathSettings } from '../utils/VersionPathSettings';
-import { ClarionInstallation } from '../utils/ClarionInstallationDetector';
+import { ClarionInstallation, ClarionInstallationDetector } from '../utils/ClarionInstallationDetector';
+import { globalClarionPropertiesFile, globalClarionVersion } from '../globals';
 
 const logger = LoggerManager.getLogger("NewSolutionCommands");
 logger.setLevel("error");
@@ -138,15 +138,6 @@ async function findExportFiles(
     return found;
 }
 
-async function promptSolutionName(defaultName: string): Promise<string | undefined> {
-    const solutionName = await vscode.window.showInputBox({
-        prompt: 'Solution name',
-        value: defaultName,
-        validateInput: (v) => solutionNameError(v)
-    });
-    return solutionName?.trim();
-}
-
 /** Asks before overwriting; true when the files may be written. */
 async function confirmOverwrite(paths: string[]): Promise<boolean> {
     const existing = paths.filter(f => fs.existsSync(f));
@@ -174,98 +165,62 @@ export async function newSolution(): Promise<void> {
     const folderPath = workspaceFolders[0].uri.fsPath;
     const defaultName = path.basename(folderPath);
 
-    // Step 1: Pick Clarion version/compiler before prompting for names
-    const installResult = await SmartSolutionOpener.detectAndPickInstallation();
-    if (!installResult) return;
-
-    // Step 2 (#763): a folder that already has programs can become their solution
+    // #763: a folder that already has programs can become their solution.
     const scan = await vscode.window.withProgress(
         { location: vscode.ProgressLocation.Window, title: 'Reading the Clarion sources in this folder' },
         () => readSourceFiles(folderPath));
     let programs = 0;
-    if (scan.tooLarge) {
-        // Part of a folder would give wrong projects: offer only the empty program.
-        vscode.window.showWarningMessage(`This folder holds more than ${MAX_SOURCE_FILES} Clarion source files, so New Solution does not build projects from them. Open the application's own folder to do that.`);
-    } else {
+    if (!scan.tooLarge) {
         if (scan.unreadable > 0) {
             vscode.window.showWarningMessage(`${plural(scan.unreadable, 'file or folder')} could not be read and ${scan.unreadable === 1 ? 'is' : 'are'} not part of the new solution.`);
         }
         programs = scan.files.filter(f => /\.clw$/i.test(f.relPath) && classifySource(f.text).kind === 'program').length;
     }
 
+    // The installations to choose from: the detected ones, and the one in use when it is not among
+    // them (#479: a ClarionProperties.xml outside the standard locations is never detected).
+    const installations = await ClarionInstallationDetector.detectInstallations();
+    const remembered = { propertiesFile: globalClarionPropertiesFile || undefined, version: globalClarionVersion || undefined };
+    if (remembered.propertiesFile && fs.existsSync(remembered.propertiesFile)
+        && !installations.some(i => i.propertiesPath.toLowerCase() === remembered.propertiesFile!.toLowerCase())) {
+        const current = await ClarionInstallationDetector.parseInstallationFromPropertiesPath(remembered.propertiesFile);
+        if (current) installations.push(current);
+    }
+
     /**
-     * The folder's proposal under a configuration: library sources the folder's directives reach
-     * through its redirection (a MAP MODULE in CWUTIL.INC needs cwutil.clw listed; without the
-     * server, the folder alone is used), and where each program's export file would be found.
+     * The folder's proposal for a selection: library sources the folder's directives reach through
+     * its redirection (a MAP MODULE in CWUTIL.INC needs cwutil.clw listed; without the server, the
+     * folder alone is used), and where each program's export file would be found.
      */
-    const reviewInput = async (configuration: string): Promise<ReviewInput> => {
+    const reviewInput = async (installation: ClarionInstallation, compilerName: string, configuration: string): Promise<ReviewInput> => {
         const libraries = await vscode.window.withProgress(
             { location: vscode.ProgressLocation.Window, title: 'Finding the library sources this folder uses' },
             () => findLibraryFiles(scan.files,
-                names => lookupLibrarySources(folderPath, installResult.installation, installResult.compilerName, configuration, names),
+                names => lookupLibrarySources(folderPath, installation, compilerName, configuration, names),
                 readLibraryFile));
         const inference = inferProjects(scan.files, libraries);
-        const exportFiles = await findExportFiles(folderPath, installResult.installation, installResult.compilerName, configuration,
+        const exportFiles = await findExportFiles(folderPath, installation, compilerName, configuration,
             inference.projects.map(p => `${p.name}.exp`));
-        return { folder: folderPath, files: scan.files, libraries, inference, exportFiles, compiler: installResult.compilerName, sourceCount: scan.files.length };
+        return { folder: folderPath, files: scan.files, libraries, inference, exportFiles, compiler: compilerName, sourceCount: scan.files.length };
     };
 
-    // Step 3 (#792): from the programs, one review page settles the projects, the solution name
-    // and the configuration; an empty program asks for them in turn.
-    let inference: FolderInference | undefined;
-    let review: ReviewResult | undefined;
-    if (programs > 0) {
-        const FROM_SOURCES = `From the ${plural(programs, 'program')} in this folder`;
-        const choice = await vscode.window.showQuickPick([FROM_SOURCES, 'A new empty program'], {
-            placeHolder: 'Build the new solution from…'
-        });
-        if (!choice) return;
-        if (choice === FROM_SOURCES) {
-            const input = await reviewInput(CONFIGURATIONS[0]);
-            inference = input.inference;
-            review = await showNewSolutionReview(input, defaultName, reviewInput);
-            if (!review) return;
-        }
-    }
-
-    let specs: NewProjectSpec[] | undefined = review?.specs;
-    let configChoice: string;
-    let trimmedName: string;
-    if (review) {
-        configChoice = review.configuration;
-        trimmedName = review.name;
-    } else {
-        // Pick build configuration (no .sln exists yet, offer standard options)
-        const picked = await vscode.window.showQuickPick(CONFIGURATIONS, {
-            placeHolder: 'Select build configuration'
-        });
-        if (!picked) return;
-        configChoice = picked;
-
-        // Step 4: Prompt for solution name
-        const named = await promptSolutionName(defaultName);
-        if (!named) return;
-        trimmedName = named;
-    }
+    // #792 — one page asks everything: the installation, compiler version and configuration, the
+    // programs in the folder or a new empty program (and its main file), and the name.
+    const choice = await showNewSolutionForm(
+        { folder: folderPath, programs, tooLarge: scan.tooLarge, review: reviewInput }, installations, defaultName, remembered);
+    if (!choice) return;
+    const installResult = { installation: choice.installation, compilerName: choice.compiler };
+    const configChoice = choice.configuration;
+    const trimmedName = choice.name;
     const slnPath = path.join(folderPath, `${trimmedName}.sln`);
 
+    let specs: NewProjectSpec[];
     let clwPath: string | undefined;
-    if (!specs) {
-        // Step 5: Prompt for main CLW filename
-        const clwInput = await vscode.window.showInputBox({
-            prompt: 'Main source file name',
-            value: `${trimmedName}.clw`,
-            validateInput: (v) => {
-                if (!v || v.trim().length === 0) return 'File name cannot be empty';
-                if (!v.trim().toLowerCase().endsWith('.clw')) return 'File must have a .clw extension';
-                if (/[\\/:*?"<>|]/.test(v.trim())) return 'File name contains invalid characters';
-                return undefined;
-            }
-        });
-        if (!clwInput) return;
-        const clwName = clwInput.trim();
-        clwPath = path.join(folderPath, clwName);
-        specs = [{ name: trimmedName, guid: generateGuid(), compile: [clwName], kind: 'exe' }];
+    if (choice.start === 'programs') {
+        specs = choice.specs;
+    } else {
+        clwPath = path.join(folderPath, choice.mainFile);
+        specs = [{ name: trimmedName, guid: generateGuid(), compile: [choice.mainFile], kind: 'exe' }];
     }
 
     const cwprojPaths = specs.map(s => path.join(folderPath, `${s.name}.cwproj`));
@@ -292,8 +247,8 @@ export async function newSolution(): Promise<void> {
         return;
     }
 
-    if (!clwPath && inference && inference.missingProgram.length > 0) {
-        const m = inference.missingProgram.length;
+    if (choice.start === 'programs' && choice.missingProgram.length > 0) {
+        const m = choice.missingProgram.length;
         vscode.window.showInformationMessage(
             `${plural(m, 'module')} ${m === 1 ? 'names a program' : 'name programs'} not in this folder and ${m === 1 ? 'was' : 'were'} left out.`);
     }

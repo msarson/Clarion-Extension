@@ -1,46 +1,90 @@
 import * as vscode from 'vscode';
 import LoggerManager from '../utils/LoggerManager';
+import { ClarionInstallation, ClarionInstallationDetector } from '../utils/ClarionInstallationDetector';
 import { pageHtml as kitPage } from '../webview/PageKit';
-import { buildReviewState, defaultChoices, ReviewChoices, ReviewInput, ReviewResult, reviewResult } from './NewSolutionReview';
+import { ReviewInput } from './NewSolutionReview';
+import { buildFormState, defaultFormChoices, FormChoices, FormInput, formResult, FormResult, StartFrom } from './NewSolutionForm';
+import { SolutionChoice } from './SolutionPage';
 
 const logger = LoggerManager.getLogger('NewSolutionReviewPanel');
 logger.setLevel('error');
 
-type ReviewMessage =
-    | { type: 'ready' | 'create' | 'cancel' }
+type FormMessage =
+    | { type: 'ready' | 'create' | 'cancel' | 'browse' }
     | { type: 'include' | 'keep'; key: string; value: boolean }
     | { type: 'kind'; key: string; value: 'exe' | 'dll' }
     | { type: 'place'; key: string; value: string }
-    | { type: 'name' | 'configuration'; value: string };
+    | { type: 'name' | 'configuration' | 'installation' | 'version' | 'mainFile'; value: string }
+    | { type: 'start'; value: StartFrom };
+
+/** What New Solution goes on with: the page's result, with the installation it names. */
+export type NewSolutionChoice = FormResult & { installation: ClarionInstallation };
+
+export interface NewSolutionFolder {
+    folder: string;
+    programs: number;
+    tooLarge: boolean;
+    /** The folder's proposal for an installation, compiler version and configuration. */
+    review: (installation: ClarionInstallation, compiler: string, configuration: string) => Promise<ReviewInput>;
+}
 
 /**
- * #792 — New Solution's review page: the whole proposal for a folder of programs, confirmed once.
- * The page sends each change, the state comes back from NewSolutionReview, and the result is the
- * projects to write; undefined when the user cancels or closes the page. A configuration change
- * redoes the inference through `reconfigure`, as its redirection can find other library sources.
+ * #792 — New Solution's page: what the solution builds with, whether it starts from the programs
+ * in the folder (whose whole proposal is reviewed here) or a new empty program, and its name, all
+ * confirmed once. The page sends each change and the state comes back from NewSolutionForm; the
+ * proposal is worked out again whenever the installation, compiler or configuration changes, as
+ * their redirection finds the library sources and export files. Undefined when the user cancels
+ * or closes the page.
  */
-export function showNewSolutionReview(
-    first: ReviewInput,
+export function showNewSolutionForm(
+    folder: NewSolutionFolder,
+    detected: ClarionInstallation[],
     solutionName: string,
-    reconfigure: (configuration: string) => Promise<ReviewInput>,
-): Promise<ReviewResult | undefined> {
+    remembered: SolutionChoice,
+): Promise<NewSolutionChoice | undefined> {
     return new Promise(resolve => {
-        let input = first;
-        let choices: ReviewChoices = defaultChoices(input.inference, solutionName);
-        let busy = false, settled = false, generation = 0;
-        const panel = vscode.window.createWebviewPanel('clarion.newSolutionReview', 'New Solution', vscode.ViewColumn.Active, { enableScripts: true });
+        const installations = [...detected];
+        const toOption = (i: ClarionInstallation) => ({ propertiesFile: i.propertiesPath, ideVersion: i.ideVersion, compilers: i.compilerVersions.map(c => c.name) });
+        const input: FormInput = { folder: folder.folder, installations: installations.map(toOption), programs: folder.programs, tooLarge: folder.tooLarge };
+        let choices: FormChoices = defaultFormChoices(input, solutionName, remembered);
+        let busy = false, settled = false, generation = 0, reviewedFor = '';
+        const panel = vscode.window.createWebviewPanel('clarion.newSolutionReview', 'New Solution', vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true });
         panel.webview.html = pageHtml(panel.webview);
 
-        const finish = (result: ReviewResult | undefined) => {
+        const finish = (result: NewSolutionChoice | undefined) => {
             if (settled) return;
             settled = true;
             resolve(result);
             panel.dispose();
         };
-        const post = () => panel.webview.postMessage({ type: 'state', state: buildReviewState(input, choices), busy });
+        const post = () => {
+            if (!settled) void panel.webview.postMessage({ type: 'state', state: buildFormState(input, choices), busy });
+        };
         panel.onDidDispose(() => finish(undefined));
 
-        panel.webview.onDidReceiveMessage(async (msg: ReviewMessage) => {
+        /** The proposal for the selection on the page, worked out when it changes; a later change wins. */
+        const review = async () => {
+            const state = buildFormState(input, choices);
+            const installation = installations.find(i => i.propertiesPath === state.installation.value);
+            const key = `${state.installation.value}|${state.version.value}|${choices.configuration}`;
+            if (state.start.value !== 'programs' || !installation || !state.version.value || key === reviewedFor) return;
+            reviewedFor = key;
+            const mine = ++generation;
+            busy = true;
+            input.review = undefined;
+            post();
+            try {
+                const next = await folder.review(installation, state.version.value, choices.configuration);
+                if (mine === generation) input.review = next;
+            } catch (err) {
+                if (mine === generation) reviewedFor = '';
+                throw err;
+            } finally {
+                if (mine === generation) busy = false;
+            }
+        };
+
+        panel.webview.onDidReceiveMessage(async (msg: FormMessage) => {
             try {
                 switch (msg.type) {
                     case 'ready': break;
@@ -49,45 +93,47 @@ export function showNewSolutionReview(
                     case 'place': choices = { ...choices, placement: { ...choices.placement, [msg.key]: msg.value } }; break;
                     case 'keep': choices = { ...choices, kept: { ...choices.kept, [msg.key]: msg.value } }; break;
                     case 'name': choices = { ...choices, name: msg.value }; break;
-                    case 'configuration': {
-                        const before = choices.configuration;
-                        choices = { ...choices, configuration: msg.value };
-                        const mine = ++generation;
-                        busy = true;
-                        post();
-                        let next: ReviewInput;
-                        try {
-                            next = await reconfigure(msg.value);
-                        } catch (err) {
-                            // The proposal is still the old configuration's: so is the choice.
-                            if (mine === generation) choices = { ...choices, configuration: before };
-                            throw err;
+                    case 'mainFile': choices = { ...choices, mainFile: msg.value }; break;
+                    case 'start': choices = { ...choices, start: msg.value }; await review(); break;
+                    case 'installation': choices = { ...choices, propertiesFile: msg.value, version: undefined }; await review(); break;
+                    case 'version': choices = { ...choices, version: msg.value }; await review(); break;
+                    case 'configuration': choices = { ...choices, configuration: msg.value }; await review(); break;
+                    case 'browse': {
+                        const picked = await vscode.window.showOpenDialog({
+                            title: 'Select ClarionProperties.xml', filters: { ClarionProperties: ['xml'] }, canSelectMany: false, openLabel: 'Select',
+                        });
+                        if (!picked?.length) break;
+                        const installation = await ClarionInstallationDetector.parseInstallationFromPropertiesPath(picked[0].fsPath);
+                        if (!installation) {
+                            vscode.window.showErrorMessage('No Clarion compiler versions found in the selected ClarionProperties.xml.');
+                            break;
                         }
-                        // A later change of configuration wins over this one.
-                        if (mine !== generation || settled) return;
-                        input = next;
-                        busy = false;
+                        installations.push(installation);
+                        input.installations = installations.map(toOption);
+                        choices = { ...choices, propertiesFile: installation.propertiesPath, version: undefined };
+                        await review();
                         break;
                     }
                     case 'create': {
-                        const result = busy ? undefined : reviewResult(input, choices);
-                        if (result) return finish(result);
+                        const result = busy ? undefined : formResult(input, choices);
+                        const installation = result && installations.find(i => i.propertiesPath === result.propertiesFile);
+                        if (result && installation) return finish({ ...result, installation });
                         break;
                     }
                     case 'cancel': return finish(undefined);
                 }
-                if (!settled) post();
+                post();
             } catch (err) {
-                busy = false;
-                logger.error(`❌ New Solution review: ${err instanceof Error ? err.message : String(err)}`);
+                logger.error(`❌ New Solution: ${err instanceof Error ? err.message : String(err)}`);
                 vscode.window.showErrorMessage(`New Solution: ${err instanceof Error ? err.message : String(err)}`);
-                if (!settled) post();
+                post();
             }
         });
+        void review().then(post, err => logger.error(`❌ New Solution: ${err instanceof Error ? err.message : String(err)}`));
     });
 }
 
-/** The page: VS Code's theme colours; the proposal arrives by message and every change goes back. */
+/** The page: VS Code's theme colours; the state arrives by message and every change goes back. */
 function pageHtml(webview: vscode.Webview): string {
     return kitPage({
         cspSource: webview.cspSource,
@@ -107,6 +153,11 @@ function pageHtml(webview: vscode.Webview): string {
   .fields { display: flex; flex-wrap: wrap; align-items: flex-end; gap: 12px; }
   .field { display: flex; flex-direction: column; gap: 6px; }
   .field input[type=text] { width: 220px; }
+  select.needs { border-color: var(--vscode-editorWarning-foreground); }
+  .label .needs-text { color: var(--vscode-editorWarning-foreground); font-weight: 600; }
+  .with-button { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+  .control select { max-width: 520px; }
+  label.option { display: flex; align-items: center; gap: 8px; }
 `,
         body: `
 <header>
@@ -114,24 +165,43 @@ function pageHtml(webview: vscode.Webview): string {
 </header>
 <main>
   <section>
-    <h2>Projects, one per program</h2>
-    <div class="table-wrap"><table>
-      <thead><tr><th>Include</th><th>Program</th><th>EXE or DLL</th><th>Sources</th><th>References</th><th>Export file</th></tr></thead>
-      <tbody id="projects"></tbody>
-    </table></div>
+    <h2>Build with</h2>
+    <div class="row"><div class="label" id="installation-label"></div><div class="control"><div class="with-button">
+      <select id="installation" aria-label="Clarion installation"></select>
+      <button class="secondary" id="browse" type="button" title="An installation outside the standard locations">Browse…</button>
+    </div></div></div>
+    <div class="row"><div class="label" id="version-label"></div><div class="control"><select id="version" aria-label="Compiler version"></select></div></div>
+    <div class="row"><div class="label"><span>Configuration</span></div><div class="control"><select id="configuration" aria-label="Configuration"></select></div></div>
   </section>
-  <div class="pair">
-    <section class="attention" id="place-section" hidden><h2 id="place-title">Modules to place</h2><div id="place"></div></section>
-    <section id="leftover-section" hidden>
-      <h2>Possible leftovers · nothing calls them</h2>
-      <div class="row muted">A generator can leave old modules behind. Untick the ones the project no longer uses.</div>
-      <div id="leftovers"></div>
+  <section>
+    <h2>Start from</h2>
+    <div class="row" id="start-programs-row"><label class="option"><input type="radio" name="start" id="start-programs" value="programs"><span id="start-programs-text"></span></label></div>
+    <div class="row"><label class="option"><input type="radio" name="start" id="start-empty" value="empty"><span>A new empty program</span></label></div>
+    <div class="row muted" id="start-why" hidden></div>
+    <div class="row" id="main-file-row"><div class="label"><span>Main source file</span></div>
+      <div class="control"><input type="text" id="main-file" data-key="mainFile" aria-label="Main source file"><span class="note" id="main-file-error" hidden></span></div></div>
+  </section>
+  <div class="info muted" id="waiting" hidden></div>
+  <div id="review" hidden>
+    <section>
+      <h2>Projects, one per program</h2>
+      <div class="table-wrap"><table>
+        <thead><tr><th>Include</th><th>Program</th><th>EXE or DLL</th><th>Sources</th><th>References</th><th>Export file</th></tr></thead>
+        <tbody id="projects"></tbody>
+      </table></div>
     </section>
+    <div class="pair" style="margin-top: 20px">
+      <section class="attention" id="place-section" hidden><h2 id="place-title">Modules to place</h2><div id="place"></div></section>
+      <section id="leftover-section" hidden>
+        <h2>Possible leftovers · nothing calls them</h2>
+        <div class="row muted">A generator can leave old modules behind. Untick the ones the project no longer uses.</div>
+        <div id="leftovers"></div>
+      </section>
+    </div>
+    <div class="info muted" id="note" hidden style="margin-top: 20px"></div>
   </div>
-  <div class="info muted" id="note" hidden></div>
   <div class="fields">
     <label class="field"><span>Solution name</span><input type="text" id="name" data-key="name"></label>
-    <label class="field"><span>Configuration</span><select id="configuration"></select></label>
     <button class="primary" id="create" type="button">Create</button>
     <button class="secondary" id="cancel" type="button">Cancel</button>
   </div>
@@ -143,7 +213,10 @@ function pageHtml(webview: vscode.Webview): string {
   const $ = id => document.getElementById(id);
   const post = m => vscode.postMessage(m);
   $('name').addEventListener('input', e => post({ type: 'name', value: e.target.value }));
-  $('configuration').addEventListener('change', e => post({ type: 'configuration', value: e.target.value }));
+  $('main-file').addEventListener('input', e => post({ type: 'mainFile', value: e.target.value }));
+  for (const id of ['installation', 'version', 'configuration']) $(id).addEventListener('change', e => post({ type: id, value: e.target.value }));
+  for (const id of ['start-programs', 'start-empty']) $(id).addEventListener('change', e => { if (e.target.checked) post({ type: 'start', value: e.target.value }); });
+  $('browse').addEventListener('click', () => post({ type: 'browse' }));
   $('create').addEventListener('click', () => post({ type: 'create' }));
   $('cancel').addEventListener('click', () => post({ type: 'cancel' }));
 
@@ -152,6 +225,15 @@ function pageHtml(webview: vscode.Webview): string {
     const key = document.activeElement && document.activeElement.dataset ? document.activeElement.dataset.key : undefined;
     draw();
     if (key) for (const e of document.querySelectorAll('[data-key]')) if (e.dataset.key === key) { e.focus(); break; }
+  }
+
+  function fillChoice(id, label, f) {
+    const s = $(id);
+    s.className = f.needs ? 'needs' : '';
+    s.replaceChildren(...(f.value ? [] : [el('option', { value: '' }, f.options.length ? 'Choose…' : 'None found')]),
+      ...f.options.map(o => el('option', { value: o.value }, o.label)));
+    s.value = f.value;
+    $(id + '-label').replaceChildren(el('span', { class: f.needs ? 'needs-text' : '' }, label), f.needs ? el('span', { class: 'muted' }, 'Choose one') : '');
   }
 
   function checkbox(key, checked, label, type) {
@@ -188,24 +270,46 @@ function pageHtml(webview: vscode.Webview): string {
 
   function render() {
     if (!state) return;
+    const r = state.review;
     $('title').textContent = state.title;
-    $('summary').textContent = state.summary + (busy ? ' · finding the library sources…' : '');
-    keepingFocus(() => {
-      $('projects').replaceChildren(...state.projects.map(projectRow));
-      $('place-section').hidden = state.toPlace.length === 0;
-      $('place-title').textContent = 'Modules to place · ' + state.toPlace.length;
-      $('place').replaceChildren(...state.toPlace.map(placeRow));
-      $('leftover-section').hidden = state.leftovers.length === 0;
-      $('leftovers').replaceChildren(...state.leftovers.map(l => el('label', { class: 'leftover' },
-        checkbox(l.file, l.kept, 'Keep ' + l.file, 'keep'), el('code', {}, l.file), el('span', { class: 'muted' }, l.project))));
-    });
-    $('note').hidden = !state.note;
-    $('note').textContent = state.note;
-    if (document.activeElement !== $('name')) $('name').value = state.name;
+    $('summary').textContent = (r ? r.summary : '') + (busy ? (r ? ' · ' : '') + 'finding the library sources…' : '');
+    fillChoice('installation', 'Clarion installation', state.installation);
+    fillChoice('version', 'Compiler version', state.version);
     const cfg = $('configuration');
     cfg.replaceChildren(...state.configurations.map(c => el('option', { value: c }, c)));
     cfg.value = state.configuration;
-    cfg.disabled = busy;
+    for (const id of ['installation', 'version', 'configuration']) $(id).disabled = busy;
+
+    const fromPrograms = state.start.value === 'programs';
+    $('start-programs-row').hidden = !state.start.offered;
+    $('start-programs-text').textContent = 'The ' + state.start.programs + (state.start.programs === 1 ? ' program' : ' programs') + ' in this folder';
+    $('start-programs').checked = fromPrograms;
+    $('start-empty').checked = !fromPrograms;
+    $('start-why').hidden = !state.start.why;
+    $('start-why').textContent = state.start.why || '';
+    $('main-file-row').hidden = fromPrograms;
+    if (document.activeElement !== $('main-file')) $('main-file').value = state.mainFile;
+    $('main-file-error').hidden = !state.mainFileError;
+    $('main-file-error').textContent = state.mainFileError || '';
+
+    $('waiting').hidden = !state.waiting;
+    $('waiting').textContent = state.waiting || '';
+    $('review').hidden = !r;
+    if (r) {
+      keepingFocus(() => {
+        $('projects').replaceChildren(...r.projects.map(projectRow));
+        $('place-section').hidden = r.toPlace.length === 0;
+        $('place-title').textContent = 'Modules to place · ' + r.toPlace.length;
+        $('place').replaceChildren(...r.toPlace.map(placeRow));
+        $('leftover-section').hidden = r.leftovers.length === 0;
+        $('leftovers').replaceChildren(...r.leftovers.map(l => el('label', { class: 'leftover' },
+          checkbox(l.file, l.kept, 'Keep ' + l.file, 'keep'), el('code', {}, l.file), el('span', { class: 'muted' }, l.project))));
+      });
+      $('note').hidden = !r.note;
+      $('note').textContent = r.note;
+    }
+
+    if (document.activeElement !== $('name')) $('name').value = state.name;
     $('create').textContent = state.createLabel;
     $('create').disabled = busy || !state.canCreate;
     $('name-error').hidden = !state.nameError;

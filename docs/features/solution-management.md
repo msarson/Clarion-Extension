@@ -70,19 +70,15 @@ The containing folder opens automatically, and the solution is loaded.
 
 ### Method 4: Create New Solution (Wizard)
 
-**Start a brand-new Clarion project from scratch:**
+**Make a solution in the open folder:** click the **`+`** button in the Solution View toolbar, or run `Clarion: New Solution` from the Command Palette (`Ctrl+Shift+P`). One page asks everything:
 
-1. Open **Clarion Tools** sidebar
-2. Click the **`+`** button in the Solution View toolbar, or run `Clarion: New Solution` from the Command Palette (`Ctrl+Shift+P`)
-3. Enter a solution name when prompted
-4. Choose a parent folder
+- **Build with:** the Clarion installation, compiler version and configuration. **Browse…** finds an installation outside the standard locations.
+- **Start from:** the programs already in the folder, or a new empty program.
+  - **From the programs:** the page shows one project per program, as an EXE or a DLL, with its sources, the projects it references and its export file. It also lists the modules it could not place and possible leftovers, so you can settle them before anything is written.
+  - **A new empty program:** name its main source file. The solution gets one project, `SolutionName.cwproj`, and a starter `.clw` with `PROGRAM` and `CODE`.
+- **Solution name**, then **Create**.
 
-The wizard creates a minimal ready-to-compile solution:
-- `SolutionName.sln` — Visual Studio solution file
-- `SolutionName.cwproj` — Clarion project file (auto-configured with detected Clarion version)
-- `SolutionName.clw` — Starter source file with `PROGRAM` and `CODE`
-
-The Clarion version and configuration are auto-detected from your installed Clarion. The solution opens immediately after creation.
+The solution opens as soon as it is created.
 
 ---
 
