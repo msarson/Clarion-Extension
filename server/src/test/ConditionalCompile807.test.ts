@@ -223,6 +223,82 @@ suite('#807 — COMPILE/OMIT conditions', () => {
         ], ctx).includes.filter(i => i.active).map(i => i.file), ['A.inc']);
     });
 
+    // The bug hunt: a name set inside a block that is not decided may or may not be compiled, so
+    // it cannot decide a later block (an old header pattern: `OMIT('***',_c55_)` around
+    // `_ABCDllMode_ EQUATE(0)`, _c55_ being a switch only the compiler knows).
+    test('an EQUATE or PRAGMA define inside an undecided block does not decide anything later', () => {
+        assert.deepStrictEqual(includes([
+            "  OMIT('***', _c55_)",
+            '_ABCDllMode_  EQUATE(0)',
+            '  ***',
+            "  COMPILE('***', _ABCDllMode_)",
+            "  INCLUDE('Dll.inc')",
+            '  ***',
+        ]), ['Dll.inc']);
+        assert.deepStrictEqual(includes([
+            "  COMPILE('!!', Mystery)",
+            "  PRAGMA('project(#pragma define(UseNew=>on))')",
+            '!!',
+            "  OMIT('**', UseNew)",
+            "  INCLUDE('Old.inc')",
+            '**',
+        ]), ['Old.inc']);
+        const r = scanConditionalCompile(["  COMPILE('**', Mystery)", 'Ver  EQUATE(2)', '**'], {});
+        assert.strictEqual(r.equates.has('ver'), false, 'not exported to an includer either');
+    });
+
+    test('a name set in both branches of an undecided pair stays unknown', () => {
+        assert.deepStrictEqual(includes([
+            "  COMPILE('***', _C11_)",
+            'VER  EQUATE(11)',
+            '***',
+            "  OMIT('***', _C11_)",
+            'VER  EQUATE(10)',
+            '***',
+            "  COMPILE('***', VER = 11)",
+            "  INCLUDE('v11.inc'),ONCE",
+            '***',
+        ]), ['v11.inc']);
+    });
+
+    test('a terminator inside a string does not close the block', () => {
+        assert.deepStrictEqual(includes([
+            "  OMIT('***')",
+            "  MESSAGE('***')",
+            "  INCLUDE('a.inc')",
+            '***',
+        ]), []);
+    });
+
+    test('an EQUATE local to a procedure, or a member of an ITEMIZE, is not a switch', () => {
+        assert.deepStrictEqual(includes([
+            '  MEMBER()',
+            'Proc  PROCEDURE',
+            'Ver     EQUATE(2)',
+            '  CODE',
+            "  OMIT('**', Ver = 2)",
+            "  INCLUDE('Two.inc')",
+            '**',
+        ]), ['Two.inc'], 'a procedure\'s local EQUATE');
+        assert.deepStrictEqual(includes([
+            'Colors  ITEMIZE,PRE(Col)',
+            'Ver       EQUATE(2)',
+            '        END',
+            "  OMIT('**', Ver = 2)",
+            "  INCLUDE('Two.inc')",
+            '**',
+        ]), ['Two.inc'], 'Col:Ver, not Ver');
+    });
+
+    test('a PRAGMA define in a comment is not one', () => {
+        assert.deepStrictEqual(includes([
+            "! PRAGMA('define(_X_=>1)')",
+            "  OMIT('**', _X_)",
+            "  INCLUDE('X.inc')",
+            '**',
+        ]), ['X.inc']);
+    });
+
     test('inactive lines are reported for other uses', () => {
         const r = scan(['Ver  EQUATE(1)', "  OMIT('**', Ver)", 'x LONG', '**', 'y LONG']);
         assert.deepStrictEqual([0, 1, 2, 3, 4].map(l => r.isInactive(l)), [false, true, true, true, false]);
