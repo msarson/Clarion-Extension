@@ -4,6 +4,7 @@
  * Supports overload resolution based on parameter types
  */
 
+import { compiledIncludeTest } from './ConditionalIncludes'; // #807
 import { Location, Position } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
@@ -291,9 +292,11 @@ export class MapProcedureResolver {
         };
         const includes: Array<{ fileName: string; insideMap: boolean }> = [];
         const includePattern = /INCLUDE\s*\(\s*['"]([^'"]+)['"]/gi;
+        const compiled = compiledIncludeTest(null, content); // #807 (the summary holds no path; redirection finds an INCLUDEd version file)
         let match: RegExpExecArray | null;
         while ((match = includePattern.exec(content)) !== null) {
             const line = offsetToLine(match.index);
+            if (!compiled.atLine(line)) continue;
             includes.push({ fileName: match[1], insideMap: summary.mapRanges.some(r => line > r.start && line < r.end) });
         }
         summary.includes = includes;

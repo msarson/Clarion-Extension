@@ -1,5 +1,10 @@
 import * as assert from 'assert';
+import * as fs from 'fs';
+import * as os from 'os';
+import * as path from 'path';
+import { pathToFileURL } from 'url';
 import { ClarionTokenizer, TokenType } from '../ClarionTokenizer';
+import { TokenCache } from '../TokenCache';
 
 /**
  * #807 — the token path: an INCLUDE in a COMPILE/OMIT block decided not to compile gets no
@@ -42,6 +47,29 @@ suite('#807 — INCLUDE tokens in a block that will not compile', () => {
             { line: 2, file: null, inactive: true },
             { line: 5, file: 'Kept.inc', inactive: false },
         ]);
+    });
+
+    test('through TokenCache, the version EQUATE is read from the INCLUDE beside the file (no solution needed)', () => {
+        const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'tok807-'));
+        try {
+            fs.writeFileSync(path.join(dir, 'LibXLVer.INC'), 'LibXL:Version  EQUATE(520)\r\n');
+            const file = path.join(dir, 'LibXL.INC');
+            fs.writeFileSync(file, [
+                "  INCLUDE('LibXLVer.INC'),ONCE",
+                "  COMPILE ('###', LibXL:Version = 411)",
+                "     INCLUDE('LibXL.411.INT'),ONCE",
+                '! ###',
+                "  COMPILE ('###', LibXL:Version = 520)",
+                "     INCLUDE('LibXL.520.INT'),ONCE",
+                '! ###',
+            ].join('\r\n'));
+            const tokens = TokenCache.getInstance().getTokensForClosedFile(pathToFileURL(file).toString());
+            const incs = tokens.filter(t => t.type === TokenType.Directive && t.value.toUpperCase() === 'INCLUDE')
+                .map(t => `${t.line}:${t.referencedFile ?? '-'}:${t.inactiveByCondition ? 'off' : 'on'}`);
+            assert.deepStrictEqual(incs, ['0:LibXLVer.INC:on', '2:-:off', '5:LibXL.520.INT:on']);
+        } finally {
+            fs.rmSync(dir, { recursive: true, force: true });
+        }
     });
 
     test('no OMIT or COMPILE: every INCLUDE is followed, as before', () => {

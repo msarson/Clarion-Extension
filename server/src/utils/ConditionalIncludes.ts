@@ -57,6 +57,27 @@ function equatesOfFile(file: string, visiting: Set<string>, depth: number, deps?
     return scan.equates;
 }
 
+/**
+ * For a walker that finds INCLUDEs in a file's text by pattern: whether the INCLUDE on a line, or
+ * at a character offset, sits in a block that compiles. Always true, at no cost, for a file with
+ * no OMIT or COMPILE.
+ */
+export function compiledIncludeTest(filePath: string | null, text: string): { atLine(line: number): boolean; atOffset(offset: number): boolean } {
+    const inactive = inactiveIncludeLines(filePath, text);
+    if (inactive.size === 0) return { atLine: () => true, atOffset: () => true };
+    const lineStarts = [0];
+    for (let i = text.indexOf('\n'); i !== -1; i = text.indexOf('\n', i + 1)) lineStarts.push(i + 1);
+    const lineOf = (offset: number): number => {
+        let lo = 0, hi = lineStarts.length - 1;
+        while (lo < hi) {
+            const mid = (lo + hi + 1) >> 1;
+            if (lineStarts[mid] <= offset) lo = mid; else hi = mid - 1;
+        }
+        return lo;
+    };
+    return { atLine: line => !inactive.has(line), atOffset: offset => !inactive.has(lineOf(offset)) };
+}
+
 /** The EQUATEs of an INCLUDE written in `fromFile` (null: the path is not known), if it can be found. */
 export function equatesOfIncludeName(name: string, fromFile: string | null): Map<string, number> | undefined {
     const resolved = resolveInclude(name, fromFile);

@@ -1,3 +1,4 @@
+import { compiledIncludeTest } from '../utils/ConditionalIncludes'; // #807
 import { Location, Range, Position } from 'vscode-languageserver-protocol';
 import { CancellationToken } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
@@ -1900,9 +1901,10 @@ export class ReferencesProvider {
         const solutionManager = SolutionManager.getInstance();
         const fromDir = fromPath.substring(0, fromPath.lastIndexOf('\\'));
 
-        for (const line of lines) {
+        const compiled = compiledIncludeTest(fromPath, content); // #807
+        for (const [lineIndex, line] of lines.entries()) {
             const includeMatch = line.match(/INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/i);
-            if (!includeMatch) continue;
+            if (!includeMatch || !compiled.atLine(lineIndex)) continue;
 
             const includeFileName = includeMatch[1];
 
@@ -3826,8 +3828,10 @@ export class ReferencesProvider {
 
         const fromDir = fromPath.substring(0, fromPath.lastIndexOf('\\'));
         const includePattern = /INCLUDE\s*\(\s*['"]([^'"]+)['"]\s*(?:,\s*ONCE)?\s*\)/gi;
+        const compiled = compiledIncludeTest(fromPath, content); // #807
         let match: RegExpExecArray | null;
         while ((match = includePattern.exec(content)) !== null) {
+            if (!compiled.atOffset(match.index)) continue;
             const incFileName = match[1];
             let incPath: string | null = null;
             const sameDirCandidate = `${fromDir}\\${incFileName}`;
@@ -4205,9 +4209,11 @@ export class ReferencesProvider {
 
         const fromDir = fromPath.substring(0, fromPath.lastIndexOf('\\'));
         const includePattern = /INCLUDE\s*\(\s*['"]([^'"]+)['"]\s*(?:,\s*ONCE)?\s*\)/gi;
+        const compiled = compiledIncludeTest(fromPath, content); // #807
         let match: RegExpExecArray | null;
 
         while ((match = includePattern.exec(content)) !== null) {
+            if (!compiled.atOffset(match.index)) continue;
             const incFileName = match[1];
 
             // Resolve via same-dir first, then project redirection

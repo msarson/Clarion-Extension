@@ -13,6 +13,7 @@
  *     → DefinitionProvider (format as Location)
  */
 
+import { compiledIncludeTest } from '../utils/ConditionalIncludes'; // #807
 import { tokensOnLine, findInLineRange } from '../utils/TokenLineIndex';
 import { topLevelLabels } from '../utils/TokenIndexes';
 import { globalScopeIndex } from '../utils/GlobalScopeIndex';
@@ -2470,9 +2471,11 @@ export class SymbolFinderService {
         const sm = SolutionManager.getInstance();
         const fromDir = path.dirname(fromPath);
         const includeRe = /^\s*INCLUDE\s*\(\s*'([^']+)'/gim;
+        const compiled = compiledIncludeTest(fromPath, source); // #807
         let m: RegExpExecArray | null;
         let scanned = 0; // #187 — yield between INCLUDE files so the walk doesn't block hover/F12
         while ((m = includeRe.exec(source)) !== null) {
+            if (!compiled.atOffset(m.index)) continue;
             await cooperativeCheckpoint(scanned++);
             const includeFile = m[1];
             // #328: owner-project-first redirection

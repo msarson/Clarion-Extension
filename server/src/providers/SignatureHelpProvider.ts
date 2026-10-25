@@ -1,3 +1,4 @@
+import { compiledIncludeTest } from '../utils/ConditionalIncludes'; // #807
 import { SignatureHelp, SignatureInformation, ParameterInformation, Position } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import LoggerManager from '../logger';
@@ -566,12 +567,13 @@ export class SignatureHelpProvider {
         const declarations: { signature: string; paramCount: number }[] = [];
         const content = document.getText();
         const lines = content.split('\n');
-        
+        const compiled = compiledIncludeTest(decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\'), content); // #807
+
         // Find INCLUDE statements
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             const includeMatch = line.match(/INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/i);
-            if (!includeMatch) continue;
+            if (!includeMatch || !compiled.atLine(i)) continue;
             
             const includeFileName = includeMatch[1];
             logger.info(`Found INCLUDE: ${includeFileName}`);

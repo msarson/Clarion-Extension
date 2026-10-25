@@ -1,3 +1,4 @@
+import { compiledIncludeTest } from '../utils/ConditionalIncludes'; // #807
 import { Hover, Location, Position, Range } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import LoggerManager from '../logger';
@@ -1396,9 +1397,11 @@ export class HoverProvider {
         try { content = fs.readFileSync(fromPath, 'utf8'); } catch { return null; }
 
         const includePattern = /INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/gi;
+        const compiled = compiledIncludeTest(fromPath, content); // #807
         let match: RegExpExecArray | null;
 
         while ((match = includePattern.exec(content)) !== null) {
+            if (!compiled.atOffset(match.index)) continue;
             const includeFile = match[1];
             let resolvedPath: string | null = null;
 

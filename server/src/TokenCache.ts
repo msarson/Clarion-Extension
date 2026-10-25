@@ -1,5 +1,6 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
-import { ClarionTokenizer, Token } from './ClarionTokenizer';
+import { ClarionTokenizer, Token, TokenType } from './ClarionTokenizer';
+import { inactiveIncludeLines } from './utils/ConditionalIncludes';
 import { DocumentStructure, SourceLines } from './DocumentStructure';
 import LoggerManager from './logger';
 import * as fs from 'fs';
@@ -169,6 +170,7 @@ export class TokenCache {
                 try {
                     const tokens = this.incrementalTokenize(document, cached, currentText);
                     if (tokens) {
+                        TokenCache.applyConditionalIncludes(tokens, document.uri, currentText); // #807
                         const incTime = performance.now() - incStart;
                         const totalTime = performance.now() - perfStart;
                         logger.perf('Incremental tokenization', {
@@ -192,7 +194,8 @@ export class TokenCache {
             try {
                 const tokenizer = new ClarionTokenizer(document.getText());
                 const tokens = tokenizer.tokenize();
-                
+                TokenCache.applyConditionalIncludes(tokens, document.uri, currentText); // #807
+
                 // 🚀 PERFORMANCE: Build line-based cache
                 const cacheStart = performance.now();
                 const lineTokens = this.buildLineTokenMap(document, tokens);
@@ -369,6 +372,7 @@ export class TokenCache {
             // tokenize() builds + runs DocumentStructure.process() internally; a
             // second process() here would be redundant (and double-push children).
             const tokens = new ClarionTokenizer(content).tokenize();
+            TokenCache.applyConditionalIncludes(tokens, uri, content); // #807
             this.closedFileCache.set(key, { tokens, mtimeMs });
             // #260 — bounded: evict oldest entries past the cap (Map preserves
             // insertion order; hits above re-inserted, so first key = LRU).
@@ -581,6 +585,25 @@ export class TokenCache {
      * The document's lines when it has an OMIT directive (DocumentStructure reads OMIT bodies from
      * them). An accessor over the document, not a split of its text: this runs on every edit (#733).
      */
+    /**
+     * #807 — DocumentStructure decides COMPILE/OMIT blocks without the file's path, so an INCLUDEd
+     * file's EQUATEs can only be found through the solution's redirection. Here the path is known:
+     * decide again with the file beside it too, and take the INCLUDEs of a block that does not
+     * compile out of the walk. Only for a file with such a directive.
+     */
+    static applyConditionalIncludes(tokens: Token[], uri: string, text: string): void {
+        if (!/\b(?:OMIT|COMPILE)\s*\(/i.test(text)) return;
+        const filePath = decodeURIComponent(uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
+        const inactive = inactiveIncludeLines(filePath, text);
+        for (const t of tokens) {
+            if (t.type !== TokenType.Directive || t.value.toUpperCase() !== 'INCLUDE') continue;
+            if (inactive.has(t.line)) {
+                t.inactiveByCondition = true;
+                delete t.referencedFile;
+            }
+        }
+    }
+
     static linesIfOmit(document: TextDocument): SourceLines | undefined {
         // #807: COMPILE too, whose condition can decide an INCLUDE
         if (!/\b(?:OMIT|COMPILE)\s*\(/i.test(document.getText())) return undefined;
