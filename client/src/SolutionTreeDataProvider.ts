@@ -1120,10 +1120,11 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             treeItem.contextValue = 'clarionProject';
             const projectFile = path.join(project.path, project.filename);
             logger.info(`🔍 Project file path: ${projectFile}`);
+            // #792 — the project's options, as the Clarion IDE's pages; the page opens its XML.
             treeItem.command = {
-                title: 'Open Project File',
-                command: 'clarion.openFile',
-                arguments: [projectFile]
+                title: 'Project Properties',
+                command: 'clarion.openProjectProperties',
+                arguments: [Uri.file(projectFile)]
             };
             logger.info(`📂 getTreeItem(): Project – ${project.name}`);
             return treeItem;
@@ -1210,11 +1211,8 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             treeItem.description = startupName ? `${startupName} (${config})` : `(${config})`;
         }
         
-        treeItem.command = {
-            title: 'Open Solution File',
-            command: 'clarion.openFile',
-            arguments: [solution.path]
-        };
+        // #792 — the solution's settings and projects on one page; the page opens the .sln as text.
+        treeItem.command = { title: 'Solution Properties', command: 'clarion.openSolutionProperties' };
         logger.info(`🧩 getTreeItem(): Solution – ${solution.name}`);
 
         return treeItem;

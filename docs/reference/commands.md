@@ -41,7 +41,7 @@ Run commands from the Command Palette (`Ctrl+Shift+P`), context menus in the edi
 | `clarion.closeSolution` | Close the current solution |
 | `clarion.forceRefreshSolutionCache` | Refresh Solution — re-parse `.sln`/projects |
 | `clarion.reinitializeSolution` | Full reinitialize of the solution environment |
-| `clarion.openSolutionProperties` | **Solution Properties** — the solution's Clarion installation, compiler version, configuration and startup project on one page, with its projects (type, references, export file) and the build settings; changes apply at once. The gear on the Solution View's title bar, or the solution node's menu. Open Solution shows the same page when something has to be chosen |
+| `clarion.openSolutionProperties` | **Solution Properties** — the solution's Clarion installation, compiler version, configuration and startup project on one page, with its projects (type, references, export file) and the build settings; changes apply at once. A click on the solution in the Solution View, the gear on its title bar, or the solution node's menu. Open Solution shows the same page when something has to be chosen |
 | `clarion.setConfiguration` | Set the active build configuration (Debug/Release/custom) |
 | `clarion.setActiveVersion` | Pick the active Clarion version (drives redirection/libsrc paths) |
 | `clarion.quickOpen` | Quick Open including redirection paths (`Ctrl+P` when a solution is open; falls back to VS Code's native Quick Open without one) |
@@ -55,7 +55,7 @@ Run commands from the Command Palette (`Ctrl+Shift+P`), context menus in the edi
 | `clarion.buildSolutionDirect` | Build the whole solution in dependency order from the Solution View's solution node, without the "what do you want to build?" prompt |
 | `clarion.buildCurrentProject` | Build the project containing the active file |
 | `clarion.buildProject` | Build a specific project (Solution View context menu) |
-| `clarion.openProjectProperties` | **Project Properties** — a project's options as the Clarion IDE's pages (Application, Compiling, Debug, Build Events), per configuration; on a project in the Solution View, a `.cwproj` in the Explorer, or the title bar of an open `.cwproj`. Also **Open With… › Clarion Project Properties** |
+| `clarion.openProjectProperties` | **Project Properties** — a project's options as the Clarion IDE's pages (Application, Compiling, Debug, Build Events), per configuration; a click on a project in the Solution View, or its menu, a `.cwproj` in the Explorer, or the title bar of an open `.cwproj`. Also **Open With… › Clarion Project Properties** |
 | `clarion.buildAllProjects` | Build every project |
 | `clarion.startDebugging` | `F5` — launch the startup project under the Clarion debugger |
 | `clarion.buildAndRun` / `clarion.buildAndDebug` | **Build and Run**, **Build and Debug** — build, then run or debug the startup project (the Solution View's `…` menu) |
