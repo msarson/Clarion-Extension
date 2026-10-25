@@ -21,6 +21,7 @@ import { registerReportCommands } from './commands/ReportCommands'; // #687
 import { registerSolutionManagementCommands, registerSolutionOpeningCommands, registerMiscSolutionCommands, registerNoFolderSolutionCommands } from './commands/SolutionCommands';
 import { registerTreeCommands } from './commands/TreeCommands';
 import { registerProjectFileCommands } from './commands/ProjectFileCommands';
+import { registerProjectFolderCommands } from './commands/ProjectFolderCommands';
 import { registerStatusCommands } from './commands/ViewCommands';
 import { registerTextEditingCommands } from './commands/TextEditingCommands';
 import { registerRefactorCommands } from './commands/RefactorCommands';
@@ -295,6 +296,7 @@ export async function activate(context: ExtensionContext): Promise<void> {
     // Register remaining commands
     context.subscriptions.push(
         ...registerProjectFileCommands(solutionTreeDataProvider),
+        ...registerProjectFolderCommands(solutionTreeDataProvider),
         ...registerSolutionOpeningCommands(context, initializeSolution, solutionTreeDataProvider)
     );
     

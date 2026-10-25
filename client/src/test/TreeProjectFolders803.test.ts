@@ -35,6 +35,22 @@ suite('Solution View: the IDE folders are shown and open the Sources tab (#803)'
         assert.match(item, /contextValue = 'clarionProjectFolderItem'/);
     });
 
+    test('Add on a folder and Remove on an entry, as the IDE\'s popup menus, and nowhere else', () => {
+        const pkg = JSON.parse(fs.readFileSync(path.join(root, 'package.json'), 'utf8'));
+        const declared = (id: string) => pkg.contributes.commands.find((c: { command: string }) => c.command === id);
+        assert.ok(declared('clarion.projectFolder.add'), 'add declared');
+        assert.ok(declared('clarion.projectFolder.remove'), 'remove declared');
+        const context = pkg.contributes.menus['view/item/context'] as { command: string; when: string }[];
+        assert.ok(context.some(m => m.command === 'clarion.projectFolder.add' && m.when === 'view == solutionView && viewItem == clarionProjectFolder'));
+        assert.ok(context.some(m => m.command === 'clarion.projectFolder.remove' && m.when === 'view == solutionView && viewItem == clarionProjectFolderItem'));
+        // They need a tree node, so they are not offered in the Command Palette.
+        const palette = pkg.contributes.menus.commandPalette as { command: string; when: string }[];
+        for (const id of ['clarion.projectFolder.add', 'clarion.projectFolder.remove']) {
+            assert.ok(palette.some(m => m.command === id && m.when === 'false'), id);
+        }
+        assert.match(read('extension.ts'), /registerProjectFolderCommands\(solutionTreeDataProvider\)/);
+    });
+
     test('the Project Properties page shows the tab it is opened on, when opening or already open', () => {
         assert.match(editor, /registerCommand\('clarion\.openProjectProperties', async \([^)]*, tab\?: string\)/);
         assert.match(editor, /postMessage\(\{ type: 'tab', tab \}\)/);

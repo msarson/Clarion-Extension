@@ -1,5 +1,6 @@
 import * as assert from 'assert';
-import { projectFolders, referenceCandidates } from '../views/ProjectFolders';
+import { folderAddition, projectFolders, referenceCandidates } from '../views/ProjectFolders';
+import { listItems } from '../project/CwprojItems';
 
 /**
  * #803 — the Solution View shows a project as the Clarion IDE's Solution Explorer does: File
@@ -41,6 +42,17 @@ suite('Solution View: a project\'s IDE folders (#803)', () => {
         assert.deepStrictEqual(entries(2), [['classes.pr', 'legacy\\classes.pr', 'legacy\\classes.pr']]);
         // With no <Name>, named from its path as the .sln names it (#802).
         assert.deepStrictEqual(entries(3), [['Common', '..\\Common\\Common.cwproj', '..\\Common\\Common.cwproj'], ['Util', 'Util.cwproj', 'Util.cwproj']]);
+    });
+
+    test('Add on a folder: every pick goes in, a reference with its GUID and Name', () => {
+        let text = folderAddition(cwproj([]), 'FileDriver', [{ include: 'TOPSPEED' }, { include: 'ODBC' }]);
+        text = folderAddition(text, 'Include', [{ include: 'legacy\\classes.pr' }]);
+        text = folderAddition(text, 'ProjectReference', [{ include: 'Libs\\Common\\Common.cwproj', guid: '{80300000-0000-0000-0000-000000000002}', name: 'Common' }]);
+        const items = listItems(text);
+        assert.deepStrictEqual(items.fileDrivers.map(i => i.include), ['TOPSPEED', 'ODBC']);
+        assert.deepStrictEqual(items.includes.map(i => i.include), ['legacy\\classes.pr']);
+        assert.deepStrictEqual(items.projectReferences.map(r => [r.include, r.name]), [['Libs\\Common\\Common.cwproj', 'Common']]);
+        assert.match(text, /<Project>\{80300000-0000-0000-0000-000000000002\}<\/Project>/);
     });
 
     test('the projects a project can still reference: the others in the solution, by a path from its own folder', () => {

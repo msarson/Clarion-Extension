@@ -96,6 +96,7 @@ Available in the Solution View for solutions with `.app` files under version con
 | Command | Description |
 |---|---|
 | `clarion.addSourceFile` / `clarion.removeSourceFile` | Add/remove a source file in a project |
+| `clarion.projectFolder.add` / `clarion.projectFolder.remove` | **Add…** on a project's folder in the Solution View (File Drivers; Libraries, Objects and Resource Files; Projects to include; Referenced Projects) and **Remove** on an entry, as the Clarion IDE's Solution Explorer menus; the `.cwproj` is edited and saved |
 | `clarion.addMapModule` | Add a MODULE with a PROCEDURE to the MAP |
 | `clarion.addProcedureToModule` | Add a PROCEDURE to an existing MODULE |
 | `clarion.addProcedureFromMap` | Add a PROCEDURE from the MAP |

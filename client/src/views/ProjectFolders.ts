@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { includeFor, ItemKind, listItems } from '../project/CwprojItems';
+import { addItem, includeFor, ItemKind, listItems } from '../project/CwprojItems';
 
 /**
  * #803 — a project in the Solution View as the Clarion IDE's Solution Explorer shows it: four
@@ -50,6 +50,12 @@ export function projectFolders(cwprojText: string): ProjectFolder[] {
         })),
     };
     return PROJECT_FOLDERS.map(f => ({ ...f, entries: entries[f.section] }));
+}
+
+/** Add on a folder: each pick as an item of its kind; a reference with its `<Project>` GUID and `<Name>`, as the IDE writes it. */
+export function folderAddition(text: string, kind: ItemKind, picks: { include: string; guid?: string; name?: string }[]): string {
+    return picks.reduce((current, pick) => addItem(current, kind, pick.include,
+        kind === 'ProjectReference' && pick.guid ? [['Project', pick.guid], ['Name', pick.name ?? pick.include]] : []), text);
 }
 
 const bareGuid = (guid: string) => guid.replace(/[{}]/g, '').toLowerCase();

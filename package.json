@@ -601,6 +601,17 @@
         "category": "Clarion",
         "icon": "$(settings-gear)",
         "enablement": "clarion.solutionOpen"
+      },
+      {
+        "command": "clarion.projectFolder.add",
+        "title": "Add…",
+        "category": "Clarion",
+        "icon": "$(add)"
+      },
+      {
+        "command": "clarion.projectFolder.remove",
+        "title": "Remove",
+        "category": "Clarion"
       }
     ],
     "menus": {
@@ -779,6 +790,21 @@
           "command": "clarion.openSolutionProperties",
           "when": "view == solutionView && viewItem == clarionSolution",
           "group": "0_properties"
+        },
+        {
+          "command": "clarion.projectFolder.add",
+          "when": "view == solutionView && viewItem == clarionProjectFolder",
+          "group": "1_modification"
+        },
+        {
+          "command": "clarion.projectFolder.add",
+          "when": "view == solutionView && viewItem == clarionProjectFolder",
+          "group": "inline"
+        },
+        {
+          "command": "clarion.projectFolder.remove",
+          "when": "view == solutionView && viewItem == clarionProjectFolderItem",
+          "group": "1_modification"
         }
       ],
       "commandPalette": [
@@ -812,6 +838,14 @@
         },
         {
           "command": "clarion.openSolutionMenu",
+          "when": "false"
+        },
+        {
+          "command": "clarion.projectFolder.add",
+          "when": "false"
+        },
+        {
+          "command": "clarion.projectFolder.remove",
           "when": "false"
         }
       ],
