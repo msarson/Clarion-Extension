@@ -241,7 +241,7 @@ async function augmentDeclaredViaSymbolFinder(
         const upper = candidate.name.toUpperCase();
         if (ctx.declaredNames.has(upper)) continue;
         if (BUILT_IN_IDENTIFIERS.has(upper)) continue;
-        // #124 — skip Clarion language keywords (AND/OR/XOR/NOT/TO/BY/BAND/...). The
+        // #124 — skip Clarion language keywords (AND/OR/XOR/NOT/TO/BY/...). The
         // tokenizer emits these as TokenType.Variable; without this filter they trip
         // the SymbolFinder cross-file lookup AND fire false-positive diagnostics.
         if (KeywordService.getInstance().isKeyword(candidate.name)) continue;
