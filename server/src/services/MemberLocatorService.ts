@@ -34,6 +34,7 @@ import * as path from 'path';
 import LoggerManager from '../logger';
 import { findLabelQualifiedMember } from '../utils/LabelQualifiedMember';
 import { isAncestorOf, ancestorChain, pickDeclaration } from '../utils/ClassAncestry';
+import { inactiveIncludeLines } from '../utils/ConditionalIncludes';
 import { resolveEnclosingClassName } from '../utils/EnclosingClassResolver';
 
 const logger = LoggerManager.getLogger("MemberLocatorService");
@@ -901,15 +902,21 @@ export class MemberLocatorService {
     }
 
     /** One pass over raw text: every column-0 label (lower-cased) and every INCLUDE target. */
-    private static scanLabelsAndIncludes(text: string): LabelScan {
+    private static scanLabelsAndIncludes(text: string, filePath: string | null = null): LabelScan {
         if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
         const labels = new Set<string>();
         const includes: string[] = [];
         const labelRe = /^[A-Za-z_][\w:]*/gm;
         let m: RegExpExecArray | null;
         while ((m = labelRe.exec(text)) !== null) labels.add(m[0].toLowerCase());
+        // #807: not an INCLUDE in a COMPILE/OMIT block decided not to compile (its line is worked
+        // out only when the file has one)
+        const inactive = inactiveIncludeLines(filePath, text);
         const incRe = /^[ \t]*INCLUDE[ \t]*\([ \t]*'([^']+)'/gim;
-        while ((m = incRe.exec(text)) !== null) includes.push(m[1]);
+        while ((m = incRe.exec(text)) !== null) {
+            if (inactive.size > 0 && inactive.has(text.slice(0, m.index).split('\n').length - 1)) continue;
+            includes.push(m[1]);
+        }
         return { labels, includes };
     }
 
@@ -930,7 +937,7 @@ export class MemberLocatorService {
             labelScanCache.set(key, null);
             return null;
         }
-        const scan = MemberLocatorService.scanLabelsAndIncludes(text);
+        const scan = MemberLocatorService.scanLabelsAndIncludes(text, filePath);
         labelScanCache.set(key, scan);
         return scan;
     }

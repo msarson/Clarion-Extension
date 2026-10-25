@@ -582,7 +582,8 @@ export class TokenCache {
      * them). An accessor over the document, not a split of its text: this runs on every edit (#733).
      */
     static linesIfOmit(document: TextDocument): SourceLines | undefined {
-        if (!/\bOMIT\s*\(/i.test(document.getText())) return undefined;
+        // #807: COMPILE too, whose condition can decide an INCLUDE
+        if (!/\b(?:OMIT|COMPILE)\s*\(/i.test(document.getText())) return undefined;
         const length = document.lineCount;
         return {
             length,

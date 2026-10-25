@@ -57,6 +57,12 @@ function equatesOfFile(file: string, visiting: Set<string>, depth: number, deps?
     return scan.equates;
 }
 
+/** The EQUATEs of an INCLUDE written in `fromFile` (null: the path is not known), if it can be found. */
+export function equatesOfIncludeName(name: string, fromFile: string | null): Map<string, number> | undefined {
+    const resolved = resolveInclude(name, fromFile);
+    return resolved ? equatesOfFile(resolved, new Set(fromFile ? [fromFile.toLowerCase()] : []), 1) : undefined;
+}
+
 export function inactiveIncludeLines(filePath: string | null, text: string): Set<number> {
     if (!DIRECTIVE_HINT.test(text)) return new Set();
     const visiting = new Set<string>(filePath ? [filePath.toLowerCase()] : []);

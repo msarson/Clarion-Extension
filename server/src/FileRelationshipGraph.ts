@@ -23,6 +23,7 @@ import { SolutionManager } from './solution/solutionManager';
 import { serverSettings } from './serverSettings';
 import { resolutionEnvironmentKey } from './solution/resolutionEnvironmentKey'; // #568
 import { resolveFileInNoSolutionMode } from './solution/findFileNoSolution';
+import { inactiveIncludeLines } from './utils/ConditionalIncludes';
 import LoggerManager from './logger';
 
 const logger = LoggerManager.getLogger("FileRelationshipGraph");
@@ -56,7 +57,7 @@ export interface FileEdge {
 // before the solution's redirection parsers were primed, so every MEMBER('x.clw')
 // resolution failed and the persisted edge lists were missing their MEMBER edges
 // (Mark's VM: frg_member_edges_by_basename=0 with reused_from_disk=2987).
-const DISK_CACHE_VERSION = 3; // #484 — MODULE edges to binaries dropped
+const DISK_CACHE_VERSION = 4; // #484 — MODULE edges to binaries dropped; #807 — no edge for an INCLUDE in a block that does not compile
 
 interface FrgDiskCacheEntry { mtimeMs: number; edges: FileEdge[]; }
 
@@ -809,6 +810,8 @@ export class FileRelationshipGraph {
         const mapOpenRe  = /\bMAP\b/i;
         const mapCloseRe = /\bEND\b/i;
 
+        // #807: an INCLUDE in a COMPILE/OMIT block decided not to compile gets no edge
+        const inactiveIncludes = inactiveIncludeLines(filePath, content);
         let isProgramFile = false;
         let mapDepth = 0;
         // #315: MEMBER must be the file's FIRST STATEMENT, but Clarion allows any
@@ -844,7 +847,7 @@ export class FileRelationshipGraph {
             // INCLUDE('file')
             let m: RegExpExecArray | null;
             includeRe.lastIndex = 0;
-            while ((m = includeRe.exec(stripped)) !== null) {
+            while (!inactiveIncludes.has(lineNum) && (m = includeRe.exec(stripped)) !== null) {
                 const resolved = this.resolveFile(m[1], filePath);
                 if (!resolved) continue;
                 const toFile = this.normalizePath(resolved);

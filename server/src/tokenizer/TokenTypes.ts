@@ -131,6 +131,8 @@ export interface Token {
     branches?: BranchInfo[];
     structureParent?: Token;  // ✅ Reference to the parent structure token
     referencedFile?: string;  // ✅ Resolved path for any file reference (MODULE/INCLUDE/LINK/MEMBER/etc)
+    /** #807 — an INCLUDE in a COMPILE/OMIT block decided not to compile: not followed (no referencedFile). */
+    inactiveByCondition?: boolean;
     localVariablesAnalyzed?: boolean;  // 🚀 PERF: Track if procedure's local variables were already analyzed
     isSingleLineWithContinuation?: boolean; // ✅ True if structure is single-line but spans multiple lines due to |
     inlineTerminator?: boolean; // #578 — this END/period closes a structure that opened on the same logical line

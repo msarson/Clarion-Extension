@@ -21,7 +21,7 @@ const logger = LoggerManager.getLogger('IncludeIndexDiskCache');
 // in-session invalidation, and the identity signature (host-content hash for #344,
 // member-list fingerprint for #345) catches input-set changes. Bump the version on
 // any envelope/consumer-shape change so a stale format is discarded, never misread.
-const DISK_CACHE_VERSION = 1;
+const DISK_CACHE_VERSION = 2; // #807 — the include chains and reachable sets skip INCLUDEs in blocks that do not compile
 
 export interface IncludeIndexEnvelope<P> {
     version: number;

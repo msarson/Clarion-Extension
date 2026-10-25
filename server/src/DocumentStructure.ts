@@ -11,6 +11,8 @@ import { ControlService } from './utils/ControlService';
 import { ScopeResolver } from './scope/ScopeResolver';
 import { firstTokenAfterLine } from './utils/TokenLineIndex';
 import { OmitCompileDetector } from './utils/OmitCompileDetector';
+import { scanConditionalCompile } from './utils/ConditionalCompile';
+import { equatesOfIncludeName } from './utils/ConditionalIncludes';
 
 /**
  * A document's source lines: a split array, or an accessor over the document so a caller on the
@@ -2454,10 +2456,24 @@ export class DocumentStructure {
      * Resolve file references for tokens that contain file references
      * Handles MODULE, INCLUDE, LINK, MEMBER, etc. by checking token sequences
      */
+    /**
+     * #807 — the lines of INCLUDEs in a COMPILE/OMIT block decided not to compile. Only when the
+     * file has such a directive and its lines are at hand; the path is not known here, so an
+     * INCLUDEd file's EQUATEs are found through the solution's redirection (none: not decided).
+     */
+    private inactiveIncludeLines(): Set<number> {
+        if (!this.lines || !this.tokens.some(t => t.type === TokenType.Directive && /^(OMIT|COMPILE)$/i.test(t.value))) return new Set();
+        const lines: string[] = [];
+        for (let l = 0; l < this.lines.length; l++) lines.push(this.lines.at(l) ?? '');
+        const scan = scanConditionalCompile(lines, { equatesOfInclude: name => equatesOfIncludeName(name, null) });
+        return new Set(scan.includes.filter(i => !i.active).map(i => i.line));
+    }
+
     private resolveFileReferences(): void {
         // Note: We're storing unresolved filenames
         // Actual path resolution happens via RedirectionParser when needed
-        
+        const inactiveIncludes = this.inactiveIncludeLines();
+
         for (let i = 0; i < this.tokens.length; i++) {
             const token = this.tokens[i];
             if (!token.value) continue;
@@ -2485,7 +2501,9 @@ export class DocumentStructure {
             // Check for INCLUDE followed by ('filename')
             if (upperValue === 'INCLUDE') {
                 const filename = this.extractFilenameAfterKeyword(i);
-                if (filename) {
+                if (filename && inactiveIncludes.has(token.line)) {
+                    token.inactiveByCondition = true; // #807: not compiled, so not followed
+                } else if (filename) {
                     token.referencedFile = filename;
                     if (DOCSTRUCT_TRACE) logger.info(`✅ INCLUDE token at line ${token.line} references: ${token.referencedFile}`);
                 }

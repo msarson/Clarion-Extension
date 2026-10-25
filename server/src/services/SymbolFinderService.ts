@@ -1771,6 +1771,7 @@ export class SymbolFinderService {
 
         for (const t of hostTokens) {
             if (t.type !== TokenType.Directive || t.value.toUpperCase() !== 'INCLUDE') continue;
+            if (t.inactiveByCondition) continue; // #807: in a COMPILE/OMIT block that does not compile
             if (t.line >= boundary) continue;
             await timeSlice();
 
