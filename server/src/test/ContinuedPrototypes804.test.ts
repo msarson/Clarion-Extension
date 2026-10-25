@@ -6,6 +6,8 @@ import { setServerInitialized } from '../serverState';
 import { TokenCache } from '../TokenCache';
 import { MemberLocatorService } from '../services/MemberLocatorService';
 import { validateClassInterfaceImplementationAsync } from '../providers/diagnostics/ClassDiagnostics';
+import { DocumentStructure } from '../DocumentStructure';
+import { TokenType } from '../tokenizer/TokenTypes';
 
 /**
  * #804 / #805 — a prototype continued with `|`, in two shapes taken from a real interface
@@ -53,6 +55,29 @@ suite('#804 — Outline: a prototype continued with | keeps its name', () => {
             assert.ok(names.some(n => n.startsWith(label)), `${label} missing: ${JSON.stringify(names)}`);
         }
         assert.strictEqual(names.length, 5, JSON.stringify(names));
+    });
+});
+
+suite('#804 — a method definition continued with | keeps its qualified name', () => {
+    // The review: the label was found, but the dotted name was still assembled from the
+    // PROCEDURE's own line, so `MyClass.LongMethodName |` read as a global procedure.
+    const procedures = (lines: string[]) => {
+        const tokens = new ClarionTokenizer(lines.join('\n')).tokenize();
+        new DocumentStructure(tokens).process();
+        return tokens.filter(t => t.type === TokenType.Procedure).map(t => `${t.label}/${TokenType[t.subType as TokenType]}`);
+    };
+
+    test('Class.Method, continued, is a method implementation like its one-line form', () => {
+        const one = procedures(["  MEMBER('x')", 'MyClass.LongMethodName PROCEDURE(LONG x)', '  CODE']);
+        const continued = procedures(["  MEMBER('x')", 'MyClass.LongMethodName |', '   PROCEDURE(LONG x)', '  CODE']);
+        assert.deepStrictEqual(continued, one);
+        assert.deepStrictEqual(continued, ['MyClass.LongMethodName/MethodImplementation']);
+    });
+
+    test('Class.Interface.Method, continued, keeps the class', () => {
+        const one = procedures(["  MEMBER('x')", 'MyClass.IFoo.LongMethodName PROCEDURE(LONG x)', '  CODE']);
+        const continued = procedures(["  MEMBER('x')", 'MyClass.IFoo.LongMethodName |', '   PROCEDURE(LONG x)', '  CODE']);
+        assert.deepStrictEqual(continued, one);
     });
 });
 

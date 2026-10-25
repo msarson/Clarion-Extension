@@ -2231,7 +2231,7 @@ export class DocumentStructure {
      * line, continued with `|` (and maybe a comment), with PROCEDURE on the next: step back over
      * the continuation to the label.
      */
-    private tokenBeforeProcedure(index: number): Token | undefined {
+    private indexBeforeProcedure(index: number): number {
         let i = index - 1;
         let continued = false;
         while (i >= 0 && (this.tokens[i].type === TokenType.LineContinuation || this.tokens[i].type === TokenType.Comment)) {
@@ -2239,7 +2239,11 @@ export class DocumentStructure {
             i--;
         }
         // Only across a continuation: a comment alone on the line above is not part of this statement.
-        return continued ? this.tokens[i] : this.tokens[index - 1];
+        return continued ? i : index - 1;
+    }
+
+    private tokenBeforeProcedure(index: number): Token | undefined {
+        return this.tokens[this.indexBeforeProcedure(index)];
     }
 
     private handleProcedureInsideDefinition(token: Token, index: number): void {
@@ -2252,7 +2256,11 @@ export class DocumentStructure {
     }
 
     private handleProcedureToken(token: Token, index: number): void {
-        const prevToken = this.tokenBeforeProcedure(index);
+        // #804: the name is assembled from the label's position and line, which a `|` continuation
+        // may put on the line above the PROCEDURE.
+        const prevIndex = this.indexBeforeProcedure(index);
+        const prevToken = this.tokens[prevIndex];
+        const nameLine = prevToken?.line ?? token.line;
     
         // 🧠 Determine token type based on context
         if (this.insideClassOrInterfaceOrMapDepth > 0) {
@@ -2309,8 +2317,8 @@ export class DocumentStructure {
             if (prevToken.value.includes(".")) {
                 // The previous token itself contains dots (e.g., "IConnection.CloseSocket" for 3-part)
                 // Look back for a Label token on the same line to find the class name prefix
-                const prevPrevToken = index >= 2 ? this.tokens[index - 2] : undefined;
-                if (prevPrevToken && prevPrevToken.line === token.line && prevPrevToken.type === TokenType.Label) {
+                const prevPrevToken = prevIndex >= 1 ? this.tokens[prevIndex - 1] : undefined;
+                if (prevPrevToken && prevPrevToken.line === nameLine && prevPrevToken.type === TokenType.Label) {
                     fullProcedureName = prevPrevToken.value + '.' + prevToken.value;
                 } else {
                     fullProcedureName = prevToken.value;
@@ -2321,7 +2329,7 @@ export class DocumentStructure {
                 // Collect all tokens before PROCEDURE that are part of the qualified name
                 const nameParts: string[] = [prevToken.value];
                 let segmentStart = prevToken.start;
-                let lookbackIndex = index - 2;
+                let lookbackIndex = prevIndex - 1;
 
                 const isNamePartToken = (t: Token) =>
                     t.type === TokenType.Label || t.type === TokenType.Variable ||
@@ -2332,7 +2340,7 @@ export class DocumentStructure {
                     const lookbackToken = this.tokens[lookbackIndex];
 
                     // Stop if we're on a different line
-                    if (lookbackToken.line !== token.line) break;
+                    if (lookbackToken.line !== nameLine) break;
 
                     // A bare ':' immediately touching the segment being built continues a
                     // chained colon-qualified identifier (e.g. "My:My:Method") rather than
@@ -2343,7 +2351,7 @@ export class DocumentStructure {
                     if (lookbackToken.type === TokenType.Delimiter && lookbackToken.value === ':' &&
                         lookbackToken.start + 1 === segmentStart) {
                         const before = lookbackIndex >= 1 ? this.tokens[lookbackIndex - 1] : undefined;
-                        if (before && before.line === token.line && isNamePartToken(before) &&
+                        if (before && before.line === nameLine && isNamePartToken(before) &&
                             before.start + before.value.length === lookbackToken.start) {
                             nameParts[0] = before.value + ':' + nameParts[0];
                             segmentStart = before.start;

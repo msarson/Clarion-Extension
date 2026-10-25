@@ -6,6 +6,7 @@ import { AttributeService } from '../../utils/AttributeService';
 import { isDotSuffix, isDotBase, isNestedInsideAttributeArgs } from '../../utils/AttributeContextGuards';
 import { ControlService } from '../../utils/ControlService';
 import { findDeclarationKeyword, readDeclaredAttributes, findAttributeProblems } from '../../utils/DeclaredAttributes';
+import { conditionalLines, getConditionalBlockRanges } from './StructureDiagnostics';
 
 const attributeService = AttributeService.getInstance();
 const controlService = ControlService.getInstance();
@@ -212,7 +213,9 @@ export function validateAttributeApplicability(tokens: Token[], document: TextDo
     }
 
     diagnostics.push(...validateHeaderAttributes(tokens, structure));
-    diagnostics.push(...validateUnknownAttributes(tokens, structure, bodies ?? windowOrReportBodies(tokens), lines));
+    // A line inside an OMIT or COMPILE block is not judged: the compiler may skip it (the review of #806).
+    const conditional = conditionalLines(getConditionalBlockRanges(tokens, document), document.lineCount);
+    diagnostics.push(...validateUnknownAttributes(tokens, structure, bodies ?? windowOrReportBodies(tokens), lines, conditional));
     return diagnostics;
 }
 
@@ -242,7 +245,7 @@ const DECLARATION_KEYWORD_TYPES = new Set([
  * (WINDOW, FILE, KEY... with an `attributes` list) are left to it; MAP and MODULE prototypes,
  * whose list carries a return type, are not read.
  */
-function validateUnknownAttributes(tokens: Token[], structure: DocumentStructure, bodies: [number, number][], lines: string[]): Diagnostic[] {
+function validateUnknownAttributes(tokens: Token[], structure: DocumentStructure, bodies: [number, number][], lines: string[], conditional: Uint8Array): Diagnostic[] {
     const diagnostics: Diagnostic[] = [];
     const seenLines = new Set<number>();
     let inCode = false;
@@ -263,6 +266,10 @@ function validateUnknownAttributes(tokens: Token[], structure: DocumentStructure
 
         const logical = structure.getLogicalLine(token.line);
         if (!logical || logical.tokens[0] !== token || seenLines.has(logical.startLine)) continue;
+        if (conditional[logical.startLine]) continue;
+        // A procedure or method definition (`MyClass.Fn PROCEDURE(LONG x),LONG`) declares nothing
+        // here; what follows its parameters is its prototype, not attributes.
+        if (logical.tokens.some(t => /^(PROCEDURE|FUNCTION)$/i.test(t.value))) continue;
         const keyword = isLabel ? logical.tokens[1] : token;
         if (!keyword || !DECLARATION_KEYWORD_TYPES.has(keyword.type)) continue;
         seenLines.add(logical.startLine);

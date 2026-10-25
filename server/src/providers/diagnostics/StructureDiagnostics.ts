@@ -90,7 +90,7 @@ function createUnterminatedConditionalBlockDiagnostic(
     };
 }
 
-function getConditionalBlockRanges(tokens: Token[], document: TextDocument): Array<{ start: number; end: number }> {
+export function getConditionalBlockRanges(tokens: Token[], document: TextDocument): Array<{ start: number; end: number }> {
     const ranges: Array<{ start: number; end: number }> = [];
     const blockStack: Array<{ line: number; terminator: string }> = [];
 
@@ -135,7 +135,7 @@ function getConditionalBlockRanges(tokens: Token[], document: TextDocument): Arr
  * terminator), as a per-line lookup. #715: each token was tested against every block, which on
  * a module with a thousand OMIT blocks made the two checks below quadratic.
  */
-function conditionalLines(ranges: Array<{ start: number; end: number }>, lineCount: number): Uint8Array {
+export function conditionalLines(ranges: Array<{ start: number; end: number }>, lineCount: number): Uint8Array {
     const inside = new Uint8Array(lineCount + 1);
     for (const { start, end } of ranges) {
         for (let line = start + 1; line <= end && line <= lineCount; line++) inside[line] = 1;

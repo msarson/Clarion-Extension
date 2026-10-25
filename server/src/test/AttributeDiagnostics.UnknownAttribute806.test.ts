@@ -27,6 +27,24 @@ function program(data: string[], code: string[] = ['  RETURN']): string[] {
     return ['  PROGRAM', '  MAP', '  END', ...data, '  CODE', ...code];
 }
 
+suite('Unknown attribute: the review\'s findings (#806)', () => {
+    test('nothing inside an OMIT or COMPILE block is judged: the compiler skips it', () => {
+        assert.deepStrictEqual(unknownAttributes(program([
+            "  OMIT('***')",
+            'Note           STRING(20),BLAH',
+            '***',
+            "  COMPILE('!***', _C99_)",
+            'Later          LONG,FROMLATERVERSION',
+            '!***',
+        ])), []);
+    });
+
+    test('a method definition is not a declaration: its return type is not read as an attribute', () => {
+        const lines = ["  MEMBER('x')", '  MAP', '  END', 'MyClass.Fn     PROCEDURE(LONG x),LONG', '  CODE', '  RETURN 0'];
+        assert.deepStrictEqual(unknownAttributes(lines), []);
+    });
+});
+
 suite('Unknown attribute on a declaration (#806)', () => {
     test('a misspelt attribute on a CLASS is reported with the compiler\'s wording', () => {
         const lines = program([
