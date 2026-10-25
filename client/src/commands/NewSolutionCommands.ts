@@ -10,7 +10,6 @@ import { showNewSolutionForm } from '../solution/NewSolutionReviewPanel';
 import { getLanguageClient, isClientReady } from '../LanguageClientManager';
 import { versionPathSettings } from '../utils/VersionPathSettings';
 import { ClarionInstallation, ClarionInstallationDetector } from '../utils/ClarionInstallationDetector';
-import { globalClarionPropertiesFile, globalClarionVersion } from '../globals';
 
 const logger = LoggerManager.getLogger("NewSolutionCommands");
 logger.setLevel("error");
@@ -177,10 +176,16 @@ export async function newSolution(): Promise<void> {
         programs = scan.files.filter(f => /\.clw$/i.test(f.relPath) && classifySource(f.text).kind === 'program').length;
     }
 
-    // The installations to choose from: the detected ones, and the one in use when it is not among
+    // The page starts on the default for new solutions (Set Version › Set as default for new
+    // solutions), not the version in use, which is the last solution's. With no default it asks,
+    // unless there is only one installation and compiler.
+    const remembered = {
+        propertiesFile: vscode.workspace.getConfiguration('clarion').inspect<string>('activePropertiesFile')?.globalValue || undefined,
+        version: vscode.workspace.getConfiguration('clarion').inspect<string>('activeVersion')?.globalValue || undefined,
+    };
+    // The installations to choose from: the detected ones, and the default's when it is not among
     // them (#479: a ClarionProperties.xml outside the standard locations is never detected).
     const installations = await ClarionInstallationDetector.detectInstallations();
-    const remembered = { propertiesFile: globalClarionPropertiesFile || undefined, version: globalClarionVersion || undefined };
     if (remembered.propertiesFile && fs.existsSync(remembered.propertiesFile)
         && !installations.some(i => i.propertiesPath.toLowerCase() === remembered.propertiesFile!.toLowerCase())) {
         const current = await ClarionInstallationDetector.parseInstallationFromPropertiesPath(remembered.propertiesFile);
