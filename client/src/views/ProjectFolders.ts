@@ -49,7 +49,20 @@ export function projectFolders(cwprojText: string): ProjectFolder[] {
             include: i.include,
         })),
     };
-    return PROJECT_FOLDERS.map(f => ({ ...f, entries: entries[f.section] }));
+    // An item a hand-edited .cwproj lists twice is shown once: two tree items must not share an id.
+    const once = (list: ProjectFolderEntry[]) => list.filter((e, i) => list.findIndex(x => x.include.toLowerCase() === e.include.toLowerCase()) === i);
+    return PROJECT_FOLDERS.map(f => ({ ...f, entries: once(entries[f.section]) }));
+}
+
+/**
+ * A project node of the Solution View, by its data: `kind: 'project'`, or the older form, the
+ * project info alone (a GUID and a .cwproj). Not by `type`: a project's info carries the .sln's
+ * project-type GUID there, so a node with a `type` may still be a project.
+ */
+export function isProjectNodeData(data: unknown): boolean {
+    if (!data || typeof data !== 'object') return false;
+    const d = data as { kind?: unknown; guid?: unknown; filename?: unknown };
+    return d.kind === 'project' || (typeof d.guid === 'string' && typeof d.filename === 'string' && /\.cwproj$/i.test(d.filename));
 }
 
 /** Add on a folder: each pick as an item of its kind; a reference with its `<Project>` GUID and `<Name>`, as the IDE writes it. */

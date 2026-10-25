@@ -21,9 +21,14 @@ logger.setLevel('error');
  */
 export class ProjectPropertiesEditorProvider implements vscode.CustomTextEditorProvider {
     public static readonly viewType = 'clarion.projectProperties';
-    /** #803: the open pages by .cwproj URI, and a tab to show when one opens. */
-    private static readonly panels = new Map<string, vscode.WebviewPanel>();
-    private static readonly pendingTab = new Map<string, string>();
+    /**
+     * #803: the open pages of each .cwproj (a page can be open in two groups), and a tab for the
+     * page about to open, taken when it is ready and only for a few seconds, so a later page
+     * never inherits it. Keyed without case: Windows paths may arrive spelled either way.
+     */
+    private static readonly panels = new Map<string, Set<vscode.WebviewPanel>>();
+    private static readonly pendingTab = new Map<string, { tab: string; at: number }>();
+    private static keyOf(uri: vscode.Uri): string { return uri.toString().toLowerCase(); }
 
     public static register(): vscode.Disposable[] {
         return [
@@ -36,14 +41,11 @@ export class ProjectPropertiesEditorProvider implements vscode.CustomTextEditorP
                 }
                 // #803: a tab to show (a Solution View folder opens Sources). A page opening takes
                 // it with its first state; one already open is told.
-                const key = uri.toString();
-                if (tab) ProjectPropertiesEditorProvider.pendingTab.set(key, tab);
-                const open = ProjectPropertiesEditorProvider.panels.get(key);
+                const key = ProjectPropertiesEditorProvider.keyOf(uri);
+                if (tab) ProjectPropertiesEditorProvider.pendingTab.set(key, { tab, at: Date.now() });
                 await vscode.commands.executeCommand('vscode.openWith', uri, ProjectPropertiesEditorProvider.viewType);
-                if (tab && open) {
-                    ProjectPropertiesEditorProvider.pendingTab.delete(key);
-                    void open.webview.postMessage({ type: 'tab', tab });
-                }
+                // A page already open is told; a new one takes the tab when it is ready.
+                if (tab) for (const open of ProjectPropertiesEditorProvider.panels.get(key) ?? []) void open.webview.postMessage({ type: 'tab', tab });
             }),
         ];
     }
@@ -56,11 +58,15 @@ export class ProjectPropertiesEditorProvider implements vscode.CustomTextEditorP
         panel.webview.options = { enableScripts: true };
         panel.webview.html = pageHtml(panel.webview);
 
-        const key = document.uri.toString();
-        ProjectPropertiesEditorProvider.panels.set(key, panel);
-        const post = () => {
-            const tab = ProjectPropertiesEditorProvider.pendingTab.get(key);
-            ProjectPropertiesEditorProvider.pendingTab.delete(key);
+        const key = ProjectPropertiesEditorProvider.keyOf(document.uri);
+        const open = ProjectPropertiesEditorProvider.panels.get(key) ?? new Set<vscode.WebviewPanel>();
+        open.add(panel);
+        ProjectPropertiesEditorProvider.panels.set(key, open);
+        const post = (ready = false) => {
+            // The tab asked for, taken by the page that has just opened, while it is fresh.
+            const pending = ready ? ProjectPropertiesEditorProvider.pendingTab.get(key) : undefined;
+            if (ready) ProjectPropertiesEditorProvider.pendingTab.delete(key);
+            const tab = pending && Date.now() - pending.at < 10_000 ? pending.tab : undefined;
             return panel.webview.postMessage({
                 type: 'state',
                 state: buildPageState(document.getText(), configuration, targets),
@@ -75,14 +81,15 @@ export class ProjectPropertiesEditorProvider implements vscode.CustomTextEditorP
         });
         panel.onDidDispose(() => {
             changes.dispose();
-            if (ProjectPropertiesEditorProvider.panels.get(key) === panel) ProjectPropertiesEditorProvider.panels.delete(key);
+            open.delete(panel);
+            if (open.size === 0 && ProjectPropertiesEditorProvider.panels.get(key) === open) ProjectPropertiesEditorProvider.panels.delete(key);
         });
 
         panel.webview.onDidReceiveMessage(async (msg: { type: string; property?: string; value?: string; kind?: string; scope?: 'all' | 'configuration' }) => {
             try {
                 switch (msg.type) {
                     case 'ready':
-                        post();
+                        post(true);
                         break;
                     case 'configuration':
                         configuration = msg.value || configuration;

@@ -26,6 +26,29 @@ suite('Solution View: the IDE folders are shown and open the Sources tab (#803)'
         assert.match(tree, /projectFolders\(text\)/);
     });
 
+    // The reviews of #803: the folders never appeared (a project's data has a `type`), and once
+    // built they were carried across refreshes, so an Add or Remove never showed.
+    test('a project is recognised by isProjectNodeData, and its folders are rebuilt on every query', () => {
+        const getChildren = tree.slice(tree.indexOf('async getChildren(element?: TreeNode)'), tree.indexOf('private async getChildrenInner('));
+        assert.match(getChildren, /isProjectNodeData\(element\.data\)/);
+        assert.match(getChildren, /children\.filter\(c => c\.data\?\.type !== 'projectFolder'\)/);
+        assert.doesNotMatch(tree, /private isProjectNode\(/);
+    });
+
+    test('Add and Remove redraw the view themselves, and ask before saving other unsaved changes', () => {
+        const cmds = read('commands/ProjectFolderCommands.ts');
+        assert.match(cmds, /solutionTreeDataProvider\?\.redraw\(\)/);
+        assert.match(tree, /public redraw\(\): void \{\s*this\._onDidChangeTreeData\.fire\(\);/);
+        assert.match(cmds, /document\.isDirty/);
+        assert.match(cmds, /not in the project/);
+    });
+
+    test('the filter does not match a folder by its own label', () => {
+        // In nodeMatches, so every filter path (find, mark, apply) leaves folders out.
+        const matches = tree.slice(tree.indexOf('private nodeMatches('), tree.indexOf('private nodeMatches(') + 400);
+        assert.match(matches, /if \(node\.data\?\.type === 'projectFolder'\) return false;/);
+    });
+
     test('a folder opens the project\'s Sources tab; a referenced project opens its own page', () => {
         const folder = tree.slice(tree.indexOf("type === 'projectFolder')"), tree.indexOf("type === 'projectFolderItem')"));
         assert.match(folder, /command: 'clarion\.openProjectProperties', arguments: \[Uri\.file\(folder\.cwproj\), 'sources'\]/);

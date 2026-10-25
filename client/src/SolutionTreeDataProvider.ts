@@ -13,7 +13,7 @@ import { SolutionScanner, DetectedSolution } from './utils/SolutionScanner';
 import { ClarionInstallationDetector } from './utils/ClarionInstallationDetector';
 import { GlobalSolutionHistory } from './utils/GlobalSolutionHistory';
 import { ProjectDependencyResolver } from './utils/ProjectDependencyResolver';
-import { projectFolders } from './views/ProjectFolders';
+import { isProjectNodeData, projectFolders } from './views/ProjectFolders';
 
 /** #803: each IDE folder's icon, for the folder and its entries. */
 const FOLDER_ICONS: Record<string, string> = {
@@ -85,10 +85,9 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
      * the file list locally. File nodes only need name+relativePath; clicking resolves the full
      * path lazily (fix 13), so no redirection logic is needed here.
      */
-    /** A project node: the current kind, or the older one carrying only its GUID. */
-    private isProjectNode(node: TreeNode): boolean {
-        const data = node.data as any;
-        return !!data && !data.type && (data.kind === 'project' || !!data.guid);
+    /** #803: draw the tree again without rebuilding it; a project's folders are read afresh. */
+    public redraw(): void {
+        this._onDidChangeTreeData.fire();
     }
 
     /**
@@ -591,10 +590,12 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         const gcStart = Date.now();
         try {
             const children = await this.getChildrenInner(element);
-            // #803: a project shows the IDE's folders before its sources.
-            if (element && this.isProjectNode(element) && !(this._filterText && this._filterText.trim() !== '')
-                && !children.some(c => c.data?.type === 'projectFolder' || c.data?.type === 'retryProjectLoad')) {
-                element.children = [...this.projectFolderNodes(element), ...children];
+            // #803: a project shows the IDE's folders before its sources, read from its .cwproj on
+            // every query: the sources are cached across refreshes (#296, #297), the folders must not
+            // be, or an Add or Remove would never show.
+            if (element && isProjectNodeData(element.data) && !(this._filterText && this._filterText.trim() !== '')
+                && !children.some(c => c.data?.type === 'retryProjectLoad')) {
+                element.children = [...this.projectFolderNodes(element), ...children.filter(c => c.data?.type !== 'projectFolder')];
                 return element.children;
             }
             return children;
@@ -1551,6 +1552,9 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     
     // Helper method to check if a node matches the filter directly
     private nodeMatches(node: TreeNode, normalizedFilter: string): boolean {
+        // #803: a project folder never matches by its own label ("File Drivers" would keep every
+        // project for "file"); its entries still do.
+        if (node.data?.type === 'projectFolder') return false;
         return this.substringMatch(node.label, normalizedFilter);
     }
     

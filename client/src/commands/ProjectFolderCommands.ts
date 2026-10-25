@@ -21,15 +21,31 @@ type Pick = { include: string; guid?: string; name?: string };
  * Sources tab makes, saved at once as the IDE does (and undone like any other edit).
  */
 export function registerProjectFolderCommands(solutionTreeDataProvider: SolutionTreeDataProvider | undefined): Disposable[] {
-    const edit = async (data: FolderNodeData, change: (text: string) => string): Promise<boolean> => {
+    /**
+     * The change, saved at once as the IDE does. When the .cwproj already has unsaved changes (the
+     * Project Properties page leaves its edits unsaved), saving would write them too: ask first, and
+     * otherwise leave this change unsaved beside them. The tree reads the .cwproj from disk, so it
+     * is redrawn after a save; a refresh would rebuild every node and can be skipped while one runs.
+     */
+    const edit = async (data: FolderNodeData, change: (text: string) => string): Promise<'saved' | 'unsaved' | 'unchanged'> => {
         const document = await workspace.openTextDocument(Uri.file(data.cwproj));
         const before = document.getText();
         const after = change(before);
-        if (after === before) return false;
+        if (after === before) return 'unchanged';
+        const otherChanges = document.isDirty;
         await applyText(document, after);
+        if (otherChanges) {
+            const answer = await window.showWarningMessage(
+                `${path.basename(data.cwproj)} has other changes not saved yet. Save them with this one?`,
+                { modal: true }, 'Save All');
+            if (answer !== 'Save All') {
+                window.showInformationMessage(`The change to ${data.projectName} is made but not saved; save ${path.basename(data.cwproj)} to keep it.`);
+                return 'unsaved';
+            }
+        }
         await document.save();
-        await solutionTreeDataProvider?.refresh();
-        return true;
+        solutionTreeDataProvider?.redraw();
+        return 'saved';
     };
 
     const picksFor = async (data: FolderNodeData, text: string): Promise<Pick[]> => {
@@ -90,7 +106,10 @@ export function registerProjectFolderCommands(solutionTreeDataProvider: Solution
             const answer = await window.showWarningMessage(`Remove ${node?.label ?? include} from ${data.projectName}?`, { modal: true }, 'Remove');
             if (answer !== 'Remove') return;
             try {
-                await edit(data, current => removeItem(current, data.kind, include));
+                // The tree shows the file on disk; an unsaved edit may already have taken the item out.
+                if (await edit(data, current => removeItem(current, data.kind, include)) === 'unchanged') {
+                    window.showInformationMessage(`${node?.label ?? include} is not in the project ${data.projectName} as it stands; it may have been removed in an unsaved edit.`);
+                }
             } catch (err) {
                 logger.error(`❌ Remove from ${data.projectName}: ${err instanceof Error ? err.message : String(err)}`);
                 window.showErrorMessage(`Could not change ${data.projectName}: ${err instanceof Error ? err.message : String(err)}`);
