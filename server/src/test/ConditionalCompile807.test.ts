@@ -150,6 +150,79 @@ suite('#807 — COMPILE/OMIT conditions', () => {
         ]), ['A.inc']);
     });
 
+    test('an INCLUDE\'s EQUATEs are asked for only when a condition needs a name not yet known', () => {
+        const asked: string[] = [];
+        const ctx = { equatesOfInclude: (f: string) => { asked.push(f); return new Map([['ver', 2]]); } };
+        scanConditionalCompile([
+            "  INCLUDE('A.inc')",
+            "  OMIT('**')",              // unconditional: nothing to look up
+            "  INCLUDE('B.inc')",
+            '**',
+            'Local  EQUATE(1)',
+            "  COMPILE('**', Local)",     // decided by the file itself
+            '**',
+        ], ctx);
+        assert.deepStrictEqual(asked, [], 'no condition needed an INCLUDE');
+        const r = scanConditionalCompile([
+            "  INCLUDE('A.inc')",
+            "  INCLUDE('C.inc')",
+            "  COMPILE('**', Ver = 2)",
+            "  INCLUDE('Two.inc')",
+            '**',
+        ], ctx);
+        assert.deepStrictEqual(asked, ['A.inc', 'C.inc'], 'the INCLUDEs before it, in order, once');
+        assert.deepStrictEqual(r.includes.filter(i => i.active).map(i => i.file), ['A.inc', 'C.inc', 'Two.inc']);
+    });
+
+    test('a name no source defines as an EQUATE (a project switch) does not make the INCLUDEs be read', () => {
+        // The perf rig: 2,200 generated modules test _ABCDllMode_-style switches; reading every
+        // earlier INCLUDE to look for an EQUATE nobody defines blocked the server for 2 s.
+        const asked: string[] = [];
+        const ctx = {
+            equatesOfInclude: (f: string) => { asked.push(f); return new Map([['ver', 2]]); },
+            includesDefining: (name: string) => name.toLowerCase() === 'ver' ? undefined : () => false,
+        };
+        scanConditionalCompile(["  INCLUDE('A.inc')", "  COMPILE('**', _ABCDllMode_)", '**'], ctx);
+        assert.deepStrictEqual(asked, [], 'a switch only a project defines');
+        scanConditionalCompile(["  INCLUDE('A.inc')", "  COMPILE('**', Ver = 2)", '**'], ctx);
+        assert.deepStrictEqual(asked, ['A.inc'], 'a name some file defines as an EQUATE');
+    });
+
+    test('with the files that define a name known, only those INCLUDEs are read for it', () => {
+        // Cold perf rig: reading every earlier INCLUDE (and theirs) for a name defined in one
+        // library file cost seconds; the index knows which file defines it.
+        const asked: string[] = [];
+        const ctx = {
+            equatesOfInclude: (f: string) => { asked.push(f); return f === 'Ver.inc' ? new Map([['ver', 2]]) : new Map(); },
+            includesDefining: (name: string) => name.toLowerCase() === 'ver' ? (f: string) => f.toLowerCase() === 'ver.inc' : () => false,
+        };
+        const r = scanConditionalCompile([
+            "  INCLUDE('Big1.inc')",
+            "  INCLUDE('Ver.inc')",
+            "  INCLUDE('Big2.inc')",
+            "  COMPILE('**', Ver = 2)",
+            "  INCLUDE('Two.inc')",
+            '**',
+            "  COMPILE('**', _ABCDllMode_)",
+            '**',
+        ], ctx);
+        assert.deepStrictEqual(asked, ['Ver.inc']);
+        assert.ok(r.includes.find(i => i.file === 'Two.inc')!.active);
+    });
+
+    test('an EQUATE in the file after an INCLUDE wins over the INCLUDE\'s, as the compiler reads them in order', () => {
+        const ctx = { equatesOfInclude: () => new Map([['ver', 1]]) };
+        assert.deepStrictEqual(scanConditionalCompile([
+            "  INCLUDE('A.inc')",
+            'Ver  EQUATE(2)',
+            "  COMPILE('**', Mystery)",   // unknown: makes the INCLUDE be read
+            '**',
+            "  OMIT('**', Ver = 2)",
+            "  INCLUDE('Two.inc')",
+            '**',
+        ], ctx).includes.filter(i => i.active).map(i => i.file), ['A.inc']);
+    });
+
     test('inactive lines are reported for other uses', () => {
         const r = scan(['Ver  EQUATE(1)', "  OMIT('**', Ver)", 'x LONG', '**', 'y LONG']);
         assert.deepStrictEqual([0, 1, 2, 3, 4].map(l => r.isInactive(l)), [false, true, true, true, false]);

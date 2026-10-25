@@ -24,6 +24,12 @@ export interface ConditionalContext {
     lookup?: (name: string) => number | undefined;
     /** The integer EQUATEs an INCLUDEd file defines, for the lines after its INCLUDE. */
     equatesOfInclude?: (file: string) => Map<string, number> | undefined;
+    /**
+     * For a name not known yet, which INCLUDEs could define it: only those are read. Rejecting all
+     * spares reading anything for a switch only a project defines. Absent, or returning undefined:
+     * read every INCLUDE so far.
+     */
+    includesDefining?: (name: string) => ((file: string) => boolean) | undefined;
 }
 
 export interface ConditionalScan {
@@ -82,9 +88,26 @@ function code(line: string): string {
 export function scanConditionalCompile(lines: string[], context: ConditionalContext = {}): ConditionalScan {
     const equates = new Map<string, number>();
     const pragmas = new Map<string, number>();
+    // INCLUDEs followed so far whose EQUATEs have not been read: read only when a condition needs a
+    // name not known yet (most conditions are decided without, or name a project switch no file
+    // defines). Read in order; an EQUATE the file itself defines after an INCLUDE keeps its value.
+    let pending: string[] = [];
+    const readPending = (only?: (file: string) => boolean) => {
+        const files = only ? pending.filter(only) : pending;
+        pending = only ? pending.filter(f => !only(f)) : [];
+        for (const file of files) {
+            for (const [k, v] of context.equatesOfInclude?.(file) ?? []) {
+                const key = k.toLowerCase();
+                if (!equates.has(key)) equates.set(key, v);
+            }
+        }
+    };
     const value = (name: string): number | undefined => {
         const key = name.toLowerCase();
-        return equates.get(key) ?? pragmas.get(key) ?? context.lookup?.(name);
+        const known = equates.get(key) ?? pragmas.get(key) ?? context.lookup?.(name);
+        if (known !== undefined || pending.length === 0) return known;
+        readPending(context.includesDefining?.(name));
+        return equates.get(key);
     };
     const includes: ConditionalScan['includes'] = [];
     const inactive = new Uint8Array(lines.length);
@@ -127,7 +150,7 @@ export function scanConditionalCompile(lines: string[], context: ConditionalCont
         const include = INCLUDE.exec(live);
         if (include) {
             includes.push({ file: include[1], line, active: true });
-            for (const [k, v] of context.equatesOfInclude?.(include[1]) ?? []) equates.set(k.toLowerCase(), v);
+            if (context.equatesOfInclude) pending.push(include[1]);
             continue;
         }
         const equate = EQUATE.exec(live);
@@ -140,6 +163,15 @@ export function scanConditionalCompile(lines: string[], context: ConditionalCont
             const v = switchValue(pragma[2]);
             if (v !== undefined) pragmas.set(pragma[1].toLowerCase(), v);
         }
+    }
+    // What the file exports to an includer: its INCLUDEs' EQUATEs too (read now, only if asked for).
+    if (context.equatesOfInclude && pending.length > 0) {
+        let read = false;
+        return {
+            includes,
+            get equates() { if (!read) { read = true; readPending(); } return equates; },
+            isInactive: line => inactive[line] === 1,
+        };
     }
     return { includes, equates, isInactive: line => inactive[line] === 1 };
 }
