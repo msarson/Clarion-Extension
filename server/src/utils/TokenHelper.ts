@@ -564,10 +564,8 @@ export class TokenHelper {
      * inclusive on both bounds.
      */
     public static getFileRefArgStringToken(tokens: Token[], line: number, character: number): Token | null {
-        const fileRefTokens = tokensOnLine(tokens, line).filter(t =>
-            t.referencedFile !== undefined &&
-            t.referencedFile.length > 0
-        );
+        // #807: an INCLUDE in a block that does not compile keeps its name for navigation only
+        const fileRefTokens = tokensOnLine(tokens, line).filter(t => (t.referencedFile ?? t.inactiveFile ?? '').length > 0);
         if (fileRefTokens.length === 0) return null;
 
         for (const fileRef of fileRefTokens) {
@@ -600,8 +598,7 @@ export class TokenHelper {
     ): { section: Token; includeFile: string } | null {
         const includeTokens = tokensOnLine(tokens, line).filter(t =>
             t.value?.toUpperCase() === 'INCLUDE' &&
-            t.referencedFile !== undefined &&
-            t.referencedFile.length > 0
+            (t.referencedFile ?? t.inactiveFile ?? '').length > 0 // #807: navigation only
         );
         for (const inc of includeTokens) {
             const strings = tokensOnLine(tokens, line)
@@ -610,7 +607,7 @@ export class TokenHelper {
             if (strings.length < 2) continue;
             const second = strings[1];
             if (second.start <= character && character <= second.start + second.value.length) {
-                return { section: second, includeFile: inc.referencedFile! };
+                return { section: second, includeFile: (inc.referencedFile ?? inc.inactiveFile)! };
             }
         }
         return null;

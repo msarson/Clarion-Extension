@@ -133,6 +133,8 @@ export interface Token {
     referencedFile?: string;  // ✅ Resolved path for any file reference (MODULE/INCLUDE/LINK/MEMBER/etc)
     /** #807 — an INCLUDE in a COMPILE/OMIT block decided not to compile: not followed (no referencedFile). */
     inactiveByCondition?: boolean;
+    /** #807 — such an INCLUDE's file, for navigation only (F12, hover, links); no walker follows it. */
+    inactiveFile?: string;
     localVariablesAnalyzed?: boolean;  // 🚀 PERF: Track if procedure's local variables were already analyzed
     isSingleLineWithContinuation?: boolean; // ✅ True if structure is single-line but spans multiple lines due to |
     inlineTerminator?: boolean; // #578 — this END/period closes a structure that opened on the same logical line

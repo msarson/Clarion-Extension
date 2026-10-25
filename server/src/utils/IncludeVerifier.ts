@@ -12,7 +12,7 @@ import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { inactiveIncludeLines } from './ConditionalIncludes';
+import { inactiveIncludeLines, recordedDependencies } from './ConditionalIncludes';
 
 /** iv-includes.json format: 2 since #807 (an INCLUDE in a block that does not compile is not listed). */
 const IV_LIST_VERSION = 2;
@@ -570,7 +570,9 @@ export class IncludeVerifier {
         }
 
         this.includeCache.set(cacheKey, { includes, timestamp: now });
-        if (mtime !== null) {
+        // #807: a list whose COMPILE/OMIT decisions were read from another file (a version file) is
+        // not kept on disk: its own time alone would not say when it is stale.
+        if (mtime !== null && recordedDependencies(filePath).size === 0) {
             const diskLists = await this.loadDiskIncludeLists();
             diskLists.set(pathKey, { mtime, includes });
             this.scheduleDiskListsSave();

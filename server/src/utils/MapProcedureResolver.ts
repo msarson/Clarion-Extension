@@ -278,7 +278,7 @@ export class MapProcedureResolver {
     }
 
     /** #756 — a file's INCLUDEs in text order, each marked inside or outside the file's MAPs. Read once per summary. */
-    private includesOf(summary: FileWalkSummary, content: string): Array<{ fileName: string; insideMap: boolean }> {
+    private includesOf(summary: FileWalkSummary, content: string, filePath: string | null = null): Array<{ fileName: string; insideMap: boolean }> {
         if (summary.includes) return summary.includes;
         const lineStarts = [0];
         for (let i = content.indexOf('\n'); i !== -1; i = content.indexOf('\n', i + 1)) lineStarts.push(i + 1);
@@ -292,7 +292,7 @@ export class MapProcedureResolver {
         };
         const includes: Array<{ fileName: string; insideMap: boolean }> = [];
         const includePattern = /INCLUDE\s*\(\s*['"]([^'"]+)['"]/gi;
-        const compiled = compiledIncludeTest(null, content); // #807 (the summary holds no path; redirection finds an INCLUDEd version file)
+        const compiled = compiledIncludeTest(filePath, content); // #807
         let match: RegExpExecArray | null;
         while ((match = includePattern.exec(content)) !== null) {
             const line = offsetToLine(match.index);
@@ -425,7 +425,8 @@ export class MapProcedureResolver {
         // when a cheap text check finds a MAP in it and the name (or INCLUDEs to follow),
         // so the guard above keeps its cost.
         // #756 — the file's INCLUDEs and MAP ranges come from its walk summary, worked out once.
-        const includes = this.includesOf(this.summaryOf(from.tokens), from.document.getText());
+        const includes = this.includesOf(this.summaryOf(from.tokens), from.document.getText(),
+            decodeURIComponent(from.document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\'));
         const nameLower = procName.toLowerCase();
 
         // #361 — the inner loop below loads (and, cold, tokenizes) EVERY include of

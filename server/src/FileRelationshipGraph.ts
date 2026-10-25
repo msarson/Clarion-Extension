@@ -23,7 +23,7 @@ import { SolutionManager } from './solution/solutionManager';
 import { serverSettings } from './serverSettings';
 import { resolutionEnvironmentKey } from './solution/resolutionEnvironmentKey'; // #568
 import { resolveFileInNoSolutionMode } from './solution/findFileNoSolution';
-import { inactiveIncludeLines } from './utils/ConditionalIncludes';
+import { dependenciesUnchanged, inactiveIncludeLines, recordedDependencies } from './utils/ConditionalIncludes';
 import LoggerManager from './logger';
 
 const logger = LoggerManager.getLogger("FileRelationshipGraph");
@@ -59,7 +59,8 @@ export interface FileEdge {
 // (Mark's VM: frg_member_edges_by_basename=0 with reused_from_disk=2987).
 const DISK_CACHE_VERSION = 4; // #484 — MODULE edges to binaries dropped; #807 — no edge for an INCLUDE in a block that does not compile
 
-interface FrgDiskCacheEntry { mtimeMs: number; edges: FileEdge[]; }
+/** #807: `deps` — the other files the entry's COMPILE/OMIT decisions were read from, and their times. */
+interface FrgDiskCacheEntry { mtimeMs: number; edges: FileEdge[]; deps?: Record<string, number>; }
 
 interface FrgDiskCacheFile {
     version: number;
@@ -343,7 +344,9 @@ export class FileRelationshipGraph {
         if (!hasLiveTokens) {
             try { mtimeMs = (await fs.promises.stat(filePath)).mtimeMs; } catch { mtimeMs = undefined; }
             const entry = diskCache?.files[filePath];
-            if (entry && mtimeMs !== undefined && entry.mtimeMs === mtimeMs) {
+            // #807: and the files its COMPILE/OMIT decisions were read from (a version file) unchanged
+            if (entry && mtimeMs !== undefined && entry.mtimeMs === mtimeMs
+                && dependenciesUnchanged(entry.deps ? new Map(Object.entries(entry.deps)) : undefined)) {
                 this.scannedFiles.add(filePath);
                 for (const edge of entry.edges) this.addEdge(edge);
                 freshEntries[filePath] = entry;
@@ -353,7 +356,11 @@ export class FileRelationshipGraph {
 
         await this.processFile(filePath);
         if (!hasLiveTokens && mtimeMs !== undefined) {
-            freshEntries[filePath] = { mtimeMs, edges: this.forwardEdges.get(filePath) ?? [] };
+            const deps = recordedDependencies(filePath);
+            freshEntries[filePath] = {
+                mtimeMs, edges: this.forwardEdges.get(filePath) ?? [],
+                ...(deps.size ? { deps: Object.fromEntries(deps) } : {}),
+            };
         }
         return false;
     }

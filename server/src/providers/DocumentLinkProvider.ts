@@ -3,6 +3,9 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import * as path from 'path';
 import { FileRelationshipGraph, FileEdge } from '../FileRelationshipGraph';
 import { pathToCanonicalUri } from '../utils/UriUtils';
+import * as fs from 'fs';
+import { TokenCache } from '../TokenCache';
+import { resolveViaProjectRedirection } from '../utils/RedirectionResolution';
 import LoggerManager from '../logger';
 
 function uriToFsPath(uri: string): string {
@@ -23,14 +26,17 @@ const QUOTED_FILE_RE = /'([^']+)'/g;
 export class DocumentLinkProvider {
 
     provideDocumentLinks(document: TextDocument): DocumentLink[] {
+        // #807: an INCLUDE in a COMPILE/OMIT block that does not compile has no graph edge (nothing
+        // follows it), but its file name is still a link.
+        const inactive = this.inactiveIncludeLinks(document);
         const frg = FileRelationshipGraph.getInstance();
         frg.ensureNoSolutionGraphForDocument(document);
-        if (!frg.isBuilt) return [];
+        if (!frg.isBuilt) return inactive;
 
         const filePath = uriToFsPath(document.uri);
         const edges = frg.getForwardEdges(filePath)
             .filter(e => e.type !== 'IMPLICIT_INCLUDE' && e.fromLine !== undefined);
-        if (edges.length === 0) return [];
+        if (edges.length === 0) return inactive;
 
         // Group edges by the line that produced them. A single line can carry more than
         // one file reference (#198: `CLASS,TYPE,MODULE('X.clw'),LINK('X.clw')`), so we
@@ -71,6 +77,34 @@ export class DocumentLinkProvider {
         }
 
         logger.info(`🔗 [DocumentLinkProvider] ${links.length} links for ${path.basename(filePath)}`);
+        return [...links, ...inactive];
+    }
+
+    /** The file name of each INCLUDE that is not followed (#807), resolved as the walkers would. */
+    private inactiveIncludeLinks(document: TextDocument): DocumentLink[] {
+        const tokens = TokenCache.getInstance().getTokens(document).filter(t => t.inactiveByCondition && t.inactiveFile);
+        if (tokens.length === 0) return [];
+        const fromPath = uriToFsPath(document.uri);
+        const lines = document.getText().split(/\r?\n/);
+        const links: DocumentLink[] = [];
+        for (const t of tokens) {
+            const name = t.inactiveFile!;
+            let target: string | null = null;
+            try { target = resolveViaProjectRedirection(name, fromPath); } catch { target = null; }
+            if (!target) {
+                const beside = path.join(path.dirname(fromPath), name);
+                if (fs.existsSync(beside)) target = beside;
+            }
+            if (!target) continue;
+            const lineText = lines[t.line] ?? '';
+            const at = lineText.toLowerCase().indexOf(`'${name.toLowerCase()}'`, t.start);
+            if (at < 0) continue;
+            links.push({
+                range: { start: { line: t.line, character: at }, end: { line: t.line, character: at + name.length + 2 } },
+                target: fsPathToUri(target),
+                tooltip: path.basename(target),
+            });
+        }
         return links;
     }
 }

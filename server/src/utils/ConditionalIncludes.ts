@@ -1,3 +1,4 @@
+import * as crypto from 'crypto';
 import * as fs from 'fs';
 import * as path from 'path';
 import { scanConditionalCompile } from './ConditionalCompile';
@@ -65,7 +66,9 @@ function resolveInclude(name: string, fromFile: string | null): string | null {
 function equatesOfFile(file: string, visiting: Set<string>, depth: number, deep: boolean, deps?: Map<string, number>): Map<string, number> | undefined {
     const key = `${file.toLowerCase()}|${deep ? 'deep' : 'own'}`;
     if (visiting.has(file.toLowerCase()) || depth > MAX_DEPTH) return undefined;
-    const cached = equatesCache.get(key);
+    // A deep read depends on which files were being read around it (a file's own include guard,
+    // reached back through a cycle of INCLUDEs, must not decide it), so only shallow reads are reused.
+    const cached = deep ? undefined : equatesCache.get(key);
     if (cached && [...cached.deps].every(([f, m]) => mtimeOf(f) === m)) {
         for (const [f, m] of cached.deps) deps?.set(f, m);
         return cached.equates;
@@ -83,10 +86,13 @@ function equatesOfFile(file: string, visiting: Set<string>, depth: number, deep:
             return resolved ? equatesOfFile(resolved, visiting, depth + 1, deep, own) : undefined;
         },
     } : {});
+    // Read the exported EQUATEs now (they are read lazily): while this file still counts as being
+    // read, against loops, and before its dependencies are handed up.
+    const equates = scan.equates;
     visiting.delete(file.toLowerCase());
-    equatesCache.set(key, { deps: own, equates: scan.equates });
+    if (!deep) equatesCache.set(key, { deps: own, equates });
     for (const [f, m] of own) deps?.set(f, m);
-    return scan.equates;
+    return equates;
 }
 
 /**
@@ -115,14 +121,17 @@ export function compiledIncludeTest(filePath: string | null, text: string): { at
  * checks all ask for the same file. Valid while the text is the same and every INCLUDEd file read
  * for it keeps its modification time.
  */
-const resultCache = new Map<string, { text: string; deps: Map<string, number>; lines: Set<number> }>();
+/** Keyed by path; the text is held as its length and hash, not a copy (thousands of large modules). */
+const resultCache = new Map<string, { length: number; hash: string; deps: Map<string, number>; lines: Set<number> }>();
+const hashOf = (text: string) => crypto.createHash('md5').update(text).digest('hex');
 const RESULT_CACHE_MAX = 2000;
 
 export function inactiveIncludeLines(filePath: string | null, text: string): Set<number> {
     if (!DIRECTIVE_HINT.test(text)) return new Set();
     const key = filePath?.toLowerCase();
     const cached = key !== undefined ? resultCache.get(key) : undefined;
-    if (cached && cached.text === text && [...cached.deps].every(([f, m]) => mtimeOf(f) === m)) return cached.lines;
+    const hash = key !== undefined ? hashOf(text) : '';
+    if (cached && cached.length === text.length && cached.hash === hash && [...cached.deps].every(([f, m]) => mtimeOf(f) === m)) return cached.lines;
 
     const visiting = new Set<string>(key ? [key] : []);
     const deps = new Map<string, number>();
@@ -138,8 +147,28 @@ export function inactiveIncludeLines(filePath: string | null, text: string): Set
     const lines = new Set(scan.includes.filter(i => !i.active).map(i => i.line));
     if (key !== undefined) {
         resultCache.delete(key);
-        resultCache.set(key, { text, deps, lines });
+        resultCache.set(key, { length: text.length, hash, deps, lines });
         if (resultCache.size > RESULT_CACHE_MAX) resultCache.delete(resultCache.keys().next().value!);
     }
     return lines;
+}
+
+/**
+ * The other files a file's answer was read from, with their modification times when read: empty
+ * when it depends on its own text alone. A cache keyed by the file's own time must check these too
+ * (a version file changing decides its includer differently), or not persist the answer.
+ */
+export function conditionalDependencies(filePath: string, text: string): Map<string, number> {
+    inactiveIncludeLines(filePath, text);
+    return resultCache.get(filePath.toLowerCase())?.deps ?? new Map();
+}
+
+/** The dependencies recorded the last time `filePath` was decided (none recorded: empty). */
+export function recordedDependencies(filePath: string): Map<string, number> {
+    return resultCache.get(filePath.toLowerCase())?.deps ?? new Map();
+}
+
+/** Whether every file in `deps` still has the time it was read at. */
+export function dependenciesUnchanged(deps: Map<string, number> | undefined): boolean {
+    return !deps || [...deps].every(([f, m]) => mtimeOf(f) === m);
 }

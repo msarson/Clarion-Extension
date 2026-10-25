@@ -1,6 +1,6 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { ClarionTokenizer, Token, TokenType } from './ClarionTokenizer';
-import { inactiveIncludeLines } from './utils/ConditionalIncludes';
+import { conditionalDependencies, dependenciesUnchanged, inactiveIncludeLines } from './utils/ConditionalIncludes';
 import { DocumentStructure, SourceLines } from './DocumentStructure';
 import LoggerManager from './logger';
 import * as fs from 'fs';
@@ -26,6 +26,8 @@ interface CachedTokenData {
     lineTokens: Map<number, LineTokenData>; // 🚀 PERFORMANCE: Line-based cache
     documentText: string; // Track full text for change detection
     structure?: DocumentStructure; // 🚀 PERFORMANCE: Cached structure
+    /** #807 — other files the COMPILE/OMIT decisions were read from; a change to one re-tokenizes. */
+    conditionalDeps?: Map<string, number>;
     /** #260 — the caller-visible URI (original spelling of the last writer).
      *  The map itself is keyed canonically; consumers that enumerate the cache
      *  (getAllCachedUris) get THIS, so Locations/documents.get() keep working. */
@@ -53,7 +55,7 @@ export class TokenCache {
     // serve stale tokens after an external (on-disk) change.
     // #260 — bounded LRU (see closedFileCacheMax): previously grew unbounded
     // for the server's lifetime, across solution switches.
-    private closedFileCache = new Map<string, { tokens: Token[]; mtimeMs: number }>();
+    private closedFileCache = new Map<string, { tokens: Token[]; mtimeMs: number; conditionalDeps?: Map<string, number> }>();
 
     /** #260 — max closed-file entries kept. Map preserves insertion order;
      *  hits re-insert (LRU), overflow evicts the oldest. Mutable for tests. */
@@ -151,7 +153,9 @@ export class TokenCache {
             // git, scripted edits), pairing STALE tokens with FRESH content. The
             // entry already carries documentText; a content mismatch falls through
             // to the incremental/full paths below, which handle it correctly.
-            if (cached && cached.version === document.version && cached.documentText === currentText) {
+            // #807: and while the files a COMPILE/OMIT decision was read from are unchanged
+            const depsUnchanged = dependenciesUnchanged(cached?.conditionalDeps);
+            if (cached && depsUnchanged && cached.version === document.version && cached.documentText === currentText) {
                 logger.info(`🟢 [TC] Cache HIT v${document.version} tokens=${cached.tokens.length} uri=${document.uri}`);
                 return cached.tokens;
             }
@@ -164,13 +168,15 @@ export class TokenCache {
             }
             
             // 🚀 PERFORMANCE: Try incremental update if we have cached data
-            if (cached && cached.documentText && this.canUseIncrementalUpdate(currentText, cached.documentText)) {
+            if (cached && depsUnchanged && cached.documentText && this.canUseIncrementalUpdate(currentText, cached.documentText)) {
                 logger.info(`🚀 [PERF] Attempting incremental tokenization for ${document.uri}`);
                 const incStart = performance.now();
                 try {
                     const tokens = this.incrementalTokenize(document, cached, currentText);
                     if (tokens) {
-                        TokenCache.applyConditionalIncludes(tokens, document.uri, currentText); // #807
+                        const deps = TokenCache.applyConditionalIncludes(tokens, document.uri, currentText); // #807
+                        const entry = this.cache.get(TokenCache.canonicalKey(document.uri));
+                        if (entry) entry.conditionalDeps = deps.size ? deps : undefined;
                         const incTime = performance.now() - incStart;
                         const totalTime = performance.now() - perfStart;
                         logger.perf('Incremental tokenization', {
@@ -194,7 +200,7 @@ export class TokenCache {
             try {
                 const tokenizer = new ClarionTokenizer(document.getText());
                 const tokens = tokenizer.tokenize();
-                TokenCache.applyConditionalIncludes(tokens, document.uri, currentText); // #807
+                const conditionalDeps = TokenCache.applyConditionalIncludes(tokens, document.uri, currentText); // #807
 
                 // 🚀 PERFORMANCE: Build line-based cache
                 const cacheStart = performance.now();
@@ -217,7 +223,8 @@ export class TokenCache {
                     lineTokens,
                     documentText: currentText,
                     structure: structure,
-                    uri: document.uri
+                    uri: document.uri,
+                    conditionalDeps: conditionalDeps.size ? conditionalDeps : undefined,
                 });
                 
                 const fullTime = performance.now() - fullStart;
@@ -360,7 +367,7 @@ export class TokenCache {
         // same file share one entry instead of tokenizing twice into divergence.
         const key = TokenCache.canonicalKey(uri);
         const cached = this.closedFileCache.get(key);
-        if (cached && cached.mtimeMs === mtimeMs) {
+        if (cached && cached.mtimeMs === mtimeMs && dependenciesUnchanged(cached.conditionalDeps)) { // #807
             // LRU touch: re-insert so this entry becomes newest.
             this.closedFileCache.delete(key);
             this.closedFileCache.set(key, cached);
@@ -372,8 +379,8 @@ export class TokenCache {
             // tokenize() builds + runs DocumentStructure.process() internally; a
             // second process() here would be redundant (and double-push children).
             const tokens = new ClarionTokenizer(content).tokenize();
-            TokenCache.applyConditionalIncludes(tokens, uri, content); // #807
-            this.closedFileCache.set(key, { tokens, mtimeMs });
+            const conditionalDeps = TokenCache.applyConditionalIncludes(tokens, uri, content); // #807
+            this.closedFileCache.set(key, { tokens, mtimeMs, conditionalDeps: conditionalDeps.size ? conditionalDeps : undefined });
             // #260 — bounded: evict oldest entries past the cap (Map preserves
             // insertion order; hits above re-inserted, so first key = LRU).
             while (this.closedFileCache.size > TokenCache.closedFileCacheMax) {
@@ -586,27 +593,34 @@ export class TokenCache {
      * them). An accessor over the document, not a split of its text: this runs on every edit (#733).
      */
     /**
-     * #807 — DocumentStructure decides COMPILE/OMIT blocks without the file's path, so an INCLUDEd
-     * file's EQUATEs can only be found through the solution's redirection. Here the path is known:
-     * decide again with the file beside it too, and take the INCLUDEs of a block that does not
-     * compile out of the walk. Only for a file with such a directive.
+     * #807 — the one place a token list's INCLUDEs are decided: an INCLUDE in a COMPILE/OMIT block
+     * that does not compile keeps its file name for navigation (`inactiveFile`: F12, hover, links) but
+     * not `referencedFile`, so no walker follows it; one that compiles again (an edit, a changed
+     * version file) gets it back. Here the file's path is known, so a version file beside it counts.
+     * Returns the other files the decision was read from (empty: its own text alone).
      */
-    static applyConditionalIncludes(tokens: Token[], uri: string, text: string): void {
-        if (!/\b(?:OMIT|COMPILE)\s*\(/i.test(text)) return;
+    static applyConditionalIncludes(tokens: Token[], uri: string, text: string): Map<string, number> {
         const filePath = decodeURIComponent(uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\');
-        const inactive = inactiveIncludeLines(filePath, text);
+        const hinted = /\b(?:OMIT|COMPILE)\s*\(/i.test(text);
+        const inactive = hinted ? inactiveIncludeLines(filePath, text) : new Set<number>();
         for (const t of tokens) {
             if (t.type !== TokenType.Directive || t.value.toUpperCase() !== 'INCLUDE') continue;
             if (inactive.has(t.line)) {
+                const file = t.referencedFile ?? t.inactiveFile;
+                if (file) t.inactiveFile = file;
                 t.inactiveByCondition = true;
                 delete t.referencedFile;
+            } else if (t.inactiveByCondition) {
+                if (!t.referencedFile && t.inactiveFile) t.referencedFile = t.inactiveFile;
+                delete t.inactiveByCondition;
+                delete t.inactiveFile;
             }
         }
+        return hinted ? conditionalDependencies(filePath, text) : new Map();
     }
 
     static linesIfOmit(document: TextDocument): SourceLines | undefined {
-        // #807: COMPILE too, whose condition can decide an INCLUDE
-        if (!/\b(?:OMIT|COMPILE)\s*\(/i.test(document.getText())) return undefined;
+        if (!/\bOMIT\s*\(/i.test(document.getText())) return undefined;
         const length = document.lineCount;
         return {
             length,
