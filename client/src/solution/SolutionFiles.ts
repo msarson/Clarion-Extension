@@ -102,9 +102,11 @@ export function buildCwprojContent(spec: CwprojSpec): string {
 
 /**
  * A new program's main source. #795: an EXE's main CODE runs it; a DLL's is empty, as the
- * generator writes it (a DLL's procedures are called, its program never runs).
+ * generator writes it (a DLL's procedures are called, its program never runs). #796: the
+ * message's title is the project's name.
  */
-export function buildProgramContent(kind: 'exe' | 'dll'): string {
+export function buildProgramContent(kind: 'exe' | 'dll', name: string): string {
+    const title = name.replace(/'/g, "''");
     return [
         '  PROGRAM',
         '',
@@ -112,7 +114,7 @@ export function buildProgramContent(kind: 'exe' | 'dll'): string {
         '  END',
         '',
         '  CODE',
-        ...(kind === 'exe' ? ["  MESSAGE('Hello World')"] : []),
+        ...(kind === 'exe' ? [`  MESSAGE('Hello World','${title}')`] : []),
         '',
     ].join('\r\n').replace(/\r\n$/, kind === 'dll' ? '\r\n' : '');
 }
@@ -127,7 +129,7 @@ export function newProjectFiles(spec: { name: string; kind: 'exe' | 'dll'; mainF
     const at = (file: string) => spec.folder ? `${spec.folder}\\${file}` : file;
     const files = [
         { path: at(`${spec.name}.cwproj`), content: buildCwprojContent({ name: spec.name, guid: spec.guid, compile: [spec.mainFile], kind: spec.kind }) },
-        { path: at(spec.mainFile), content: buildProgramContent(spec.kind) },
+        { path: at(spec.mainFile), content: buildProgramContent(spec.kind, spec.name) },
     ];
     if (spec.kind === 'dll') files.push({ path: at(`${spec.name}.exp`), content: buildMinimalExpContent(spec.name) });
     return files;

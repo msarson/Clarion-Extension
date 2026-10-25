@@ -225,7 +225,7 @@ export async function newSolution(): Promise<void> {
     try {
         fs.writeFileSync(slnPath, buildSlnContent(specs), 'utf8');
         specs.forEach((s, i) => fs.writeFileSync(cwprojPaths[i], buildCwprojContent(s), 'utf8'));
-        if (clwPath) fs.writeFileSync(clwPath, buildProgramContent('exe'), 'utf8');
+        if (clwPath) fs.writeFileSync(clwPath, buildProgramContent('exe', trimmedName), 'utf8');
         logger.info(`✅ Created new solution: ${trimmedName} (${specs.length} project(s)) in ${folderPath}`);
 
         // Create the Clarion IDE preferences XML so the IDE recognises startup project + config

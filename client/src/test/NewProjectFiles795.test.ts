@@ -13,8 +13,15 @@ suite('Solution Properties: a new project\'s files (#795)', () => {
         assert.ok(files[0].content.includes('<OutputType>Exe</OutputType>'));
         assert.ok(files[0].content.includes('<Compile Include="Orders.clw" />'));
         assert.ok(files[0].content.includes('<ProjectGuid>{33333333-3333-3333-3333-333333333333}</ProjectGuid>'));
-        assert.strictEqual(files[1].content, buildProgramContent('exe'));
+        assert.strictEqual(files[1].content, buildProgramContent('exe', 'Orders'));
         assert.match(files[1].content, /CODE\r\n  MESSAGE/);
+    });
+
+    test('an EXE\'s message has the project\'s name as its title (#796)', () => {
+        assert.match(buildProgramContent('exe', 'Orders'), /  MESSAGE\('Hello World','Orders'\)/);
+        // A Clarion string doubles its apostrophe; New Solution's names may hold one.
+        assert.match(buildProgramContent('exe', "O'Brien"), /MESSAGE\('Hello World','O''Brien'\)/);
+        assert.doesNotMatch(buildProgramContent('dll', 'Common'), /MESSAGE/);
     });
 
     test('a DLL: an empty main CODE, and its export file', () => {
