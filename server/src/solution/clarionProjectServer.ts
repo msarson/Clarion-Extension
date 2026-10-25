@@ -30,6 +30,16 @@ function includeOf(item: unknown): string | null {
     return typeof value === 'string' && value.length > 0 ? value : null;
 }
 
+/**
+ * #802 — a project reference with no <Name> is named from its path, as the .sln names the project:
+ * either slash, `.cwproj` in any case, and MSBuild's %XX escapes decoded (as Compile items are).
+ */
+function referenceNameFromPath(include: string): string {
+    let decoded = include;
+    try { decoded = decodeURIComponent(include); } catch { /* not an escape: keep it as written */ }
+    return path.win32.basename(decoded).replace(/\.cwproj$/i, '');
+}
+
 export class ClarionProjectServer {
     sourceFiles: ClarionSourcerFileServer[] = [];
     fileDrivers: string[] = [];
@@ -199,7 +209,7 @@ export class ClarionProjectServer {
                         
                         if (projectGuid && (projectName || includePath)) {
                             this.projectReferences.push({
-                                name: projectName || (includePath ? path.basename(includePath, '.cwproj') : "Unknown"),
+                                name: projectName || (includePath ? referenceNameFromPath(includePath) : "Unknown"),
                                 project: projectGuid
                             });
                         }

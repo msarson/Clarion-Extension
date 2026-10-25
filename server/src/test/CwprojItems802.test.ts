@@ -58,4 +58,12 @@ suite('A .cwproj is read in full: drivers, libraries, None items and references 
         ]);
         assert.deepStrictEqual(project.projectReferences.map(r => r.name), ['Common', 'Util']);
     });
+
+    test('a reference named from its path: any case of .cwproj, MSBuild escapes decoded', async () => {
+        const project = await load([
+            '<ProjectReference Include="..\\Data\\Data.CWPROJ"><Project>{80200000-0000-0000-0000-000000000004}</Project></ProjectReference>',
+            '<ProjectReference Include="libs/My%20Lib.cwproj"><Project>{80200000-0000-0000-0000-000000000005}</Project></ProjectReference>',
+        ]);
+        assert.deepStrictEqual(project.projectReferences.map(r => r.name), ['Data', 'My Lib']);
+    });
 });
