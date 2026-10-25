@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { scanConditionalCompile } from './ConditionalCompile';
 import { resolveViaProjectRedirection } from './RedirectionResolution';
+import { isProjectDependency, projectDependencyHolds, projectSwitches } from '../solution/ProjectDefines';
 
 /**
  * #807 — the INCLUDE lines of a file that sit in a COMPILE/OMIT block decided not to compile, for
@@ -20,6 +21,9 @@ const MAX_DEPTH = 8;
 /** A file's EQUATEs, valid while it and every file it read keep their modification times. */
 const equatesCache = new Map<string, { deps: Map<string, number>; equates: Map<string, number> }>();
 const mtimeOf = (file: string): number | undefined => { try { return fs.statSync(file).mtimeMs; } catch { return undefined; } };
+/** A dependency still holds: a file at the time it was read (-1: still missing), or one of #812's project keys. */
+const depHolds = (file: string, mtimeMs: number): boolean =>
+    isProjectDependency(file) ? projectDependencyHolds(file) : (mtimeOf(file) ?? -1) === mtimeMs;
 
 /** The declaration index, once built (it holds every EQUATE by name and file); else undefined. */
 function builtIndex(): { find(name: string): { structureType?: string; filePath: string }[] } | undefined {
@@ -69,7 +73,7 @@ function equatesOfFile(file: string, visiting: Set<string>, depth: number, deep:
     // A deep read depends on which files were being read around it (a file's own include guard,
     // reached back through a cycle of INCLUDEs, must not decide it), so only shallow reads are reused.
     const cached = deep ? undefined : equatesCache.get(key);
-    if (cached && [...cached.deps].every(([f, m]) => mtimeOf(f) === m)) {
+    if (cached && [...cached.deps].every(([f, m]) => depHolds(f, m))) {
         for (const [f, m] of cached.deps) deps?.set(f, m);
         return cached.equates;
     }
@@ -131,13 +135,19 @@ export function inactiveIncludeLines(filePath: string | null, text: string): Set
     const key = filePath?.toLowerCase();
     const cached = key !== undefined ? resultCache.get(key) : undefined;
     const hash = key !== undefined ? hashOf(text) : '';
-    if (cached && cached.length === text.length && cached.hash === hash && [...cached.deps].every(([f, m]) => mtimeOf(f) === m)) return cached.lines;
+    if (cached && cached.length === text.length && cached.hash === hash && [...cached.deps].every(([f, m]) => depHolds(f, m))) return cached.lines;
 
     const visiting = new Set<string>(key ? [key] : []);
+    // #812: a file a project compiles has its project's switches. It depends on where they come
+    // from only when a condition asked for one: most blocks are decided by an EQUATE, and an answer
+    // with dependencies is not persisted by every cache.
+    const project = projectSwitches(filePath);
+    let askedProject = false;
     const deps = new Map<string, number>();
     // With the index built, read only the INCLUDEs that define a name, and only them.
     const deep = builtIndex() === undefined;
     const scan = scanConditionalCompile(text.split(/\r?\n/), {
+        lookup: name => { askedProject = true; return project.value(name); },
         includesDefining,
         equatesOfInclude: name => {
             const resolved = resolveInclude(name, filePath);
@@ -145,6 +155,7 @@ export function inactiveIncludeLines(filePath: string | null, text: string): Set
         },
     });
     const lines = new Set(scan.includes.filter(i => !i.active).map(i => i.line));
+    if (askedProject) for (const [f, m] of project.deps) deps.set(f, m);
     if (key !== undefined) {
         resultCache.delete(key);
         resultCache.set(key, { length: text.length, hash, deps, lines });
@@ -170,5 +181,5 @@ export function recordedDependencies(filePath: string): Map<string, number> {
 
 /** Whether every file in `deps` still has the time it was read at. */
 export function dependenciesUnchanged(deps: Map<string, number> | undefined): boolean {
-    return !deps || [...deps].every(([f, m]) => mtimeOf(f) === m);
+    return !deps || [...deps].every(([f, m]) => depHolds(f, m));
 }

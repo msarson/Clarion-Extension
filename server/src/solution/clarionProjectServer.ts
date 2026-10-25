@@ -56,6 +56,8 @@ export interface LegacyProjectRead {
     uncertain: boolean;
     /** Every file whose change would change what it says: itself (where it would be, when missing) and what it #includes. */
     watch: string[];
+    /** #812: each source's own `/define(...)` on its #compile line, by file name in lower case. */
+    fileDefines: Record<string, Record<string, string>>;
 }
 
 export class ClarionProjectServer {
@@ -444,7 +446,7 @@ export class ClarionProjectServer {
             // A .prj not there yet is watched where it would be, so it is read once it appears.
             const read: LegacyProjectRead = {
                 file: written, path: prjPath ?? undefined, found: false, defines: {}, includes: [], uncertain: false,
-                watch: [prjPath ?? path.resolve(this.path, written)],
+                watch: [prjPath ?? path.resolve(this.path, written)], fileDefines: {},
             };
             this.legacyProjects.push(read);
             if (!prjPath) {
@@ -468,6 +470,9 @@ export class ClarionProjectServer {
             read.defines = parsed.defines;
             read.includes = parsed.includes;
             read.uncertain = parsed.uncertain;
+            for (const compile of parsed.compiles) {
+                if (Object.keys(compile.defines).length) read.fileDefines[path.win32.basename(compile.file).toLowerCase()] = compile.defines;
+            }
 
             for (const compile of parsed.compiles) {
                 if (!/\.clw$/i.test(compile.file)) continue;

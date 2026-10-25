@@ -14,8 +14,8 @@ import * as path from 'path';
 import * as os from 'os';
 import { inactiveIncludeLines, recordedDependencies } from './ConditionalIncludes';
 
-/** iv-includes.json format: 2 since #807 (an INCLUDE in a block that does not compile is not listed). */
-const IV_LIST_VERSION = 2;
+/** iv-includes.json format: 2 since #807 (an INCLUDE in a block that does not compile is not listed); 3 since #812 (project defines decide blocks). */
+const IV_LIST_VERSION = 3;
 
 const logger = LoggerManager.getLogger('IncludeVerifier');
 logger.setLevel('error');

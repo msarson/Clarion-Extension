@@ -57,7 +57,7 @@ export interface FileEdge {
 // before the solution's redirection parsers were primed, so every MEMBER('x.clw')
 // resolution failed and the persisted edge lists were missing their MEMBER edges
 // (Mark's VM: frg_member_edges_by_basename=0 with reused_from_disk=2987).
-const DISK_CACHE_VERSION = 4; // #484 — MODULE edges to binaries dropped; #807 — no edge for an INCLUDE in a block that does not compile
+const DISK_CACHE_VERSION = 5; // #484 — MODULE edges to binaries dropped; #807 — no edge for an INCLUDE in a block that does not compile; #812 — blocks on project defines decided
 
 /** #807: `deps` — the other files the entry's COMPILE/OMIT decisions were read from, and their times. */
 interface FrgDiskCacheEntry { mtimeMs: number; edges: FileEdge[]; deps?: Record<string, number>; }
