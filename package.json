@@ -838,7 +838,7 @@
         },
         {
           "command": "clarion.newSolution",
-          "when": "view == solutionView && !clarion.solutionOpen && workspaceFolderCount > 0",
+          "when": "view == solutionView && !clarion.solutionOpen",
           "group": "navigation@0"
         },
         {
@@ -987,8 +987,8 @@
       },
       {
         "view": "solutionView",
-        "contents": "Or make one from this folder: from the programs already in it, or a new empty program.\n\n[New Solution](command:clarion.newSolution)",
-        "when": "!clarion.solutionOpen && workspaceFolderCount > 0"
+        "contents": "Or make a new one, from the programs in a folder or as a new empty program.\n\n[New Solution](command:clarion.newSolution)",
+        "when": "!clarion.solutionOpen"
       }
     ],
     "snippets": [

@@ -66,12 +66,33 @@ suite('New Solution: one form (#792)', () => {
         const base = { ...defaultFormChoices(input(), 'Sales', { propertiesFile: C10.propertiesFile, version: 'Clarion 10.0 (legacy)' }), configuration: 'Release' };
         const empty = formResult(input(), { ...base, start: 'empty' });
         assert.deepStrictEqual(empty && { ...empty }, {
-            propertiesFile: C10.propertiesFile, compiler: 'Clarion 10.0 (legacy)', configuration: 'Release', name: 'Sales', start: 'empty', mainFile: 'Sales.clw',
+            folder: 'C:/Apps/Sales', propertiesFile: C10.propertiesFile, compiler: 'Clarion 10.0 (legacy)', configuration: 'Release', name: 'Sales', start: 'empty', mainFile: 'Sales.clw',
         });
         const programs = formResult(input({ review: review('Clarion 10.0 (legacy)') }), base);
         assert.strictEqual(programs?.start, 'programs');
         assert.deepStrictEqual(programs?.start === 'programs' ? programs.specs.map(s => s.name) : [], ['Sales', 'Common']);
         assert.strictEqual(formResult(input(), base), undefined, 'no projects yet: nothing to create');
         assert.strictEqual(formResult(input(), { ...base, propertiesFile: undefined, start: 'empty' }), undefined, 'no installation chosen');
+    });
+});
+
+suite('New Solution: the folder it is made in (#792)', () => {
+    const C12 = { propertiesFile: 'C:/C12/ClarionProperties.xml', ideVersion: '12.0', compilers: ['Clarion 12.0.14373'] };
+
+    test('with no folder chosen, the page asks for one and cannot create', () => {
+        const input = { folder: '', installations: [C12], programs: 0, tooLarge: false };
+        const state = buildFormState(input, defaultFormChoices(input, '', {}));
+        assert.strictEqual(state.folder.needs, true);
+        assert.strictEqual(state.canCreate, false);
+        assert.strictEqual(state.title, 'New solution');
+    });
+
+    test('a chosen folder is shown, and the solution is made in it', () => {
+        const input = { folder: 'D:/Apps/Orders', installations: [C12], programs: 0, tooLarge: false };
+        const choices = defaultFormChoices(input, 'Orders', {});
+        const state = buildFormState(input, choices);
+        assert.deepStrictEqual([state.folder.value, state.folder.needs], ['D:/Apps/Orders', false]);
+        assert.strictEqual(state.title, 'New solution in D:/Apps/Orders');
+        assert.strictEqual(formResult(input, choices)?.folder, 'D:/Apps/Orders');
     });
 });

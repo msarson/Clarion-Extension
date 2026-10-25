@@ -64,7 +64,8 @@ suite('The Actions pane is retired (#794)', () => {
             assert.ok(text.includes(`(command:${id})`), `${id} is offered`);
         }
         const fresh = welcome.find((w: { contents: string }) => w.contents.includes('command:clarion.newSolution'));
-        assert.match(fresh.when, /workspaceFolderCount > 0/, 'New Solution needs a folder to write into');
+        // #792: New Solution chooses its own folder on its page, so it is offered with no folder open too.
+        assert.doesNotMatch(fresh.when, /workspaceFolderCount/, 'New Solution needs no open folder');
     });
 
     test('the Solution page shows the rows the pane showed', () => {

@@ -70,8 +70,9 @@ The containing folder opens automatically, and the solution is loaded.
 
 ### Method 4: Create New Solution (Wizard)
 
-**Make a solution in the open folder:** click the **`+`** button in the Solution View toolbar, or run `Clarion: New Solution` from the Command Palette (`Ctrl+Shift+P`). One page asks everything:
+**Make a new solution:** click the **`+`** button in the Solution View toolbar, or run `Clarion: New Solution` from the Command Palette (`Ctrl+Shift+P`). One page asks everything:
 
+- **Folder:** the open folder to start with; **Choose folder…** picks another, or creates one. Made in another folder, the window then opens that folder with the solution.
 - **Build with:** the Clarion installation, compiler version and configuration. **Browse…** finds an installation outside the standard locations.
 - **Start from:** the programs already in the folder, or a new empty program.
   - **From the programs:** the page shows one project per program, as an EXE or a DLL, with its sources, the projects it references and its export file. It also lists the modules it could not place and possible leftovers, so you can settle them before anything is written.

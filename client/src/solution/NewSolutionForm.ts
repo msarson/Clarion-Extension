@@ -9,6 +9,7 @@ import { buildReviewState, CONFIGURATIONS, NewProjectSpec, ReviewChoices, Review
 import { ChoiceField, InstallationOption, settleChoice, SolutionChoice } from './SolutionPage';
 
 export interface FormInput {
+    /** The folder the solution is made in; '' until one is chosen (no folder is open). */
     folder: string;
     installations: InstallationOption[];
     /** The programs the folder holds; 0 when it holds none, or too many files to read. */
@@ -31,6 +32,7 @@ export interface FormChoices extends ReviewChoices {
 
 export interface FormState {
     title: string;
+    folder: { value: string; needs: boolean };
     installation: ChoiceField;
     version: ChoiceField;
     configuration: string;
@@ -48,7 +50,7 @@ export interface FormState {
     canCreate: boolean;
 }
 
-export type FormResult = { propertiesFile: string; compiler: string; configuration: string; name: string }
+export type FormResult = { folder: string; propertiesFile: string; compiler: string; configuration: string; name: string }
     & ({ start: 'programs'; specs: NewProjectSpec[]; missingProgram: string[] } | { start: 'empty'; mainFile: string });
 
 
@@ -92,7 +94,8 @@ export function buildFormState(input: FormInput, choices: FormChoices): FormStat
     const fileError = start === 'empty' ? mainFileError(mainFile) : undefined;
     const nameError = solutionNameError(choices.name);
     return {
-        title: `New solution in ${input.folder}`,
+        title: input.folder ? `New solution in ${input.folder}` : 'New solution',
+        folder: { value: input.folder, needs: !input.folder },
         installation: {
             value: installation?.propertiesFile ?? '',
             options: input.installations.map(i => ({ value: i.propertiesFile, label: `Clarion ${i.ideVersion}` })),
@@ -115,13 +118,14 @@ export function buildFormState(input: FormInput, choices: FormChoices): FormStat
         },
         review,
         waiting: start !== 'programs' || review ? undefined
+            : !input.folder ? 'Choose the folder to see its projects.'
             : chosen ? 'Finding the projects…' : 'Choose the Clarion installation and compiler version to see the projects.',
         name: choices.name,
         nameError,
         mainFile,
         mainFileError: fileError,
         createLabel: start === 'empty' ? 'Create the solution' : review?.createLabel ?? 'Create',
-        canCreate: chosen && !nameError && (start === 'empty' ? !fileError : !!review?.canCreate),
+        canCreate: chosen && !!input.folder && !nameError && (start === 'empty' ? !fileError : !!review?.canCreate),
     };
 }
 
@@ -129,7 +133,7 @@ export function buildFormState(input: FormInput, choices: FormChoices): FormStat
 export function formResult(input: FormInput, choices: FormChoices): FormResult | undefined {
     const state = buildFormState(input, choices);
     if (!state.canCreate) return undefined;
-    const base = { propertiesFile: state.installation.value, compiler: state.version.value, configuration: choices.configuration, name: choices.name.trim() };
+    const base = { folder: input.folder, propertiesFile: state.installation.value, compiler: state.version.value, configuration: choices.configuration, name: choices.name.trim() };
     if (state.start.value === 'empty') return { ...base, start: 'empty', mainFile: state.mainFile.trim() };
     const result = input.review && reviewResult(input.review, choices);
     return result && input.review

@@ -1,4 +1,5 @@
 import * as vscode from 'vscode';
+import * as path from 'path';
 import LoggerManager from '../utils/LoggerManager';
 import { ClarionInstallation, ClarionInstallationDetector } from '../utils/ClarionInstallationDetector';
 import { pageHtml as kitPage } from '../webview/PageKit';
@@ -10,7 +11,7 @@ const logger = LoggerManager.getLogger('NewSolutionReviewPanel');
 logger.setLevel('error');
 
 type FormMessage =
-    | { type: 'ready' | 'create' | 'cancel' | 'browse' }
+    | { type: 'ready' | 'create' | 'cancel' | 'browse' | 'folder' }
     | { type: 'include' | 'keep'; key: string; value: boolean }
     | { type: 'kind'; key: string; value: 'exe' | 'dll' }
     | { type: 'place'; key: string; value: string }
@@ -20,8 +21,8 @@ type FormMessage =
 /** What New Solution goes on with: the page's result, with the installation it names. */
 export type NewSolutionChoice = FormResult & { installation: ClarionInstallation };
 
+/** What New Solution reads from a folder: its programs, and its proposal for a selection. */
 export interface NewSolutionFolder {
-    folder: string;
     programs: number;
     tooLarge: boolean;
     /** The folder's proposal for an installation, compiler version and configuration. */
@@ -37,16 +38,17 @@ export interface NewSolutionFolder {
  * or closes the page.
  */
 export function showNewSolutionForm(
-    folder: NewSolutionFolder,
+    startFolder: string,
+    readFolder: (folder: string) => Promise<NewSolutionFolder>,
     detected: ClarionInstallation[],
-    solutionName: string,
     remembered: SolutionChoice,
 ): Promise<NewSolutionChoice | undefined> {
     return new Promise(resolve => {
         const installations = [...detected];
         const toOption = (i: ClarionInstallation) => ({ propertiesFile: i.propertiesPath, ideVersion: i.ideVersion, compilers: i.compilerVersions.map(c => c.name) });
-        const input: FormInput = { folder: folder.folder, installations: installations.map(toOption), programs: folder.programs, tooLarge: folder.tooLarge };
-        let choices: FormChoices = defaultFormChoices(input, solutionName, remembered);
+        const input: FormInput = { folder: '', installations: installations.map(toOption), programs: 0, tooLarge: false };
+        let choices: FormChoices = defaultFormChoices(input, '', remembered);
+        let folder: NewSolutionFolder | undefined;
         let busy = false, settled = false, generation = 0, reviewedFor = '';
         const panel = vscode.window.createWebviewPanel('clarion.newSolutionReview', 'New Solution', vscode.ViewColumn.Active, { enableScripts: true, retainContextWhenHidden: true });
         panel.webview.html = pageHtml(panel.webview);
@@ -67,7 +69,7 @@ export function showNewSolutionForm(
             const state = buildFormState(input, choices);
             const installation = installations.find(i => i.propertiesPath === state.installation.value);
             const key = `${state.installation.value}|${state.version.value}|${choices.configuration}`;
-            if (state.start.value !== 'programs' || !installation || !state.version.value || key === reviewedFor) return;
+            if (!folder || state.start.value !== 'programs' || !installation || !state.version.value || key === reviewedFor) return;
             reviewedFor = key;
             const mine = ++generation;
             busy = true;
@@ -84,6 +86,32 @@ export function showNewSolutionForm(
             }
         };
 
+        /**
+         * Reads `chosen` and shows it: its programs, and its proposal. The name follows the folder's
+         * until the user types another, and the choices about the old folder's programs are dropped.
+         */
+        const useFolder = async (chosen: string) => {
+            const mine = ++generation;
+            busy = true;
+            post();
+            try {
+                const read = await readFolder(chosen);
+                if (mine !== generation) return;
+                const followsFolder = !choices.name.trim() || choices.name === path.basename(input.folder);
+                folder = read;
+                Object.assign(input, { folder: chosen, programs: read.programs, tooLarge: read.tooLarge, review: undefined });
+                reviewedFor = '';
+                choices = {
+                    ...choices, included: {}, kinds: {}, placement: {}, kept: {},
+                    name: followsFolder ? path.basename(chosen) : choices.name,
+                    start: read.programs > 0 ? 'programs' : 'empty',
+                };
+            } finally {
+                if (mine === generation) busy = false;
+            }
+            await review();
+        };
+
         panel.webview.onDidReceiveMessage(async (msg: FormMessage) => {
             try {
                 switch (msg.type) {
@@ -98,6 +126,14 @@ export function showNewSolutionForm(
                     case 'installation': choices = { ...choices, propertiesFile: msg.value, version: undefined }; await review(); break;
                     case 'version': choices = { ...choices, version: msg.value }; await review(); break;
                     case 'configuration': choices = { ...choices, configuration: msg.value }; await review(); break;
+                    case 'folder': {
+                        const picked = await vscode.window.showOpenDialog({
+                            title: 'The folder for the new solution', canSelectFolders: true, canSelectFiles: false, canSelectMany: false,
+                            openLabel: 'Use this folder', defaultUri: input.folder ? vscode.Uri.file(input.folder) : undefined,
+                        });
+                        if (picked?.length) await useFolder(picked[0].fsPath);
+                        break;
+                    }
                     case 'browse': {
                         const picked = await vscode.window.showOpenDialog({
                             title: 'Select ClarionProperties.xml', filters: { ClarionProperties: ['xml'] }, canSelectMany: false, openLabel: 'Select',
@@ -129,7 +165,10 @@ export function showNewSolutionForm(
                 post();
             }
         });
-        void review().then(post, err => logger.error(`❌ New Solution: ${err instanceof Error ? err.message : String(err)}`));
+        void (startFolder ? useFolder(startFolder) : Promise.resolve()).then(post, err => {
+            logger.error(`❌ New Solution: ${err instanceof Error ? err.message : String(err)}`);
+            post();
+        });
     });
 }
 
@@ -164,6 +203,13 @@ function pageHtml(webview: vscode.Webview): string {
   <div class="title"><h1 id="title">New solution</h1><div class="muted" id="summary"></div></div>
 </header>
 <main>
+  <section>
+    <h2>Folder</h2>
+    <div class="row"><div class="label" id="folder-label"></div><div class="control"><div class="with-button">
+      <span id="folder-path"></span>
+      <button class="secondary" id="folder" type="button" title="Choose or create the folder the solution is made in">Choose folder…</button>
+    </div></div></div>
+  </section>
   <section>
     <h2>Build with</h2>
     <div class="row"><div class="label" id="installation-label"></div><div class="control"><div class="with-button">
@@ -217,6 +263,7 @@ function pageHtml(webview: vscode.Webview): string {
   for (const id of ['installation', 'version', 'configuration']) $(id).addEventListener('change', e => post({ type: id, value: e.target.value }));
   for (const id of ['start-programs', 'start-empty']) $(id).addEventListener('change', e => { if (e.target.checked) post({ type: 'start', value: e.target.value }); });
   $('browse').addEventListener('click', () => post({ type: 'browse' }));
+  $('folder').addEventListener('click', () => post({ type: 'folder' }));
   $('create').addEventListener('click', () => post({ type: 'create' }));
   $('cancel').addEventListener('click', () => post({ type: 'cancel' }));
 
@@ -273,6 +320,9 @@ function pageHtml(webview: vscode.Webview): string {
     const r = state.review;
     $('title').textContent = state.title;
     $('summary').textContent = (r ? r.summary : '') + (busy ? (r ? ' · ' : '') + 'finding the library sources…' : '');
+    $('folder-label').replaceChildren(el('span', { class: state.folder.needs ? 'needs-text' : '' }, 'Make it in'), state.folder.needs ? el('span', { class: 'muted' }, 'Choose a folder') : '');
+    $('folder-path').textContent = state.folder.value || 'No folder chosen';
+    $('folder').disabled = busy;
     fillChoice('installation', 'Clarion installation', state.installation);
     fillChoice('version', 'Compiler version', state.version);
     const cfg = $('configuration');

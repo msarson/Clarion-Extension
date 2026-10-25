@@ -6,7 +6,8 @@ import { writeIdePreferences } from '../solution/ClarionIdePreferences';
 import { buildCwprojContent, buildMinimalExpContent, buildSlnContent, generateGuid } from '../solution/SolutionFiles';
 import { classifySource, findLibraryFiles, inferProjects, SourceFile } from '../solution/FolderProjectInference';
 import { NewProjectSpec, ReviewInput } from '../solution/NewSolutionReview';
-import { showNewSolutionForm } from '../solution/NewSolutionReviewPanel';
+import { NewSolutionFolder, showNewSolutionForm } from '../solution/NewSolutionReviewPanel';
+import { GlobalSolutionHistory } from '../utils/GlobalSolutionHistory';
 import { getLanguageClient, isClientReady } from '../LanguageClientManager';
 import { versionPathSettings } from '../utils/VersionPathSettings';
 import { ClarionInstallation, ClarionInstallationDetector } from '../utils/ClarionInstallationDetector';
@@ -151,30 +152,12 @@ async function confirmOverwrite(paths: string[]): Promise<boolean> {
 }
 
 /**
- * Creates a new Clarion solution in the open workspace folder: from the programs already in it
- * (#763), or a new empty program (.sln + .cwproj + .clw).
+ * Creates a new Clarion solution in a folder chosen on its page (the open one to start with): from
+ * the programs already in it (#763), or a new empty program (.sln + .cwproj + .clw). Made in another
+ * folder, the window then opens that folder with the solution.
  */
 export async function newSolution(): Promise<void> {
-    const workspaceFolders = vscode.workspace.workspaceFolders;
-    if (!workspaceFolders || workspaceFolders.length === 0) {
-        vscode.window.showErrorMessage('Open a folder first before creating a new Clarion solution.');
-        return;
-    }
-
-    const folderPath = workspaceFolders[0].uri.fsPath;
-    const defaultName = path.basename(folderPath);
-
-    // #763: a folder that already has programs can become their solution.
-    const scan = await vscode.window.withProgress(
-        { location: vscode.ProgressLocation.Window, title: 'Reading the Clarion sources in this folder' },
-        () => readSourceFiles(folderPath));
-    let programs = 0;
-    if (!scan.tooLarge) {
-        if (scan.unreadable > 0) {
-            vscode.window.showWarningMessage(`${plural(scan.unreadable, 'file or folder')} could not be read and ${scan.unreadable === 1 ? 'is' : 'are'} not part of the new solution.`);
-        }
-        programs = scan.files.filter(f => /\.clw$/i.test(f.relPath) && classifySource(f.text).kind === 'program').length;
-    }
+    const openFolder = vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '';
 
     // The page starts on the default for new solutions (Set Version › Set as default for new
     // solutions), not the version in use, which is the last solution's. With no default it asks,
@@ -192,28 +175,45 @@ export async function newSolution(): Promise<void> {
         if (current) installations.push(current);
     }
 
-    /**
-     * The folder's proposal for a selection: library sources the folder's directives reach through
-     * its redirection (a MAP MODULE in CWUTIL.INC needs cwutil.clw listed; without the server, the
-     * folder alone is used), and where each program's export file would be found.
-     */
-    const reviewInput = async (installation: ClarionInstallation, compilerName: string, configuration: string): Promise<ReviewInput> => {
-        const libraries = await vscode.window.withProgress(
-            { location: vscode.ProgressLocation.Window, title: 'Finding the library sources this folder uses' },
-            () => findLibraryFiles(scan.files,
-                names => lookupLibrarySources(folderPath, installation, compilerName, configuration, names),
-                readLibraryFile));
-        const inference = inferProjects(scan.files, libraries);
-        const exportFiles = await findExportFiles(folderPath, installation, compilerName, configuration,
-            inference.projects.map(p => `${p.name}.exp`));
-        return { folder: folderPath, files: scan.files, libraries, inference, exportFiles, compiler: compilerName, sourceCount: scan.files.length };
+    /** #763: what a folder offers: the programs already in it, and its proposal for a selection. */
+    const readFolder = async (folderPath: string): Promise<NewSolutionFolder> => {
+        const scan = await vscode.window.withProgress(
+            { location: vscode.ProgressLocation.Window, title: 'Reading the Clarion sources in this folder' },
+            () => readSourceFiles(folderPath));
+        let programs = 0;
+        if (!scan.tooLarge) {
+            if (scan.unreadable > 0) {
+                vscode.window.showWarningMessage(`${plural(scan.unreadable, 'file or folder')} could not be read and ${scan.unreadable === 1 ? 'is' : 'are'} not part of the new solution.`);
+            }
+            programs = scan.files.filter(f => /\.clw$/i.test(f.relPath) && classifySource(f.text).kind === 'program').length;
+        }
+        return {
+            programs,
+            tooLarge: scan.tooLarge,
+            /**
+             * The library sources the folder's directives reach through the selection's redirection
+             * (a MAP MODULE in CWUTIL.INC needs cwutil.clw listed; without the server, the folder
+             * alone is used), and where each program's export file would be found.
+             */
+            review: async (installation: ClarionInstallation, compilerName: string, configuration: string): Promise<ReviewInput> => {
+                const libraries = await vscode.window.withProgress(
+                    { location: vscode.ProgressLocation.Window, title: 'Finding the library sources this folder uses' },
+                    () => findLibraryFiles(scan.files,
+                        names => lookupLibrarySources(folderPath, installation, compilerName, configuration, names),
+                        readLibraryFile));
+                const inference = inferProjects(scan.files, libraries);
+                const exportFiles = await findExportFiles(folderPath, installation, compilerName, configuration,
+                    inference.projects.map(p => `${p.name}.exp`));
+                return { folder: folderPath, files: scan.files, libraries, inference, exportFiles, compiler: compilerName, sourceCount: scan.files.length };
+            },
+        };
     };
 
-    // #792 — one page asks everything: the installation, compiler version and configuration, the
-    // programs in the folder or a new empty program (and its main file), and the name.
-    const choice = await showNewSolutionForm(
-        { folder: folderPath, programs, tooLarge: scan.tooLarge, review: reviewInput }, installations, defaultName, remembered);
+    // #792 — one page asks everything: the folder, the installation, compiler version and
+    // configuration, the programs in the folder or a new empty program (and its main file), and the name.
+    const choice = await showNewSolutionForm(openFolder, readFolder, installations, remembered);
     if (!choice) return;
+    const folderPath = choice.folder;
     const installResult = { installation: choice.installation, compilerName: choice.compiler };
     const configChoice = choice.configuration;
     const trimmedName = choice.name;
@@ -297,6 +297,15 @@ export async function newSolution(): Promise<void> {
         vscode.window.showWarningMessage(
             `${needGenerator.join(', ')} ${needGenerator.length === 1 ? 'is a DLL whose export file was' : 'are DLLs whose export files were'} not found (${needGenerator.map(n => n + '.exp').join(', ')}). ` +
             `Generate the application in the Clarion IDE to write ${needGenerator.length === 1 ? 'it' : 'them'}, or mark the exported procedures with EXPORT.`);
+    }
+
+    // Made in another folder (or with none open): the window opens that folder, and the restarted
+    // window loads the solution from the history, with the selection made for it (#780).
+    if (!openFolder || path.resolve(openFolder).toLowerCase() !== path.resolve(folderPath).toLowerCase()) {
+        await GlobalSolutionHistory.addSolution(slnPath, folderPath,
+            installResult.installation.propertiesPath, installResult.compilerName, configChoice);
+        await vscode.commands.executeCommand('vscode.openFolder', vscode.Uri.file(folderPath), false);
+        return;
     }
 
     // Step 8: Open with pre-selected values — skips all pickers in openDetectedSolution
