@@ -25,6 +25,7 @@ All notable changes to the Clarion Extension are documented here.
 - **An interface method whose prototype spans several lines is no longer reported as not implemented.** Its parameters were counted from the first line only, so an implementation with the full list never matched; a label continued onto the next line was read as `|`. [#805](https://github.com/msarson/Clarion-Extension/issues/805)
 - **A misspelt attribute on a declaration is reported.** A word in attribute position that is not a Clarion attribute, such as IMPLUMENTS on a CLASS or a typo on a variable or a window control, gets the compiler's "Unknown attribute" warning. [#806](https://github.com/msarson/Clarion-Extension/issues/806)
 - **A class implementing a derived interface is warned when it leaves out an inherited method.** For `IChild INTERFACE(IParent)`, the methods IChild inherits must also be implemented, as `Class.IChild.Method`; the check counted only IChild's own methods. [#797](https://github.com/msarson/Clarion-Extension/issues/797)
+- **A RETURN on one branch of an EXECUTE no longer greys out the branches after it.** Each statement of an EXECUTE, or a BEGIN ... END block, is its own branch and only one runs, so the next one is still reachable. [#808](https://github.com/msarson/Clarion-Extension/issues/808)
 
 #### Syntax
 
