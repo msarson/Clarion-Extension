@@ -116,8 +116,9 @@ export class SolutionManager {
                 await instance.initialize();
                 // A project file written while this parse ran may have been read before the write:
                 // record no time for it (-2), so the next load reads it again.
+                // #758: so does a legacy .prj/.pr a project includes.
                 instance.parsedProjectMtimes = new Map((instance.solution?.projects ?? [])
-                    .map(p => path.join(p.path, p.filename))
+                    .flatMap(p => [path.join(p.path, p.filename), ...(p.legacyProjects ?? []).flatMap(l => l.path ? [l.path] : [])])
                     .map(file => {
                         const mtime = SolutionManager.mtimeOf(file);
                         // Whole milliseconds, strictly later: a file time has sub-millisecond precision,

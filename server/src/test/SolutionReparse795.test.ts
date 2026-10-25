@@ -102,6 +102,24 @@ suite('A changed .sln is read again on the next load (#795)', () => {
         assert.deepStrictEqual(sources(), ['main.clw', 'extra.clw']);
     });
 
+    // #758 — a legacy .prj the project includes is one of its files too.
+    test('bug-pin: an included .prj changed after loading is read again on the next load (#758)', async () => {
+        const sources = () => SolutionManager.getInstance()!.solution.projects[0].sourceFiles.map(f => f.name);
+        const proj = path.join(tmpRoot, 'Sales.cwproj');
+        fs.writeFileSync(proj, fs.readFileSync(proj, 'utf8').replace('<Compile Include="main.clw" />', '<Include Include="Sales.prj" />'));
+        fs.writeFileSync(path.join(tmpRoot, 'Sales.prj'), '#compile main.clw\r\n');
+        fs.writeFileSync(path.join(tmpRoot, 'extra.clw'), '  MEMBER()\r\n');
+        await SolutionManager.create(sln);
+        assert.deepStrictEqual(sources(), ['main.clw']);
+
+        fs.writeFileSync(path.join(tmpRoot, 'Sales.prj'), '#compile main.clw\r\n#compile extra.clw\r\n');
+        const later = new Date(Date.now() + 5000);
+        fs.utimesSync(path.join(tmpRoot, 'Sales.prj'), later, later);
+
+        await SolutionManager.create(sln);
+        assert.deepStrictEqual(sources(), ['main.clw', 'extra.clw']);
+    });
+
     test('a project file that disappears also counts as a change (#801)', async () => {
         const first = await SolutionManager.create(sln);
         fs.rmSync(path.join(tmpRoot, 'Sales.cwproj'));
