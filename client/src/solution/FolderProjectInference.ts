@@ -23,6 +23,7 @@
  *   MODULE block declares (left unlisted, it fails Unresolved External).
  */
 import { clarionSourceCandidates } from '../../../common/ClarionSourceNaming';
+import { parseLegacyProject } from '../../../common/LegacyProject';
 
 export interface SourceFile { relPath: string; text: string }
 export type SourceKind = { kind: 'program' } | { kind: 'member'; program: string } | { kind: 'bareMember' } | { kind: 'other' };
@@ -40,6 +41,8 @@ export interface InferredProject {
     references: string[];
     /** A MAP prototype it compiles carries EXPORT, so a minimal .exp exports what it needs. */
     exportsMarked: boolean;
+    /** #811: the legacy .prj/.pr (relative path) whose #compile list this project's sources are. */
+    legacyProject?: string;
 }
 export interface FolderInference {
     projects: InferredProject[];
@@ -198,6 +201,8 @@ const safeName = (name: string) => name.replace(/[$@%;'"\x00-\x1f]/g, '_');
 export interface InferOptions {
     /** The compile lists the user settled on, by program file: references, exports and libraries follow them. */
     compile?: Map<string, string[]>;
+    /** #811: the folder's legacy project files (.prj, .pr) and the .pi files they may #include. */
+    legacyProjects?: SourceFile[];
 }
 
 export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = [], options: InferOptions = {}): FolderInference {
@@ -335,6 +340,44 @@ export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = 
     // Longest first, so <Prog>_Tools_BC0 goes to Prog_Tools rather than Prog.
     const prefixes = [...byStem.keys()].sort((a, b) => b.length - a.length);
 
+    // #811 — a legacy .prj/.pr that #compiles a program says what its project compiles: its .clw
+    // files, the one beside the program where several folders hold a name, a file not in the folder
+    // by its bare name (redirection finds it). The nearest .prj wins: in the program's folder, else
+    // the closest folder above it. Nothing is guessed for such a project.
+    const legacyFiles = options.legacyProjects ?? [];
+    const nearest = <T>(items: T[], dirOf: (t: T) => string, from: string): T | undefined => {
+        let best: T | undefined, bestScore = -1;
+        for (const item of items) {
+            const d = dirOf(item);
+            const score = d === from ? Number.MAX_SAFE_INTEGER : d === '' || from.startsWith(d + '\\') ? d.length : -1;
+            if (score > bestScore) { best = item; bestScore = score; }
+        }
+        return best;
+    };
+    const legacyParsed = legacyFiles.filter(l => /\.prj?$/i.test(l.relPath)).map(l => ({
+        relPath: l.relPath,
+        compiles: parseLegacyProject(l.text, {
+            read: name => nearest(legacyFiles.filter(x => baseName(x.relPath).toLowerCase() === baseName(name).toLowerCase()),
+                x => dirName(x.relPath), dirName(l.relPath))?.text,
+        }).compiles.map(c => c.file).filter(isClw),
+    }));
+    const placedByLegacy = new Set<SourceFile>();
+    for (const program of programs) {
+        const name = baseName(program.relPath).toLowerCase();
+        const legacy = nearest(legacyParsed.filter(l => l.compiles.some(c => baseName(c).toLowerCase() === name)),
+            l => dirName(l.relPath), dirName(program.relPath));
+        if (!legacy) continue;
+        const project = projectOf.get(program)!;
+        project.legacyProject = legacy.relPath;
+        for (const compile of legacy.compiles) {
+            if (baseName(compile).toLowerCase() === name) continue;
+            const file = resolve(compile, program);
+            const entry = file && !library.has(file) ? file.relPath : compile;
+            if (file && !library.has(file)) placedByLegacy.add(file);
+            if (!project.compile.some(c => c.toLowerCase() === entry.toLowerCase())) project.compile.push(entry);
+        }
+    }
+
     const unassigned: string[] = [], missingProgram: string[] = [], ambiguous: FolderInference['ambiguous'] = [], classImplementations: string[] = [];
     /** Adds the module to its program; between programs of one name, the path a MEMBER names, then the module's own folder decides. */
     const assign = (f: SourceFile, candidates: SourceFile[], target = '') => {
@@ -343,10 +386,12 @@ export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = 
             if (named.length > 0) candidates = named;
         }
         const owner = candidates.length === 1 ? candidates[0] : candidates.find(c => dirName(c.relPath) === dirName(f.relPath));
-        if (owner) projectOf.get(owner)!.compile.push(f.relPath);
+        // #811: a project its .prj describes compiles what the .prj lists, and nothing else.
+        if (owner) { if (!projectOf.get(owner)!.legacyProject) projectOf.get(owner)!.compile.push(f.relPath); }
         else ambiguous.push({ file: f.relPath, candidates: candidates.map(c => projectOf.get(c)!.name) });
     };
     for (const f of clw) {
+        if (placedByLegacy.has(f)) continue;
         const k = kinds.get(f)!;
         if (k.kind === 'member') {
             const candidates = byStem.get(k.program);
@@ -492,8 +537,10 @@ export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = 
 
     for (const program of programs) {
         const project = projectOf.get(program)!;
-        const reached = reachedModules(program);
-        project.unreferenced = project.compile.slice(1).filter(m => !reached.has(fileAt.get(m)!));
+        // #811: what a .prj lists is no leftover, and it lists the libraries too.
+        const legacy = !!project.legacyProject;
+        const reached = legacy ? new Map<SourceFile, Set<string>>() : reachedModules(program);
+        project.unreferenced = legacy ? [] : project.compile.slice(1).filter(m => !reached.has(fileAt.get(m)!));
         // A library source a MAP MODULE reaches has no LINK to build it (compiler-verified, #763):
         // the project lists it by bare name, as a generated project does, and redirection finds
         // it. Only a MEMBER module (a .clw of MAP lines named by MODULE('CLib') is no source),
@@ -507,6 +554,7 @@ export function inferProjects(files: SourceFile[], libraryFiles: SourceFile[] = 
         for (let grew = true; grew;) {
             grew = false;
             closure = buildClosure([...compiled, ...listed], program);
+            if (legacy) break;
             const { files: built, modules } = closure;
             const inBuild = new Set(built);
             for (const [file, declared] of modules) {

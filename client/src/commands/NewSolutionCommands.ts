@@ -23,7 +23,8 @@ const MAX_SOURCE_FILES = 50000;
 
 const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
-interface SourceScan { files: SourceFile[]; unreadable: number; tooLarge: boolean }
+/** #811: `legacyProjects` are the .prj, .pr and .pi files, which say what a project compiles. */
+interface SourceScan { files: SourceFile[]; legacyProjects: SourceFile[]; unreadable: number; tooLarge: boolean }
 
 /**
  * #763 — every .clw/.inc/.equ under the folder, paths relative to it. Links are not followed
@@ -31,7 +32,7 @@ interface SourceScan { files: SourceFile[]; unreadable: number; tooLarge: boolea
  * skipped rather than ending the scan.
  */
 async function readSourceFiles(folderPath: string): Promise<SourceScan> {
-    const scan: SourceScan = { files: [], unreadable: 0, tooLarge: false };
+    const scan: SourceScan = { files: [], legacyProjects: [], unreadable: 0, tooLarge: false };
     const walk = async (dir: string): Promise<void> => {
         let entries: fs.Dirent[];
         try {
@@ -45,6 +46,12 @@ async function readSourceFiles(folderPath: string): Promise<SourceScan> {
             const full = path.join(dir, entry.name);
             if (entry.isDirectory()) {
                 if (!entry.name.startsWith('.') && !SKIP_DIRS.has(entry.name.toLowerCase())) await walk(full);
+            } else if (entry.isFile() && /\.(prj|pr|pi)$/i.test(entry.name)) {
+                try {
+                    scan.legacyProjects.push({ relPath: path.relative(folderPath, full), text: await fs.promises.readFile(full, 'latin1') });
+                } catch {
+                    scan.unreadable++;
+                }
             } else if (entry.isFile() && /\.(clw|inc|equ)$/i.test(entry.name)) {
                 if (scan.files.length >= MAX_SOURCE_FILES) { scan.tooLarge = true; return; }
                 try {
@@ -189,10 +196,10 @@ export async function newSolution(): Promise<void> {
                     () => findLibraryFiles(scan.files,
                         names => lookupLibrarySources(folderPath, installation, compilerName, configuration, names),
                         readLibraryFile));
-                const inference = inferProjects(scan.files, libraries);
+                const inference = inferProjects(scan.files, libraries, { legacyProjects: scan.legacyProjects });
                 const exportFiles = await findExportFiles(folderPath, installation, compilerName, configuration,
                     inference.projects.map(p => `${p.name}.exp`));
-                return { folder: folderPath, files: scan.files, libraries, inference, exportFiles, compiler: compilerName, sourceCount: scan.files.length };
+                return { folder: folderPath, files: scan.files, libraries, inference, exportFiles, compiler: compilerName, sourceCount: scan.files.length, legacyProjects: scan.legacyProjects };
             },
         };
     };

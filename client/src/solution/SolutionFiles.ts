@@ -5,7 +5,11 @@ import * as crypto from 'crypto';
  * No vscode here, so the content is unit-tested on its own.
  */
 export interface SlnProject { name: string; guid: string }
-export interface CwprojSpec { name: string; guid: string; compile: string[]; kind: 'exe' | 'dll'; references?: SlnProject[] }
+export interface CwprojSpec {
+    name: string; guid: string; compile: string[]; kind: 'exe' | 'dll'; references?: SlnProject[];
+    /** #811: a legacy .prj/.pr the project includes (Projects to include), relative to the .cwproj. */
+    legacyProject?: string;
+}
 
 /**
  * #763 — the export file of a DLL whose prototypes mark their exports with EXPORT: the linker
@@ -82,6 +86,9 @@ export function buildCwprojContent(spec: CwprojSpec): string {
         '    <check_index>False</check_index>',
         '  </PropertyGroup>',
         '  <ItemGroup>',
+        // #811: the build runs the .prj's #compile lines (with their own defines) but links only the
+        // Compile items, so every source is listed too (compiler-verified on Clarion 10).
+        ...(spec.legacyProject ? [`    <Include Include="${xml(msbuildPath(spec.legacyProject))}" />`] : []),
         ...spec.compile.map(f => `    <Compile Include="${xml(msbuildPath(f))}" />`),
         '  </ItemGroup>',
         // #763: the DLLs this project imports from, which also builds them first.

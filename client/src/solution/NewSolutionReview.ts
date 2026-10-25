@@ -24,6 +24,8 @@ export interface ReviewInput {
     compiler: string;
     /** The .clw/.inc/.equ files the folder holds. */
     sourceCount: number;
+    /** #811: the folder's legacy project files (.prj, .pr, .pi). */
+    legacyProjects?: SourceFile[];
 }
 
 /** The user's choices, keyed by program file (projects) and relative path (modules). */
@@ -117,7 +119,10 @@ export function defaultChoices(inference: FolderInference, name: string): Review
  */
 export function chosenSpecs(inference: FolderInference, choices: ReviewChoices, guid: () => string = generateGuid): NewProjectSpec[] {
     const projects = inference.projects.filter(p => isIncluded(choices, p));
-    const specs: NewProjectSpec[] = projects.map(p => ({ name: p.name, guid: guid(), compile: [...p.compile], kind: kindOf(choices, p), programFile: p.programFile }));
+    const specs: NewProjectSpec[] = projects.map(p => ({
+        name: p.name, guid: guid(), compile: [...p.compile], kind: kindOf(choices, p), programFile: p.programFile,
+        ...(p.legacyProject ? { legacyProject: p.legacyProject } : {}),
+    }));
     for (const m of placements(inference, choices)) specs.find(s => s.name === m.value)?.compile.push(m.file);
     projects.forEach((p, i) => {
         for (const m of p.unreferenced) {
@@ -135,7 +140,7 @@ function settledInference(input: ReviewInput, specs: NewProjectSpec[]): FolderIn
     const key = JSON.stringify(specs.map(s => [s.programFile, s.compile]));
     let settled = cache.get(key);
     if (!settled) {
-        settled = inferProjects(input.files, input.libraries, { compile: new Map(specs.map(s => [s.programFile!, s.compile])) });
+        settled = inferProjects(input.files, input.libraries, { compile: new Map(specs.map(s => [s.programFile!, s.compile])), legacyProjects: input.legacyProjects });
         cache.set(key, settled);
     }
     return settled;
@@ -209,7 +214,8 @@ export function buildReviewState(input: ReviewInput, choices: ReviewChoices): Re
         return {
             programFile: p.programFile,
             name: p.name,
-            why: p.kind === 'dll' ? 'Main CODE is empty' : 'Main CODE runs the program',
+            why: (p.kind === 'dll' ? 'Main CODE is empty' : 'Main CODE runs the program')
+                + (p.legacyProject ? `; sources from ${p.legacyProject}` : ''),
             included: !!spec,
             kind,
             sources,
