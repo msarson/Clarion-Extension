@@ -92,11 +92,16 @@ Clarion Tools
 ├── Solution View
 │   ├── MySolution.sln
 │   │   ├── MyApplication.cwproj
-│   │   │   ├── MyApp.app
-│   │   │   ├── MyApp.clw
-│   │   │   └── includes/
-│   │   │       └── MyFile.inc
+│   │   │   ├── File Drivers
+│   │   │   │   └── TOPSPEED
+│   │   │   ├── Libraries, Objects and Resource Files
+│   │   │   ├── Projects to include
+│   │   │   ├── Referenced Projects
+│   │   │   │   └── MyLibrary
+│   │   │   └── MyApp.clw
 │   │   └── MyLibrary.cwproj
+│   │       ├── File Drivers
+│   │       ├── …
 │   │       └── MyLib.clw
 │   └── Recent Solutions
 │       ├── ProjectA (Last opened: 2026-01-08)
@@ -110,6 +115,8 @@ Clarion Tools
 **Click to open files:**
 - Single-click: Selects file
 - Double-click: Opens file in editor
+
+**A project's folders, as in the Clarion IDE:** each project shows **File Drivers**, **Libraries, Objects and Resource Files**, **Projects to include** (legacy TopSpeed `.prj`/`.pr` projects pulled into the build) and **Referenced Projects**, always, then its source files. Right-click a folder for **Add…** (also its `+` button) and an entry for **Remove**; the change is saved to the `.cwproj` at once, as the IDE does. A click on a folder opens Project Properties on its Sources tab, on a referenced project its own Project Properties, on an included project its file.
 
 **Projects sorted by build order:** Projects in the Solution View are ordered dependency-first (libraries before the applications that depend on them), matching the actual build order.
 
