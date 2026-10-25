@@ -120,7 +120,9 @@ export class SolutionManager {
                     .map(p => path.join(p.path, p.filename))
                     .map(file => {
                         const mtime = SolutionManager.mtimeOf(file);
-                        return [file, mtime >= parseStart ? -2 : mtime] as [string, number];
+                        // Whole milliseconds, strictly later: a file time has sub-millisecond precision,
+                        // so one written in the parse's first millisecond would otherwise count as during it.
+                        return [file, Math.floor(mtime) > parseStart ? -2 : mtime] as [string, number];
                     }));
             }
 

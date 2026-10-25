@@ -17,6 +17,19 @@ logger.setLevel("error");// Production: Only log errors
 const perfLogger = LoggerManager.getLogger("SolutionLoadPerf", "perf");
 const redOutcomeLogged = new Set<string>();
 
+/**
+ * #802 — an item's path. The .cwproj is parsed with tag names folded to lower case but attribute
+ * names as written, so it is `Include`; the FileDriver, Library and None branches read only
+ * `include`, and those lists were always empty. An element with text and no attributes is a string.
+ */
+function includeOf(item: unknown): string | null {
+    if (typeof item === 'string') return item;
+    if (!item || typeof item !== 'object') return null;
+    const it = item as { Include?: unknown; include?: unknown; $?: { Include?: unknown; include?: unknown } };
+    const value = it.Include ?? it.include ?? it.$?.Include ?? it.$?.include;
+    return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
 export class ClarionProjectServer {
     sourceFiles: ClarionSourcerFileServer[] = [];
     fileDrivers: string[] = [];
@@ -156,14 +169,7 @@ export class ClarionProjectServer {
                     
                     // Process file drivers (faster to process these simpler items first)
                     for (const driver of fileDriverItems) {
-                        // Handle different possible formats
-                        let driverPath = null;
-                        if (typeof driver === 'string') {
-                            driverPath = driver;
-                        } else if (driver && typeof driver === 'object' && driver.include) {
-                            driverPath = driver.include;
-                        }
-                        
+                        const driverPath = includeOf(driver);
                         if (driverPath) {
                             this.fileDrivers.push(driverPath);
                         }
@@ -172,14 +178,7 @@ export class ClarionProjectServer {
                     
                     // Process libraries
                     for (const lib of libraryItems) {
-                        // Handle different possible formats
-                        let libPath = null;
-                        if (typeof lib === 'string') {
-                            libPath = lib;
-                        } else if (lib && typeof lib === 'object' && lib.include) {
-                            libPath = lib.include;
-                        }
-                        
+                        const libPath = includeOf(lib);
                         if (libPath) {
                             this.libraries.push(libPath);
                         }
@@ -195,7 +194,7 @@ export class ClarionProjectServer {
                         if (typeof ref === 'object') {
                             projectGuid = ref.project;
                             projectName = ref.name;
-                            includePath = ref.include;
+                            includePath = includeOf(ref);
                         }
                         
                         if (projectGuid && (projectName || includePath)) {
@@ -209,14 +208,7 @@ export class ClarionProjectServer {
                     
                     // Process none files
                     for (const none of noneItems) {
-                        // Handle different possible formats
-                        let nonePath = null;
-                        if (typeof none === 'string') {
-                            nonePath = none;
-                        } else if (none && typeof none === 'object' && none.include) {
-                            nonePath = none.include;
-                        }
-                        
+                        const nonePath = includeOf(none);
                         if (nonePath) {
                             this.noneFiles.push(nonePath);
                         }
