@@ -106,13 +106,22 @@ export class SolutionManager {
             // #801: a project's own file changed (a source added in the Clarion IDE or by hand) counts too.
             let instance = SolutionManager.instance;
             if (!instance || instance.solutionFilePath !== filePath || instance.parsedMtimeMs !== stat.mtimeMs || instance.projectFilesChanged()) {
+                // A file changed under the loaded solution: the in-memory cache only counts a LATER
+                // time as a change, so a file copied in with its own older time got the old parse back.
+                if (instance && instance.solutionFilePath === filePath) SolutionManager.clearCache(filePath);
+                const parseStart = Date.now();
                 instance = new SolutionManager(filePath);
                 instance.parsedMtimeMs = stat.mtimeMs;
                 SolutionManager.instance = instance;
                 await instance.initialize();
+                // A project file written while this parse ran may have been read before the write:
+                // record no time for it (-2), so the next load reads it again.
                 instance.parsedProjectMtimes = new Map((instance.solution?.projects ?? [])
                     .map(p => path.join(p.path, p.filename))
-                    .map(file => [file, SolutionManager.mtimeOf(file)]));
+                    .map(file => {
+                        const mtime = SolutionManager.mtimeOf(file);
+                        return [file, mtime >= parseStart ? -2 : mtime] as [string, number];
+                    }));
             }
 
             return instance;

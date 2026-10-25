@@ -85,6 +85,23 @@ suite('A changed .sln is read again on the next load (#795)', () => {
         assert.deepStrictEqual(sources(), ['main.clw', 'extra.clw']);
     });
 
+    // #801 review: a file copied in keeps its own, older time (Explorer, robocopy, a restore), and
+    // the in-memory parse cache only treated a LATER time as a change, so it handed back the old parse.
+    test('bug-pin: a .cwproj replaced by one with an older time is read again (#801)', async () => {
+        const sources = () => SolutionManager.getInstance()!.solution.projects[0].sourceFiles.map(f => f.name);
+        await SolutionManager.create(sln);
+        assert.deepStrictEqual(sources(), ['main.clw']);
+
+        fs.writeFileSync(path.join(tmpRoot, 'extra.clw'), '  MEMBER()\r\n');
+        const proj = path.join(tmpRoot, 'Sales.cwproj');
+        fs.writeFileSync(proj, fs.readFileSync(proj, 'utf8').replace('<Compile Include="main.clw" />', '<Compile Include="main.clw" /><Compile Include="extra.clw" />'));
+        const earlier = new Date(Date.now() - 24 * 3600 * 1000);
+        fs.utimesSync(proj, earlier, earlier);
+
+        await SolutionManager.create(sln);
+        assert.deepStrictEqual(sources(), ['main.clw', 'extra.clw']);
+    });
+
     test('a project file that disappears also counts as a change (#801)', async () => {
         const first = await SolutionManager.create(sln);
         fs.rmSync(path.join(tmpRoot, 'Sales.cwproj'));

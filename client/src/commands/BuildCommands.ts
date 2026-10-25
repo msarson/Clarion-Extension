@@ -216,33 +216,10 @@ export function registerBuildCommands(
             logger.info("🔄 Manually force refreshing solution cache...");
             if (globalSolutionFile) {
                 try {
-                    vscodeWindow.showInformationMessage("Force refreshing solution cache...");
-
-                    // #801: reload the solution first, so the server parses a .sln or .cwproj changed
-                    // outside the extension; the cache below only fetched the parse made at load.
+                    // #801: reload the solution, so the server parses a .sln or .cwproj changed outside
+                    // the extension. Fetching the cache here only got the parse made at load: the reload's
+                    // updatePaths is a notification, and the tree is redrawn when solutionReady arrives.
                     await commands.executeCommand('clarion.reinitializeSolution');
-
-                    // Get the SolutionCache singleton
-                    const solutionCache = SolutionCache.getInstance();
-                    
-                    // Force refresh the solution cache
-                    const startTime = performance.now();
-                    const result = await solutionCache.refresh(true);
-                    const endTime = performance.now();
-                    
-                    if (result) {
-                        logger.info(`✅ Solution cache force refreshed successfully in ${(endTime - startTime).toFixed(2)}ms`);
-                        
-                        // Refresh the solution tree view
-                        if (solutionTreeDataProvider) {
-                            await solutionTreeDataProvider.refresh();
-                        }
-                        
-                        vscodeWindow.showInformationMessage("Solution cache force refreshed successfully.");
-                    } else {
-                        logger.error("❌ Failed to force refresh solution cache.");
-                        vscodeWindow.showErrorMessage("Failed to force refresh solution cache. Check the logs for details.");
-                    }
                 } catch (error) {
                     logger.error(`❌ Error force refreshing solution cache: ${error instanceof Error ? error.message : String(error)}`);
                     vscodeWindow.showErrorMessage(`Error force refreshing solution cache: ${error instanceof Error ? error.message : String(error)}`);
