@@ -402,10 +402,14 @@ export class SolutionPanel {
         await this.solutionChanged(name);
     }
 
-    /** The .sln changed under the loaded solution: reload it, then this page. */
+    /**
+     * The .sln changed under the loaded solution: reload it, then this page. A full reload, as a
+     * version change does: the Solution View shows the language server's solution, parsed when it
+     * was loaded, and refreshing the cache only fetched that same tree again.
+     */
     private async solutionChanged(added: string): Promise<void> {
         void this.panel.webview.postMessage({ type: 'added' });
-        await vscode.commands.executeCommand('clarion.forceRefreshSolutionCache');
+        await vscode.commands.executeCommand('clarion.reinitializeSolution');
         await this.reload();
         vscode.window.showInformationMessage(`Added ${added} to ${path.basename(this.solutionFile)}.`);
     }

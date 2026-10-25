@@ -18,6 +18,8 @@ const perfLogger = LoggerManager.getLogger("SolutionLoadPerf", "perf");
 export class SolutionManager {
     public solution: ClarionSolutionServer;
     public solutionFilePath: string;
+    /** #795 — the .sln's modification time when it was parsed; a later one means parse it again. */
+    private parsedMtimeMs = 0;
     private static instance: SolutionManager | null = null;
     private fileCache: Map<string, string> = new Map();
     private static readonly CACHE_VERSION = 1; // Increment when cache format changes
@@ -96,16 +98,18 @@ export class SolutionManager {
                 throw new Error(`❌ Expected a file path but received a directory: ${filePath}`);
             }
 
-            if (!SolutionManager.instance) {
-                SolutionManager.instance = new SolutionManager(filePath);
-                await SolutionManager.instance.initialize();
-            } else if (SolutionManager.instance.solutionFilePath !== filePath) {
-                // If the solution file has changed, create a new instance
-                SolutionManager.instance = new SolutionManager(filePath);
-                await SolutionManager.instance.initialize();
+            // #795 — the same .sln is parsed again when it changed since it was parsed (a project
+            // added from Solution Properties, by the Clarion IDE or by hand); reused, its projects
+            // never changed until the window was reloaded.
+            let instance = SolutionManager.instance;
+            if (!instance || instance.solutionFilePath !== filePath || instance.parsedMtimeMs !== stat.mtimeMs) {
+                instance = new SolutionManager(filePath);
+                instance.parsedMtimeMs = stat.mtimeMs;
+                SolutionManager.instance = instance;
+                await instance.initialize();
             }
 
-            return SolutionManager.instance;
+            return instance;
         } finally {
             // Reset the solution operation flag when done
             (global as any).solutionOperationInProgress = false;

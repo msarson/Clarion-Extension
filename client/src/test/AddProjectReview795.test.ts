@@ -43,3 +43,18 @@ suite('Adding a project: the review\'s findings (#795)', () => {
         assert.throws(() => addProjectToSln(SLN.replace('Lib"', 'L\uFFFDb"'), OTHER, 'C:\\Apps\\Sales'), /encoding|UTF-8/);
     });
 });
+
+suite('An added project reaches the Solution View (#795)', () => {
+    test('bug-pin: the solution is reloaded, so the server reads the .sln again', () => {
+        // The Solution View shows the language server's solution, parsed when it was loaded:
+        // refreshing the cache only fetched that same tree, so the added project never appeared.
+        const fs = require('fs') as typeof import('fs');
+        const path = require('path') as typeof import('path');
+        let dir = __dirname;
+        while (!fs.existsSync(path.join(dir, 'client', 'src', 'solution', 'SolutionPanel.ts'))) dir = path.dirname(dir);
+        const panel = fs.readFileSync(path.join(dir, 'client', 'src', 'solution', 'SolutionPanel.ts'), 'utf8');
+        const changed = panel.slice(panel.indexOf('private async solutionChanged('), panel.indexOf('private async solutionChanged(') + 800);
+        assert.match(changed, /executeCommand\('clarion\.reinitializeSolution'\)/);
+        assert.doesNotMatch(changed, /forceRefreshSolutionCache/);
+    });
+});
