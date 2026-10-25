@@ -21,17 +21,29 @@ logger.setLevel('error');
  */
 export class ProjectPropertiesEditorProvider implements vscode.CustomTextEditorProvider {
     public static readonly viewType = 'clarion.projectProperties';
+    /** #803: the open pages by .cwproj URI, and a tab to show when one opens. */
+    private static readonly panels = new Map<string, vscode.WebviewPanel>();
+    private static readonly pendingTab = new Map<string, string>();
 
     public static register(): vscode.Disposable[] {
         return [
             vscode.window.registerCustomEditorProvider(ProjectPropertiesEditorProvider.viewType, new ProjectPropertiesEditorProvider()),
-            vscode.commands.registerCommand('clarion.openProjectProperties', async (target?: vscode.Uri | { data?: { path?: string; filename?: string } }) => {
+            vscode.commands.registerCommand('clarion.openProjectProperties', async (target?: vscode.Uri | { data?: { path?: string; filename?: string } }, tab?: string) => {
                 const uri = projectUri(target);
                 if (!uri) {
                     vscode.window.showErrorMessage('Choose a Clarion project (.cwproj) to show its properties.');
                     return;
                 }
+                // #803: a tab to show (a Solution View folder opens Sources). A page opening takes
+                // it with its first state; one already open is told.
+                const key = uri.toString();
+                if (tab) ProjectPropertiesEditorProvider.pendingTab.set(key, tab);
+                const open = ProjectPropertiesEditorProvider.panels.get(key);
                 await vscode.commands.executeCommand('vscode.openWith', uri, ProjectPropertiesEditorProvider.viewType);
+                if (tab && open) {
+                    ProjectPropertiesEditorProvider.pendingTab.delete(key);
+                    void open.webview.postMessage({ type: 'tab', tab });
+                }
             }),
         ];
     }
@@ -44,17 +56,27 @@ export class ProjectPropertiesEditorProvider implements vscode.CustomTextEditorP
         panel.webview.options = { enableScripts: true };
         panel.webview.html = pageHtml(panel.webview);
 
-        const post = () => panel.webview.postMessage({
-            type: 'state',
-            state: buildPageState(document.getText(), configuration, targets),
-            // #800: the full path, shown as Solution Properties shows the .sln's.
-            file: document.uri.fsPath,
-        });
+        const key = document.uri.toString();
+        ProjectPropertiesEditorProvider.panels.set(key, panel);
+        const post = () => {
+            const tab = ProjectPropertiesEditorProvider.pendingTab.get(key);
+            ProjectPropertiesEditorProvider.pendingTab.delete(key);
+            return panel.webview.postMessage({
+                type: 'state',
+                state: buildPageState(document.getText(), configuration, targets),
+                // #800: the full path, shown as Solution Properties shows the .sln's.
+                file: document.uri.fsPath,
+                ...(tab ? { tab } : {}),
+            });
+        };
 
         const changes = vscode.workspace.onDidChangeTextDocument(e => {
             if (e.document.uri.toString() === document.uri.toString() && e.contentChanges.length > 0) post();
         });
-        panel.onDidDispose(() => changes.dispose());
+        panel.onDidDispose(() => {
+            changes.dispose();
+            if (ProjectPropertiesEditorProvider.panels.get(key) === panel) ProjectPropertiesEditorProvider.panels.delete(key);
+        });
 
         panel.webview.onDidReceiveMessage(async (msg: { type: string; property?: string; value?: string; kind?: string; scope?: 'all' | 'configuration' }) => {
             try {
@@ -293,7 +315,10 @@ function pageHtml(webview: vscode.Webview): string {
   }
 
   window.addEventListener('message', e => {
+    // #803: a tab asked for (a Solution View folder opens Sources), with the state or on its own.
+    if (e.data && e.data.tab) { tab = e.data.tab; vscode.setState({ tab }); }
     if (e.data && e.data.type === 'state') { state = Object.assign({}, e.data.state, { file: e.data.file }); render(); }
+    if (e.data && e.data.type === 'tab') render();
   });
   vscode.postMessage({ type: 'ready' });
 `,

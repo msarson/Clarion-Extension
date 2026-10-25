@@ -13,6 +13,12 @@ import { SolutionScanner, DetectedSolution } from './utils/SolutionScanner';
 import { ClarionInstallationDetector } from './utils/ClarionInstallationDetector';
 import { GlobalSolutionHistory } from './utils/GlobalSolutionHistory';
 import { ProjectDependencyResolver } from './utils/ProjectDependencyResolver';
+import { projectFolders } from './views/ProjectFolders';
+
+/** #803: each IDE folder's icon, for the folder and its entries. */
+const FOLDER_ICONS: Record<string, string> = {
+    fileDrivers: 'database', libraries: 'library', includes: 'file-submodule', projectReferences: 'references',
+};
 
 const logger = LoggerManager.getLogger("SolutionTreeDataProvider");
 logger.setLevel("error");
@@ -79,6 +85,36 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
      * the file list locally. File nodes only need name+relativePath; clicking resolves the full
      * path lazily (fix 13), so no redirection logic is needed here.
      */
+    /** A project node: the current kind, or the older one carrying only its GUID. */
+    private isProjectNode(node: TreeNode): boolean {
+        const data = node.data as any;
+        return !!data && !data.type && (data.kind === 'project' || !!data.guid);
+    }
+
+    /**
+     * #803 — the Clarion IDE's folders for a project, read from its .cwproj: File Drivers,
+     * Libraries, Objects and Resource Files, Projects to include and Referenced Projects, always,
+     * empty or not. An empty one cannot be expanded.
+     */
+    private projectFolderNodes(project: TreeNode): TreeNode[] {
+        const data = project.data as any;
+        const projectPath = data?.path ?? data?.projectPath;
+        const filename = data?.filename;
+        if (!projectPath || !filename) return [];
+        const cwproj = path.join(String(projectPath), String(filename));
+        let text = '';
+        try { text = fs.readFileSync(cwproj, 'utf-8'); } catch { return []; }
+        const owner = { cwproj, projectPath: String(projectPath), projectGuid: data.projectId ?? data.guid, projectName: String(project.label) };
+        return projectFolders(text).map(folder => {
+            const node = new TreeNode(folder.label,
+                folder.entries.length ? TreeItemCollapsibleState.Collapsed : TreeItemCollapsibleState.None,
+                { type: 'projectFolder', section: folder.section, kind: folder.kind, ...owner }, project);
+            node.children = folder.entries.map(entry => new TreeNode(entry.label, TreeItemCollapsibleState.None,
+                { type: 'projectFolderItem', section: folder.section, kind: folder.kind, include: entry.include, ...owner }, node, entry.description));
+            return node;
+        });
+    }
+
     private parseProjectFilesLocally(projectData: any, label: string): { files: any[] } | null {
         try {
             const projectPath = projectData?.path ?? projectData?.projectPath;
@@ -554,7 +590,14 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         // expanded node on every fire.
         const gcStart = Date.now();
         try {
-            return await this.getChildrenInner(element);
+            const children = await this.getChildrenInner(element);
+            // #803: a project shows the IDE's folders before its sources.
+            if (element && this.isProjectNode(element) && !(this._filterText && this._filterText.trim() !== '')
+                && !children.some(c => c.data?.type === 'projectFolder' || c.data?.type === 'retryProjectLoad')) {
+                element.children = [...this.projectFolderNodes(element), ...children];
+                return element.children;
+            }
+            return children;
         } finally {
             const ms = Date.now() - gcStart;
             if (ms > 50) {
@@ -981,26 +1024,29 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             return treeItem;
         }
         
-        // Handle section nodes
-        if ((data as any)?.type === 'section') {
-            const sectionType = (data as any).sectionType;
-            switch (sectionType) {
-                case 'fileDrivers':
-                    treeItem.iconPath = new ThemeIcon('database');
-                    break;
-                case 'libraries':
-                    treeItem.iconPath = new ThemeIcon('library');
-                    break;
-                case 'projectReferences':
-                    treeItem.iconPath = new ThemeIcon('references');
-                    break;
-                case 'noneFiles':
-                    treeItem.iconPath = new ThemeIcon('files');
-                    break;
-                default:
-                    treeItem.iconPath = new ThemeIcon('folder');
+        // #803: a project's IDE folders and their entries.
+        if ((data as any)?.type === 'projectFolder') {
+            const folder = data as any;
+            treeItem.id = `folder:${folder.projectGuid}:${folder.section}`;
+            treeItem.iconPath = new ThemeIcon(FOLDER_ICONS[folder.section] ?? 'folder');
+            treeItem.contextValue = 'clarionProjectFolder';
+            treeItem.tooltip = `${folder.label ?? label} of ${folder.projectName}. Right-click to add; click to open the project's Sources.`;
+            treeItem.command = { title: 'Project Properties', command: 'clarion.openProjectProperties', arguments: [Uri.file(folder.cwproj), 'sources'] };
+            return treeItem;
+        }
+        if ((data as any)?.type === 'projectFolderItem') {
+            const item = data as any;
+            treeItem.id = `folderItem:${item.projectGuid}:${item.section}:${String(item.include).toLowerCase()}`;
+            treeItem.iconPath = new ThemeIcon(FOLDER_ICONS[item.section] ?? 'file');
+            treeItem.contextValue = 'clarionProjectFolderItem';
+            treeItem.tooltip = item.include;
+            const target = path.resolve(item.projectPath, item.include);
+            // A referenced project opens its own page, an included TopSpeed project its text.
+            if (item.kind === 'ProjectReference') {
+                treeItem.command = { title: 'Project Properties', command: 'clarion.openProjectProperties', arguments: [Uri.file(target)] };
+            } else if (item.kind === 'Include' && fs.existsSync(target)) {
+                treeItem.command = { title: 'Open', command: 'vscode.open', arguments: [Uri.file(target)] };
             }
-            treeItem.contextValue = `clarion${sectionType.charAt(0).toUpperCase() + sectionType.slice(1)}Section`;
             return treeItem;
         }
         

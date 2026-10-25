@@ -12,7 +12,7 @@ import { blankBetween, decode, encode, eolOf, lineEndAfter, lineStartAt, mask, r
  * its ItemGroup when nothing is left in it; a new one goes after the last of its kind, indented
  * like its neighbours. An Include round-trips its XML and MSBuild %XX escaping. No vscode here.
  */
-export type ItemKind = 'Compile' | 'ProjectReference' | 'FileDriver' | 'Library';
+export type ItemKind = 'Compile' | 'ProjectReference' | 'FileDriver' | 'Library' | 'Include';
 
 export interface ProjectItem {
     kind: ItemKind;
@@ -28,6 +28,7 @@ export interface ProjectItems {
     projectReferences: ProjectItem[];
     fileDrivers: ProjectItem[];
     libraries: ProjectItem[];
+    includes: ProjectItem[];
 }
 
 interface Item extends ProjectItem {
@@ -39,7 +40,8 @@ interface Item extends ProjectItem {
 }
 interface Group { openStart: number; openEnd: number; closeStart: number; closeEnd: number; indent: string; items: Item[] }
 
-export const ITEM_KINDS: ItemKind[] = ['Compile', 'ProjectReference', 'FileDriver', 'Library'];
+/** #803: Include is the IDE's "Projects to include", a legacy TopSpeed project (.prj/.pr) pulled into the build. */
+export const ITEM_KINDS: ItemKind[] = ['Compile', 'ProjectReference', 'FileDriver', 'Library', 'Include'];
 const sameName = (a: string, b: string) => a.toLowerCase() === b.toLowerCase();
 const indentAt = (text: string, index: number) => /^[ \t]*/.exec(text.slice(lineStartAt(text, index), index))![0];
 const childText = (body: string, name: string) => {
@@ -106,7 +108,7 @@ const strip = (i: Item): ProjectItem => ({ kind: i.kind, include: i.include, gen
 export function listItems(text: string): ProjectItems {
     const all = readGroups(text).flatMap(g => g.items);
     const of = (kind: ItemKind) => all.filter(i => i.kind === kind).map(strip);
-    return { compile: of('Compile'), projectReferences: of('ProjectReference'), fileDrivers: of('FileDriver'), libraries: of('Library') };
+    return { compile: of('Compile'), projectReferences: of('ProjectReference'), fileDrivers: of('FileDriver'), libraries: of('Library'), includes: of('Include') };
 }
 
 /** An attribute value: a property's encoding, and its quotes. */
@@ -115,29 +117,33 @@ const encodeAttribute = (value: string) => encode(value).replace(/"/g, '&quot;')
 /**
  * Adds an item after the last of its kind in the first ItemGroup holding that kind, or in a new
  * ItemGroup after the last one (before `</Project>` when there is none). One already there, in
- * any case, is not added again.
+ * any case, is not added again. #803: `children` are written inside it, one per line, as the IDE
+ * writes a project reference's `<Project>` GUID and `<Name>`.
  */
-export function addItem(text: string, kind: ItemKind, include: string): string {
+export function addItem(text: string, kind: ItemKind, include: string, children: [string, string][] = []): string {
     const groups = readGroups(text);
     const all = groups.flatMap(g => g.items);
     if (all.some(i => i.kind === kind && sameName(i.include, include))) return text;
     const eol = eolOf(text);
     const selfClose = all.find(i => i.selfClose)?.selfClose ?? ' />';
-    const element = `<${kind} Include="${encodeAttribute(include)}"${selfClose}`;
+    const anchor = groups[groups.length - 1];
+    const groupIndent = anchor?.indent ?? (indentAt(text, Math.max(0, mask(text).search(/<PropertyGroup\b/))) || '  ');
+    const step = all[0] ? all[0].indent.slice(groups.find(g => g.items.includes(all[0]))!.indent.length) || '  ' : '  ';
+    const open = `<${kind} Include="${encodeAttribute(include)}"`;
+    // The element at an indent; with children, one per line a step further in.
+    const element = (indent: string) => children.length === 0 ? `${open}${selfClose}`
+        : `${open}>${children.map(([name, value]) => `${eol}${indent}${step}<${name}>${encode(value)}</${name}>`).join('')}${eol}${indent}</${kind}>`;
 
     const group = groups.find(g => g.items.some(i => i.kind === kind));
     if (group) {
         const last = group.items.filter(i => i.kind === kind).pop()!;
-        if (!last.alone) return text.slice(0, last.elementEnd) + element + text.slice(last.elementEnd);
+        if (!last.alone) return text.slice(0, last.elementEnd) + element(last.indent) + text.slice(last.elementEnd);
         const lineBreak = text.slice(last.lineStart, last.lineEnd).endsWith('\n') ? '' : eol;
-        return text.slice(0, last.lineEnd) + lineBreak + `${last.indent}${element}${eol}` + text.slice(last.lineEnd);
+        return text.slice(0, last.lineEnd) + lineBreak + `${last.indent}${element(last.indent)}${eol}` + text.slice(last.lineEnd);
     }
 
     // A new group, indented like the last one and its items, or one step in from <Project>.
-    const anchor = groups[groups.length - 1];
-    const groupIndent = anchor?.indent ?? (indentAt(text, Math.max(0, mask(text).search(/<PropertyGroup\b/))) || '  ');
-    const step = all[0] ? all[0].indent.slice(groups.find(g => g.items.includes(all[0]))!.indent.length) || '  ' : '  ';
-    const block = `${groupIndent}<ItemGroup>${eol}${groupIndent}${step}${element}${eol}${groupIndent}</ItemGroup>${eol}`;
+    const block = `${groupIndent}<ItemGroup>${eol}${groupIndent}${step}${element(groupIndent + step)}${eol}${groupIndent}</ItemGroup>${eol}`;
     if (anchor) {
         const at = lineEndAfter(text, anchor.closeEnd);
         return text.slice(0, at) + (text.slice(0, at).endsWith('\n') ? '' : eol) + block + text.slice(at);
