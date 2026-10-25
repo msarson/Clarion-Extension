@@ -138,9 +138,9 @@ export function inactiveIncludeLines(filePath: string | null, text: string): Set
     if (cached && cached.length === text.length && cached.hash === hash && [...cached.deps].every(([f, m]) => depHolds(f, m))) return cached.lines;
 
     const visiting = new Set<string>(key ? [key] : []);
-    // #812: a file a project compiles has its project's switches. It depends on where they come
-    // from only when a condition asked for one: most blocks are decided by an EQUATE, and an answer
-    // with dependencies is not persisted by every cache.
+    // #812: a file a project compiles has its project's switches, worked out when first asked. It
+    // depends on where they come from only when a condition asked for one: most blocks are decided
+    // by an EQUATE, and an answer with dependencies is not persisted by every cache.
     const project = projectSwitches(filePath);
     let askedProject = false;
     const deps = new Map<string, number>();

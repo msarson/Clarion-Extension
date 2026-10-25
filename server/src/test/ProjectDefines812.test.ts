@@ -80,8 +80,9 @@ suite('COMPILE/OMIT decided from the project\'s defines (#812)', () => {
             + "<PropertyGroup Condition=\" '$(Configuration)|$(Platform)' == 'Release|Win32' \"><DefineConstants>A=&gt;0</DefineConstants></PropertyGroup>"
             + "<PropertyGroup Condition=\" '$(Configuration)' == 'Debug' \"><DefineConstants>B=&gt;2</DefineConstants></PropertyGroup>"
             + '</Project>';
-        assert.deepStrictEqual(parseDefineConstants(text, 'Debug'), { a: '1', b: '2' });
-        assert.deepStrictEqual(parseDefineConstants(text, 'release'), { a: '0', b: '1' });
+        // As MSBuild sets a property, the configuration's group replaces the list (none names $(DefineConstants)).
+        assert.deepStrictEqual(parseDefineConstants(text, 'Debug'), { b: '2' });
+        assert.deepStrictEqual(parseDefineConstants(text, 'release'), { a: '0' });
     });
 
     test('bug-pin: a project source is decided by the .cwproj\'s DefineConstants', async () => {
@@ -143,6 +144,75 @@ suite('COMPILE/OMIT decided from the project\'s defines (#812)', () => {
         fs.utimesSync(path.join(root, 'App.cwproj'), later, later);
         assert.strictEqual(dependenciesUnchanged(deps), false);
         assert.deepStrictEqual(decide(main), [DLL]);
+    });
+
+    // Review of #812.
+    test('bug-pin: the configuration as it is stored, Debug|Win32, picks its groups (and its platform)', async () => {
+        const text = '<Project>'
+            + "<PropertyGroup Condition=\" '$(Configuration)|$(Platform)' == 'Debug|Win32' \"><DefineConstants>A=&gt;1</DefineConstants></PropertyGroup>"
+            + "<PropertyGroup Condition=\" '$(Configuration)|$(Platform)' == 'Debug|x64' \"><DefineConstants>A=&gt;9</DefineConstants></PropertyGroup>"
+            + "<PropertyGroup Condition=\" '$(Configuration)' != 'Release' \"><DefineConstants>$(DefineConstants)%3bB=&gt;1</DefineConstants></PropertyGroup>"
+            + '</Project>';
+        assert.deepStrictEqual(parseDefineConstants(text, 'Debug|Win32'), { a: '1', b: '1' });
+        assert.deepStrictEqual(parseDefineConstants(text, 'Release|Win32'), {});
+        const main = write('Main.clw');
+        cwproj('App', [defines('_ABCDllMode_=&gt;1', " '$(Configuration)|$(Platform)' == 'Debug|Win32' ")], ['<Compile Include="Main.clw" />']);
+        serverSettings.configuration = 'Debug|Win32';
+        await load('App');
+        assert.deepStrictEqual(decide(main), [LIB]);
+    });
+
+    test('a later group replaces DefineConstants unless it names $(DefineConstants); a commented one is not read', () => {
+        const text = '<Project>'
+            + '<PropertyGroup><DefineConstants>A=&gt;1%3bB=&gt;1</DefineConstants></PropertyGroup>'
+            + '<PropertyGroup><DefineConstants>C=&gt;1</DefineConstants></PropertyGroup>'
+            + '<!-- <PropertyGroup><DefineConstants>D=&gt;1</DefineConstants></PropertyGroup> -->'
+            + '</Project>';
+        assert.deepStrictEqual(parseDefineConstants(text, 'Debug'), { c: '1' });
+    });
+
+    test('bug-pin: a source that joins a project, or a second project that defines it otherwise, is decided again', async () => {
+        const main = write('Main.clw');
+        const x = write('X.clw', source.replace('PROGRAM', "MEMBER('Main')"));
+        cwproj('App', [defines('_ABCDllMode_=&gt;1')], ['<Compile Include="Main.clw" />']);
+        cwproj('Other', [defines('_ABCDllMode_=&gt;0')], ['<Compile Include="Y.clw" />']);
+        await load('App', 'Other');
+        assert.deepStrictEqual(decide(x), [], 'in no project');
+        assert.deepStrictEqual(decide(main), [LIB]);
+        const xDeps = recordedDependencies(x), mainDeps = recordedDependencies(main);
+
+        const sm = SolutionManager.getInstance()!;
+        const [app, other] = sm.solution.projects;
+        cwproj('App', [defines('_ABCDllMode_=&gt;1')], ['<Compile Include="Main.clw" />', '<Compile Include="X.clw" />']);
+        await app.reloadSourceFiles();
+        assert.strictEqual(dependenciesUnchanged(xDeps), false, 'X joined App');
+        assert.deepStrictEqual(decide(x), [LIB]);
+
+        cwproj('Other', [defines('_ABCDllMode_=&gt;0')], ['<Compile Include="Main.clw" />']);
+        await other.reloadSourceFiles();
+        assert.strictEqual(dependenciesUnchanged(mainDeps), false, 'Other compiles Main too, and disagrees');
+        assert.deepStrictEqual(decide(main), []);
+    });
+
+    test('a source added to a project in place is owned at once', async () => {
+        write('Main.clw');
+        const x = write('X.clw', source.replace('PROGRAM', "MEMBER('Main')"));
+        cwproj('App', [defines('_ABCDllMode_=&gt;1')], ['<Compile Include="Main.clw" />']);
+        await load('App');
+        assert.deepStrictEqual(decide(x), []);
+        const app = SolutionManager.getInstance()!.solution.projects[0];
+        app.sourceFiles.push(new (app.sourceFiles[0].constructor as any)('X.clw', 'X.clw', app));
+        fs.writeFileSync(x, fs.readFileSync(x, 'utf8') + '\r\n'); // a new text, so the answer is not the cached one
+        assert.deepStrictEqual(decide(x), [LIB]);
+    });
+
+    test('with two .prj files, the source\'s own /define still wins', async () => {
+        const main = write('Main.clw');
+        fs.writeFileSync(path.join(root, 'A.prj'), '#compile Main.clw /define(_ABCDllMode_=>on)\r\n');
+        fs.writeFileSync(path.join(root, 'B.prj'), '#pragma define(_ABCDllMode_=>off)\r\n');
+        cwproj('App', [], ['<Include Include="A.prj" />', '<Include Include="B.prj" />']);
+        await load('App');
+        assert.deepStrictEqual(decide(main), [LIB]);
     });
 
     test('a file decided before the solution loaded is decided again once it has', async () => {
