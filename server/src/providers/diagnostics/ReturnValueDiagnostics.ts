@@ -60,8 +60,9 @@ const RVD_MEMO_BUCKET = 'rvdmemo';
 // that the rules that produced it are: an upgraded server otherwise reuses an older build's answer
 // for every file not edited since. Bump it whenever how a receiver type or a class's members are
 // resolved changes. (2: a local CLASS label is the class itself, not its parent's type.
-// 3: #778, a member prototype continued with `|` is read whole.)
-const RVD_RESOLUTION_RULES = 3;
+// 3: #778, a member prototype continued with `|` is read whole.
+// 4: #807, an INCLUDE in a COMPILE/OMIT block that does not compile is not followed.)
+const RVD_RESOLUTION_RULES = 4;
 // One disk-load attempt per doc content (rvdDocKey); bounded for hygiene.
 const rvdDiskSeedAttempted = new Set<string>();
 
