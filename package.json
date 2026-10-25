@@ -1754,7 +1754,7 @@
         "clarion.diagnostics.attributeApplicability.enabled": {
           "type": "boolean",
           "default": true,
-          "description": "Reports an attribute used on a control or structure it does not apply to, for example RESIZE on a BUTTON. Takes effect as soon as it is changed, no reload needed (issue #542)."
+          "description": "Reports an attribute used on a control or structure it does not apply to, for example RESIZE on a BUTTON, and a word that is not an attribute at all, for example IMPLUMENTS on a CLASS (issue #806). Takes effect as soon as it is changed, no reload needed (issue #542)."
         },
         "clarion.diagnostics.attributeApplicability.severity": {
           "type": "string",

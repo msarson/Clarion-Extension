@@ -53,7 +53,7 @@ Every check can be turned off on its own and reported at the severity you choose
 | `reservedKeywordLabels` | on | Reports a reserved Clarion keyword used as a label (a declaration follows it). The list is the compiler's, not the help's. |
 | `intrinsicRedefinitions` | on | Warns where the compiler warns "Redefining system intrinsic": SELF or PARENT as a method's parameter or local, NULL as a PROCEDURE or method name. In that method the new name hides the real SELF or PARENT. |
 | `unicodeCharacters` | on | Reports a character that no Windows ANSI code page can represent, which would corrupt the file for the Clarion compiler. |
-| `attributeApplicability` | on | Reports an attribute used on a control or structure it does not apply to, for example RESIZE on a BUTTON. |
+| `attributeApplicability` | on | Reports an attribute used on a control or structure it does not apply to, for example RESIZE on a BUTTON, and a word that is not an attribute at all, for example IMPLUMENTS on a CLASS. |
 | `itemizeBlocks` | on | Reports a declaration other than an EQUATE inside an ITEMIZE block. |
 | `byRefArguments` | on | Reports a literal passed to a by-reference (*TYPE) parameter. |
 | `viewProjectFields` | on | Reports a PROJECT field in a VIEW or JOIN that the projected FILE does not declare. |

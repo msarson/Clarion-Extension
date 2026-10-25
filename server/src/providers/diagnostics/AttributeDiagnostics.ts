@@ -46,8 +46,10 @@ function windowOrReportBodies(tokens: Token[]): [number, number][] {
 /**
  * Warns when a known attribute is used on a control type that doesn't support it.
  * Only fires for attributes the tokenizer classifies as TokenType.Attribute and
- * that are present in clarion-attributes.json — unknown tokens are silently ignored.
+ * that are present in clarion-attributes.json — unknown tokens are silently ignored here.
  * Only validates against unambiguous window controls (see VALIDATABLE_CONTROLS).
+ * Then the declaration headers (validateHeaderAttributes) and, everywhere else, a word in
+ * attribute position that is not an attribute at all (validateUnknownAttributes, #806).
  */
 export function validateAttributeApplicability(tokens: Token[], document: TextDocument, documentStructure?: DocumentStructure): Diagnostic[] {
     const diagnostics: Diagnostic[] = [];
@@ -210,6 +212,82 @@ export function validateAttributeApplicability(tokens: Token[], document: TextDo
     }
 
     diagnostics.push(...validateHeaderAttributes(tokens, structure));
+    diagnostics.push(...validateUnknownAttributes(tokens, structure, bodies ?? windowOrReportBodies(tokens), lines));
+    return diagnostics;
+}
+
+/**
+ * Attributes the catalogue does not carry, compiled on Clarion 10 (#806): a control's
+ * justification (LEFT, RIGHT, DECIMAL), RTF on a TEXT, and COM on an INTERFACE.
+ */
+const OTHER_ATTRIBUTE_WORDS = new Set(['LEFT', 'RIGHT', 'DECIMAL', 'RTF', 'COM']);
+
+/**
+ * The keyword token types a declaration opens with: a structure (CLASS, GROUP, QUEUE...), a data
+ * type, a user type (`Q  MyQueueType,THREAD`), a reference (`&MyType`), LIKE, or a control.
+ * PROCEDURE and FUNCTION prototypes are not among them: what follows their parameters is a return
+ * type as well as attributes (`PROCEDURE(),LONG`).
+ */
+const DECLARATION_KEYWORD_TYPES = new Set([
+    TokenType.Structure, TokenType.Type, TokenType.Variable, TokenType.ReferenceVariable,
+    TokenType.TypeReference, TokenType.WindowElement, TokenType.Class, TokenType.Interface,
+]);
+
+/**
+ * #806: a word in attribute position that is not a Clarion attribute, e.g. IMPLUMENTS on a CLASS.
+ * The compiler (Clarion 10) refuses it with "Unknown attribute: IMPLUMENTS". The attributes are
+ * read the way the declaration cards read them (readDeclaredAttributes: after the first comma at
+ * paren depth 0, `|` continuations joined), on a labelled declaration in a data section and on a
+ * control in a WINDOW, APPLICATION or REPORT. Declarations the header check already judges
+ * (WINDOW, FILE, KEY... with an `attributes` list) are left to it; MAP and MODULE prototypes,
+ * whose list carries a return type, are not read.
+ */
+function validateUnknownAttributes(tokens: Token[], structure: DocumentStructure, bodies: [number, number][], lines: string[]): Diagnostic[] {
+    const diagnostics: Diagnostic[] = [];
+    const seenLines = new Set<number>();
+    let inCode = false;
+    for (let i = 0; i < tokens.length; i++) {
+        const token = tokens[i];
+        // CODE opens a code section, DATA a routine's data; a procedure starts with its data and a
+        // routine is code unless it opens with DATA
+        if (token.type === TokenType.ExecutionMarker) { inCode = !/^DATA$/i.test(token.value); continue; }
+        if (token.type !== TokenType.Label && token.type !== TokenType.Variable) {
+            if (/^(PROCEDURE|FUNCTION)$/i.test(token.value)) { inCode = false; continue; }
+            if (/^ROUTINE$/i.test(token.value)) { inCode = true; continue; }
+        }
+        if (inCode) continue;
+
+        const isLabel = token.type === TokenType.Label;
+        const inBody = bodies.some(([start, end]) => token.line > start && token.line <= end);
+        if (!isLabel && !(inBody && (token.type === TokenType.WindowElement || token.type === TokenType.Structure))) continue;
+
+        const logical = structure.getLogicalLine(token.line);
+        if (!logical || logical.tokens[0] !== token || seenLines.has(logical.startLine)) continue;
+        const keyword = isLabel ? logical.tokens[1] : token;
+        if (!keyword || !DECLARATION_KEYWORD_TYPES.has(keyword.type)) continue;
+        seenLines.add(logical.startLine);
+        if (structure.isInMapBlock(token.line) || structure.isInModuleBlock(token.line)) continue;
+        if (controlService.getDeclarationStructure(/^\w+/.exec(keyword.value)?.[0] ?? keyword.value)?.attributes) continue;
+
+        for (const attribute of readDeclaredAttributes(logical, keyword)) {
+            const name = attribute.name;
+            if (!/^[A-Z_][A-Z0-9_]*$/.test(name)) continue; // a value, a string, a picture...
+            if (attributeService.isAttribute(name) || OTHER_ATTRIBUTE_WORDS.has(name)) continue;
+            const at = attribute.token;
+            // a template marker in a window definition, e.g. `#ORIG(?Cancel)`
+            if (lines[at.line]?.[at.start - 1] === '#') continue;
+            diagnostics.push({
+                severity: DiagnosticSeverity.Warning,
+                range: {
+                    start: { line: at.line, character: at.start },
+                    end: { line: at.line, character: at.start + at.value.length },
+                },
+                message: `Unknown attribute: ${name}`,
+                source: 'clarion',
+                code: 'unknown-attribute',
+            });
+        }
+    }
     return diagnostics;
 }
 
