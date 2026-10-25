@@ -40,6 +40,8 @@ export class SolutionPanel {
     private static properties: SolutionPanel | undefined;
     /** The page Open Solution is waiting on; a second open replaces it (it settles as cancelled). */
     private static opening: SolutionPanel | undefined;
+    /** #795 — a Solution Properties page was closed at start because nothing answered it: open it again. */
+    private static reopenAfterRestart = false;
     private static graph: GraphStatus | undefined;
 
     private input: SolutionPageInput | undefined;
@@ -72,6 +74,7 @@ export class SolutionPanel {
     }
 
     public static register(): vscode.Disposable[] {
+        void SolutionPanel.closeOrphanedPages();
         return [
             vscode.commands.registerCommand('clarion.openSolutionProperties', () => SolutionPanel.showProperties()),
             // The page shows these settings, so it follows their changes.
@@ -82,6 +85,27 @@ export class SolutionPanel {
                 }
             }),
         ];
+    }
+
+    /**
+     * #795 — a Clarion page kept on screen across an extension host restart (installing a VSIX
+     * restarts it) still shows its old content, but nothing answers it: its buttons do nothing.
+     * VS Code does not hand it to the restarted extension (a serializer is called on a window
+     * reload only), so at start any such tab is closed; none can be this extension's own yet.
+     * Solution Properties opens again once the solution has loaded (refresh); an Open or New
+     * Solution page's flow ended with the old extension host, so its command is run again.
+     */
+    private static async closeOrphanedPages(): Promise<void> {
+        const orphaned = vscode.window.tabGroups.all.flatMap(g => g.tabs).filter(t =>
+            t.input instanceof vscode.TabInputWebview && /clarion\.(solutionProperties|openSolution|newSolutionReview)$/.test(t.input.viewType));
+        if (orphaned.length === 0) return;
+        SolutionPanel.reopenAfterRestart = orphaned.some(t => (t.input as vscode.TabInputWebview).viewType.endsWith('clarion.solutionProperties'));
+        try {
+            await vscode.window.tabGroups.close(orphaned);
+        } catch (err) {
+            logger.warn(`could not close the pages left from before the restart: ${err instanceof Error ? err.message : String(err)}`);
+        }
+        SolutionPanel.refresh();
     }
 
     /** The loaded solution's page; focused when it is already open. */
@@ -120,6 +144,11 @@ export class SolutionPanel {
 
     /** The loaded solution changed (version, configuration, startup project, settings, a reload). */
     static refresh(): void {
+        if (SolutionPanel.reopenAfterRestart && globalSolutionFile) {
+            SolutionPanel.reopenAfterRestart = false;
+            void SolutionPanel.showProperties();
+            return;
+        }
         const page = SolutionPanel.properties;
         if (!page) return;
         if (page.solutionFile !== globalSolutionFile) {
