@@ -208,10 +208,43 @@ export function mainFileError(file: string): string | undefined {
 }
 
 /** #795 — why a new project cannot be added as named; undefined when it can. */
-export function newProjectError(name: string, mainFile: string, projects: { name: string }[]): string | undefined {
+/** #796 — a new project's folder as the .sln names it: below the solution's folder, backslashed; '' beside the .sln. */
+export function projectFolder(folder: string): string {
+    return folder.trim().split(/[\\/]+/).filter(s => s.length > 0).join('\\');
+}
+
+/** #796 — why a new project cannot go in this folder; undefined when it can. */
+export function projectFolderError(folder: string): string | undefined {
+    const trimmed = folder.trim();
+    if (trimmed.length === 0) return undefined;
+    // A drive, a root or a UNC path is not below the solution's folder.
+    if (/^[\\/]/.test(trimmed) || /^[a-z]:/i.test(trimmed)) return 'The folder must be a path below the solution\'s folder';
+    const segments = trimmed.split(/[\\/]+/).filter(s => s.length > 0);
+    if (segments.some(s => s === '.' || s === '..')) return 'The folder must be a path below the solution\'s folder';
+    // Windows drops a trailing dot or space, so the folder made would not be the one named; it refuses a
+    // control character only after making the folders above it, which the add could not then remove.
+    // eslint-disable-next-line no-control-regex
+    if (segments.some(s => /[:*?"<>|\x00-\x1f]/.test(s) || /[. ]$/.test(s))) return 'Folder name contains invalid characters';
+    if (segments.some(s => /^(con|prn|aux|nul|com\d|lpt\d)(\..*)?$/i.test(s))) return 'Folder name is reserved by Windows';
+    return undefined;
+}
+
+/**
+ * #796 — a project reads the .red in its own folder, then the one in bin (checked with Clarion 10
+ * MSBuild; the language server looks in the same order). One beside the .sln is not read for a
+ * project in a sub-folder, so the add says so. A full-path .red name is read from that path for
+ * every project (#765), so nothing changes then.
+ */
+export function subfolderRedNote(solutionFolder: string, folder: string, redirectionFile: string, exists: (file: string) => boolean): string | undefined {
+    if (!folder || !redirectionFile || path.win32.isAbsolute(redirectionFile)) return undefined;
+    if (!exists(path.win32.join(solutionFolder, redirectionFile))) return undefined;
+    return `The ${redirectionFile} beside the solution does not apply to ${folder}: a project reads the .red in its own folder, else the one in bin.`;
+}
+
+export function newProjectError(name: string, mainFile: string, projects: { name: string }[], folder = ''): string | undefined {
     if (!name || name.trim().length === 0) return 'Project name cannot be empty';
     // A path would write outside the folder; an apostrophe would end the name in a DLL's .exp.
     if (/[\\/:*?"<>|']/.test(name)) return 'Project name contains invalid characters';
     if (projects.some(p => p.name.toLowerCase() === name.trim().toLowerCase())) return `The solution already has a project called ${name.trim()}`;
-    return mainFileError(mainFile);
+    return projectFolderError(folder) ?? mainFileError(mainFile);
 }

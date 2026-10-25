@@ -14,7 +14,7 @@ import { addProjectToSln, projectGuidOf } from './SlnEdit';
 import { generateGuid, newProjectFiles } from './SolutionFiles';
 import LoggerManager from '../utils/LoggerManager';
 import {
-    buildSolutionPageState, InstallationOption, newProjectError, projectsInSln, projectSummary, SolutionChoice, SolutionPageInput, SolutionPageProject,
+    buildSolutionPageState, InstallationOption, newProjectError, projectFolder, projectsInSln, subfolderRedNote, projectSummary, SolutionChoice, SolutionPageInput, SolutionPageProject,
 } from './SolutionPage';
 
 const logger = LoggerManager.getLogger('SolutionPanel');
@@ -28,7 +28,7 @@ export interface OpenSelection {
     configuration: string;
 }
 
-interface PageMessage { type: string; field?: string; value?: string; cwproj?: string; checked?: boolean; name?: string; kind?: 'exe' | 'dll'; mainFile?: string; }
+interface PageMessage { type: string; field?: string; value?: string; cwproj?: string; checked?: boolean; name?: string; kind?: 'exe' | 'dll'; mainFile?: string; folder?: string; }
 
 /**
  * #792 — the Solution page in the editor area. `showProperties` shows the loaded solution and
@@ -349,7 +349,7 @@ export class SolutionPanel {
                 await vscode.commands.executeCommand('clarion.unresolvedReferencesReport');
                 break;
             case 'addNew':
-                await this.addNewProject(msg.name ?? '', msg.kind === 'dll' ? 'dll' : 'exe', msg.mainFile ?? '');
+                await this.addNewProject(msg.name ?? '', msg.kind === 'dll' ? 'dll' : 'exe', msg.mainFile ?? '', msg.folder ?? '');
                 break;
             case 'addExisting':
                 await this.addExistingProject();
@@ -359,20 +359,21 @@ export class SolutionPanel {
 
     /**
      * #795 — a new project in the solution's folder: its .cwproj, main program and (a DLL) export
-     * file, then its entry in the .sln. Nothing is written over an existing file.
+     * file, then its entry in the .sln. Nothing is written over an existing file. #796: or in a
+     * folder below it, made when it is missing.
      */
-    private async addNewProject(name: string, kind: 'exe' | 'dll', mainFile: string): Promise<void> {
-        const error = newProjectError(name, mainFile, this.input?.projects ?? []);
+    private async addNewProject(name: string, kind: 'exe' | 'dll', mainFile: string, subfolder: string): Promise<void> {
+        const error = newProjectError(name, mainFile, this.input?.projects ?? [], subfolder);
         if (error) {
             void this.panel.webview.postMessage({ type: 'addError', message: error });
             return;
         }
         const folder = path.dirname(this.solutionFile);
         const guid = generateGuid();
-        const files = newProjectFiles({ name: name.trim(), kind, mainFile: mainFile.trim(), guid });
+        const files = newProjectFiles({ name: name.trim(), kind, mainFile: mainFile.trim(), guid, folder: projectFolder(subfolder) });
         const existing = files.filter(f => fs.existsSync(path.join(folder, f.path))).map(f => f.path);
         if (existing.length) {
-            void this.panel.webview.postMessage({ type: 'addError', message: `Already in the solution's folder: ${existing.join(', ')}` });
+            void this.panel.webview.postMessage({ type: 'addError', message: `Already there: ${existing.join(', ')}` });
             return;
         }
         let sln: string;
@@ -387,7 +388,11 @@ export class SolutionPanel {
         // All or nothing: a file that appeared meanwhile is not overwritten ('wx'), and when a later
         // write fails the files already written are removed, so a retry is not blocked by them.
         const written: string[] = [];
+        const projectDir = path.dirname(path.join(folder, files[0].path));
+        let madeFrom: string | undefined;
         try {
+            // #796: the first folder this made, so a failed add removes exactly what it created.
+            madeFrom = fs.mkdirSync(projectDir, { recursive: true });
             for (const f of files) {
                 fs.writeFileSync(path.join(folder, f.path), f.content, { encoding: 'utf8', flag: 'wx' });
                 written.push(path.join(folder, f.path));
@@ -397,10 +402,14 @@ export class SolutionPanel {
             for (const f of written) {
                 try { fs.unlinkSync(f); } catch { /* leave it; the message names the failure */ }
             }
+            // Deepest first, and only while empty: something put there meanwhile is kept.
+            for (let dir = projectDir; madeFrom && dir.length >= madeFrom.length; dir = path.dirname(dir)) {
+                try { fs.rmdirSync(dir); } catch { break; }
+            }
             void this.panel.webview.postMessage({ type: 'addError', message: writeError(err, this.solutionFile) });
             return;
         }
-        await this.solutionChanged(name.trim());
+        await this.solutionChanged(name.trim(), subfolderRedNote(folder, projectFolder(subfolder), globalSettings.redirectionFile, fs.existsSync));
     }
 
     /** #795 — an existing .cwproj, named in the .sln by its own GUID and its path from the solution's folder. */
@@ -436,11 +445,12 @@ export class SolutionPanel {
      * version change does: the Solution View shows the language server's solution, parsed when it
      * was loaded, and refreshing the cache only fetched that same tree again.
      */
-    private async solutionChanged(added: string): Promise<void> {
+    private async solutionChanged(added: string, note?: string): Promise<void> {
         void this.panel.webview.postMessage({ type: 'added' });
         await vscode.commands.executeCommand('clarion.reinitializeSolution');
         await this.reload();
-        vscode.window.showInformationMessage(`Added ${added} to ${path.basename(this.solutionFile)}.`);
+        if (note) vscode.window.showWarningMessage(`Added ${added} to ${path.basename(this.solutionFile)}. ${note}`);
+        else vscode.window.showInformationMessage(`Added ${added} to ${path.basename(this.solutionFile)}.`);
     }
 
     /** A field changed: kept on the page while opening; applied to the loaded solution otherwise. */
@@ -592,10 +602,13 @@ function html(webview: vscode.Webview): string {
       const kind = el('select', { id: 'np-kind', 'aria-label': 'EXE or DLL' }, el('option', { value: 'exe' }, 'EXE'), el('option', { value: 'dll' }, 'DLL'));
       const main = el('input', { type: 'text', id: 'np-main', 'aria-label': 'Main source file', placeholder: 'Main source file',
         oninput: () => { mainEdited = true; } });
+      // #796: empty keeps the project beside the .sln; otherwise a folder below it.
+      const folder = el('input', { type: 'text', id: 'np-folder', 'aria-label': 'Folder below the solution folder',
+        placeholder: 'Folder (empty: beside the .sln)', title: 'A folder below the solution folder, such as Orders or Libs/Orders. Made when it does not exist.' });
       const form = el('div', { class: 'row', id: 'np-form', hidden: !adding },
-        el('div', { class: 'with-button' }, name, kind, main,
+        el('div', { class: 'with-button' }, name, kind, main, folder,
           el('button', { type: 'button', class: 'primary', onclick: () => post('addNew', {
-            name: name.value, kind: kind.value, mainFile: main.value }) }, 'Add'),
+            name: name.value, kind: kind.value, mainFile: main.value, folder: folder.value }) }, 'Add'),
           el('button', { type: 'button', class: 'secondary', onclick: () => { adding = false; addError = ''; render(); } }, 'Cancel'),
           el('span', { class: 'note', id: 'np-error' }, addError)));
       sections[sections.length - 1].append(
@@ -631,7 +644,7 @@ function html(webview: vscode.Webview): string {
     if (e.data && e.data.type === 'state') {
       // A redraw (the graph or a setting changed) keeps the new-project form as it was: what is
       // typed, which field has focus and where its caret is.
-      const ids = ['np-name', 'np-kind', 'np-main'];
+      const ids = ['np-name', 'np-kind', 'np-main', 'np-folder'];
       const keep = adding ? ids.map(id => document.getElementById(id) && document.getElementById(id).value) : null;
       const focused = document.activeElement && ids.includes(document.activeElement.id) ? document.activeElement : null;
       const caret = focused && 'selectionStart' in focused ? [focused.selectionStart, focused.selectionEnd] : null;

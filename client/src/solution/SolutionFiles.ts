@@ -120,12 +120,15 @@ export function buildProgramContent(kind: 'exe' | 'dll'): string {
 /**
  * #795 — the files of a project added from Solution Properties, relative to the solution's
  * folder: its .cwproj, its main program and, for a DLL, the export file it cannot link without.
+ * #796: all in `folder` (backslashed, below the solution's folder) when one is given; the
+ * .cwproj names its sources from its own folder.
  */
-export function newProjectFiles(spec: { name: string; kind: 'exe' | 'dll'; mainFile: string; guid: string }): { path: string; content: string }[] {
+export function newProjectFiles(spec: { name: string; kind: 'exe' | 'dll'; mainFile: string; guid: string; folder?: string }): { path: string; content: string }[] {
+    const at = (file: string) => spec.folder ? `${spec.folder}\\${file}` : file;
     const files = [
-        { path: `${spec.name}.cwproj`, content: buildCwprojContent({ name: spec.name, guid: spec.guid, compile: [spec.mainFile], kind: spec.kind }) },
-        { path: spec.mainFile, content: buildProgramContent(spec.kind) },
+        { path: at(`${spec.name}.cwproj`), content: buildCwprojContent({ name: spec.name, guid: spec.guid, compile: [spec.mainFile], kind: spec.kind }) },
+        { path: at(spec.mainFile), content: buildProgramContent(spec.kind) },
     ];
-    if (spec.kind === 'dll') files.push({ path: `${spec.name}.exp`, content: buildMinimalExpContent(spec.name) });
+    if (spec.kind === 'dll') files.push({ path: at(`${spec.name}.exp`), content: buildMinimalExpContent(spec.name) });
     return files;
 }
