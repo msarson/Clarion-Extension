@@ -51,6 +51,16 @@ suite('Solution View: the IDE folders are shown and open the Sources tab (#803)'
         assert.match(read('extension.ts'), /registerProjectFolderCommands\(solutionTreeDataProvider\)/);
     });
 
+    test('the Sources tab lists the projects to include, adds them by file dialog and removes them', () => {
+        const sources = editor.slice(editor.indexOf('function sources(s)'), editor.indexOf('function render()'));
+        assert.match(sources, /'Projects to include'/);
+        assert.match(sources, /s\.includes\.map\(i => itemRow\('Include', i\.include/);
+        assert.match(sources, /postMessage\(\{ type: 'pickInclude' \}\)/);
+        const host = editor.slice(editor.indexOf("case 'pickInclude'"), editor.indexOf("case 'xml'"));
+        assert.match(host, /'TopSpeed project': \['prj', 'pr'\]/);
+        assert.match(host, /addItem\(text, 'Include', includeFor\(folder, f\.fsPath\)\)/);
+    });
+
     test('the Project Properties page shows the tab it is opened on, when opening or already open', () => {
         assert.match(editor, /registerCommand\('clarion\.openProjectProperties', async \([^)]*, tab\?: string\)/);
         assert.match(editor, /postMessage\(\{ type: 'tab', tab \}\)/);

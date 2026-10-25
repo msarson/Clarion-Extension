@@ -120,6 +120,20 @@ export class ProjectPropertiesEditorProvider implements vscode.CustomTextEditorP
                         await applyText(document, text);
                         break;
                     }
+                    case 'pickInclude': {
+                        // #803: TopSpeed projects to include, relative to the project's folder.
+                        const folder = path.dirname(document.uri.fsPath);
+                        const files = await vscode.window.showOpenDialog({
+                            canSelectMany: true,
+                            defaultUri: vscode.Uri.file(folder),
+                            filters: { 'TopSpeed project': ['prj', 'pr'] },
+                            openLabel: 'Add to project',
+                        });
+                        let text = document.getText();
+                        for (const f of files ?? []) text = addItem(text, 'Include', includeFor(folder, f.fsPath));
+                        await applyText(document, text);
+                        break;
+                    }
                     case 'xml':
                         await vscode.commands.executeCommand('vscode.openWith', document.uri, 'default');
                         break;
@@ -277,8 +291,14 @@ function pageHtml(webview: vscode.Webview): string {
       ...(s.libraries.length === 0 ? [none('No libraries or objects.')] : s.libraries.map(i => itemRow('Library', i.include, i.include))),
       el('div', { class: 'add' }, library, el('button', { type: 'button', class: 'secondary', onclick: addLibrary }, 'Add')));
 
+    // #803: the IDE's "Projects to include": legacy TopSpeed projects pulled into the build.
+    const includes = el('section', {},
+      el('h2', {}, 'Projects to include'),
+      ...(s.includes.length === 0 ? [none('No TopSpeed projects included.')] : s.includes.map(i => itemRow('Include', i.include, i.include))),
+      el('div', { class: 'add' }, el('button', { type: 'button', class: 'secondary', onclick: () => vscode.postMessage({ type: 'pickInclude' }) }, 'Add project file…')));
+
     return [el('div', { class: 'muted' }, 'Items apply to every configuration.'), compiled,
-      el('div', { class: 'columns' }, references, drivers, libraries)];
+      el('div', { class: 'columns' }, references, drivers, libraries, includes)];
   }
 
   function render() {
