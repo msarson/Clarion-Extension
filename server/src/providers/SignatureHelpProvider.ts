@@ -3,7 +3,7 @@ import { SignatureHelp, SignatureInformation, ParameterInformation, Position } f
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import LoggerManager from '../logger';
 import { Token, TokenType } from '../ClarionTokenizer';
-import { ProcedureParameter } from '../tokenizer/ProcedureParameterParser';
+import { ProcedureParameter, ProcedureParameterParser } from '../tokenizer/ProcedureParameterParser';
 import { TokenCache } from '../TokenCache';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
@@ -772,6 +772,14 @@ export class SignatureHelpProvider {
     ): SignatureInformation {
         const parameters: ParameterInformation[] = [];
 
+        // A raw signature line (class members, cross-file declarations) goes through the same
+        // parser as tokenized ones, so `<...>` and `= default` survive into the popup: the regex
+        // below dropped both, and an omittable parameter was shown as a required one.
+        if (!structured) {
+            const parsed = ProcedureParameterParser.parse(signature);
+            if (parsed.length > 0) structured = parsed;
+        }
+
         if (structured) {
             for (const p of structured) {
                 parameters.push({
@@ -827,7 +835,8 @@ export class SignatureHelpProvider {
     private formatStructuredParameterLabel(p: ProcedureParameter): string {
         const typePart = p.typeArg !== undefined ? `${p.type}(${p.typeArg})` : p.type;
         const byRef = p.byRef ? '*' : '';
-        const core = p.name ? `${byRef}${typePart} ${p.name}` : `${byRef}${typePart}`;
+        const decl = p.name ? `${byRef}${typePart} ${p.name}` : `${byRef}${typePart}`;
+        const core = p.default !== undefined ? `${decl}=${p.default}` : decl;
         return p.optional ? `<${core}>` : core;
     }
 
