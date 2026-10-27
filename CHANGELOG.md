@@ -21,6 +21,7 @@ All notable changes to the Clarion Extension are documented here.
 - **Go to Implementation from a call finds a procedure prototyped behind an extra INCLUDE.** When the file included in the global data only included the one holding the MAP, the call went unresolved although Go to Definition found the prototype. [#809](https://github.com/msarson/Clarion-Extension/issues/809)
 - **The INTERFACE card shows a parent interface and COM.** The syntax now reads `INTERFACE([parentinterface]) [,TYPE] [,COM]`, and the card no longer says every method must be implemented: a derived class that re-implements its parent's interface may leave methods to the parent. [#797](https://github.com/msarson/Clarion-Extension/issues/797)
 - **Signature help for a class method shows which parameters can be omitted.** An omittable parameter lost its `<...>` and a default value its `=1`, so `<*InfoGroup pInfo>, LONG pMode=1` read as two required arguments; both now show as declared, for procedures too. [#813](https://github.com/msarson/Clarion-Extension/pull/813) @geircodes
+- **Completion offers what a module's own INCLUDE declares.** A MEMBER module that INCLUDEs a header before its first procedure can use the header's types and globals, but completion only followed the PROGRAM's INCLUDEs, so typing the start of such a type offered nothing. A class's properties are also no longer offered as globals by name. [#814](https://github.com/msarson/Clarion-Extension/pull/814) @geircodes
 
 #### Diagnostics
 
