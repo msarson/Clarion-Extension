@@ -228,6 +228,8 @@ export class WordCompletionProvider {
             // ----------------------------------------------------------------
             this.collectVariables(tokens, scope, position, procDeclLines, addIn(SORT_TIER.LOCAL));
             lap('variables_ms');
+            this.collectModuleIncludeGlobals(tokens, document, addIn(SORT_TIER.PROGRAM_DATA));
+            lap('module_includes_ms');
             this.collectProgramGlobalDataSymbols(tokens, document, addIn(SORT_TIER.PROGRAM_DATA));
             lap('program_globals_ms');
 
@@ -818,6 +820,41 @@ export class WordCompletionProvider {
         WordCompletionProvider.programGlobalsByTokens.set(programTokens, { symbols: recorded, includes });
     }
 
+    /**
+     * Globals of the headers this document INCLUDEs in its own data section — a MEMBER module's
+     * `INCLUDE('MyClass.inc')` before its first procedure makes the header's types and globals
+     * visible to that module, but the header is never inlined into the module's token stream.
+     * Same rule as the PROGRAM's INCLUDEs in collectProgramGlobalDataSymbols: one level deep,
+     * EQUATEs left to collectProjectEquates.
+     */
+    private collectModuleIncludeGlobals(
+        tokens: Token[],
+        document: TextDocument,
+        add: (label: string, kind: CompletionItemKind, detail?: string, documentation?: string, typeText?: string) => void
+    ): void {
+        const currentPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+        for (const fileName of this.findDataSectionIncludes(tokens)) {
+            const incPath = resolveViaProjectRedirection(fileName, currentPath)
+                ?? path.join(path.dirname(currentPath), fileName);
+            const inc = this.getTokensForFile(incPath);
+            if (!inc || inc.tokens.length === 0) continue;
+
+            // The header's globals depend only on its tokens, which are replaced when it changes.
+            let symbols = WordCompletionProvider.includeGlobalsByTokens.get(inc.tokens);
+            if (!symbols) {
+                const recorded: ProgramGlobalSymbol[] = [];
+                this.collectFileDataGlobals(inc.tokens, true, (label, kind, detail, documentation, typeText) =>
+                    recorded.push({ label, kind, detail, documentation, typeText }));
+                WordCompletionProvider.includeGlobalsByTokens.set(inc.tokens, recorded);
+                symbols = recorded;
+            }
+            for (const g of symbols) add(g.label, g.kind, g.detail, g.documentation, g.typeText);
+        }
+    }
+
+    /** Globals of one data-section INCLUDE per token array (replaced when the file changes). */
+    private static readonly includeGlobalsByTokens = new WeakMap<Token[], ProgramGlobalSymbol[]>();
+
     /** Column-0 global labels and PRE-qualified fields of one file's data section. */
     private collectFileDataGlobals(
         tokens: Token[],
@@ -826,11 +863,18 @@ export class WordCompletionProvider {
     ): void {
         const procDeclLines = new Set<number>();
         const equateLines = new Set<number>();
+        // A CLASS/INTERFACE body's member labels are never parent-linked, so they would read as
+        // globals here; they are reached through the instance (SELF.x, obj.x), not by bare name.
+        const classBodies: { start: number; end: number }[] = [];
         for (const t of tokens) {
             if (TokenHelper.isProcedureOrFunction(t) || t.subType === TokenType.Routine) {
                 procDeclLines.add(t.line);
             }
             if (skipEquates && t.value.toUpperCase() === 'EQUATE') equateLines.add(t.line);
+            if (t.type === TokenType.Structure && t.finishesAt !== undefined
+                && (t.value.toUpperCase() === 'CLASS' || t.value.toUpperCase() === 'INTERFACE')) {
+                classBodies.push({ start: t.line, end: t.finishesAt });
+            }
         }
 
         const isLabel = (t: Token) =>
@@ -839,7 +883,8 @@ export class WordCompletionProvider {
             !t.isStructureField &&
             (!t.parent || t.parent.type !== TokenType.Structure) &&
             !procDeclLines.has(t.line) &&
-            !equateLines.has(t.line);
+            !equateLines.has(t.line) &&
+            !classBodies.some(b => t.line > b.start && t.line <= b.end);
 
         this.collectGlobalLabels(tokens, procDeclLines, isLabel, add);
         this.collectGlobalPrefixedFields(tokens, add);
