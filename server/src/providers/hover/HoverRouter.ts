@@ -87,6 +87,11 @@ export class HoverRouter {
         };
 
         try {
+            // 0. #820: the NAME of a prototype parameter (`STRING Password`, `&MyQ Key`) is a
+            // label, whatever word it is: no attribute, keyword or data-type card applies.
+            // Variable resolution (after the router) gives it its parameter card.
+            if (this.namesPrototypeParameter(context)) return null;
+
             // 1. Handle special keywords (MODULE, TO, ELSE, PROCEDURE)
             const keywordHover = this.handleSpecialKeywords(context);
             mark('keywords');
@@ -163,8 +168,9 @@ export class HoverRouter {
             const headerAttributeHover = this.handleHeaderAttribute(word, position, documentStructure);
             if (headerAttributeHover) return headerAttributeHover;
 
-            // 9. Handle attributes
-            const attributeHover = this.handleAttribute(word, line, wordRange, document, position, documentStructure, isInClassBlock, tokens);
+            // 9. Handle attributes — never in a CODE section (#820): attributes belong to
+            // declarations, so a word there that names one (`Check = 1`) is a variable.
+            const attributeHover = this.isNameInCode(context) ? null : this.handleAttribute(word, line, wordRange, document, position, documentStructure, isInClassBlock, tokens);
             mark('attribute');
             if (attributeHover) return attributeHover;
 
@@ -279,6 +285,10 @@ export class HoverRouter {
             // (`HIDE(?List)`) — a bare, uncalled, non-declaration word is a
             // plain variable, not either of these.
             if (this.isDottedOrNestedKeywordReference(context)) {
+                return null;
+            }
+            // #820: a field declared with this name (`Hide BYTE` in a CLASS) is a label.
+            if (isDeclarationLabel(tokens, position.line, position.character)) {
                 return null;
             }
             const controlContext = documentStructure.getControlContextAt(position.line, position.character);
@@ -989,6 +999,48 @@ export class HoverRouter {
             if (t.type === TokenType.ExecutionMarker && t.value.toUpperCase() === 'CODE') code = t;
         }
         return !!code && !tokens.some(t => t.executionMarker === code);
+    }
+
+    /**
+     * #820 — whether the hovered word is the NAME of a parameter in a prototype's parameter list:
+     * `PROCEDURE(STRING pUser, <*STRING Password>, &MyQ Key, LONG Hide=1)`, on the PROCEDURE's
+     * line or a `|` continuation of it. The word follows exactly one type word at the start of its
+     * parameter (after `(`, `,` or `<`) and ends the parameter (`,` `)` `>` `=`), inside the
+     * brackets that follow PROCEDURE/FUNCTION or a MAP prototype's own label (`Name(LONG x)`).
+     */
+    private namesPrototypeParameter(context: HoverContext): boolean {
+        const { position, documentStructure } = context;
+        const logical: LogicalLine | undefined = documentStructure.getLogicalLine?.(position.line);
+        if (!logical) return false;
+        const toks = logical.tokens;
+        const i = toks.findIndex(t =>
+            t.line === position.line &&
+            position.character >= t.start &&
+            position.character <= t.start + t.value.length);
+        if (i < 2) return false;
+        const isWord = (t: Token) => /^[A-Za-z_][\w:]*$/.test(t.value);
+        if (!isWord(toks[i])) return false;
+        const next = toks[i + 1];
+        if (next && ![',', ')', '>', '='].includes(next.value)) return false;
+        // the type before it: a word, `*TYPE` or `&TYPE` (one token each), at the parameter's start
+        const type = toks[i - 1];
+        if (!/^[*&]?\s*[A-Za-z_][\w:.]*$/.test(type.value)) return false;
+        const opener = toks[i - 2];
+        if (!['(', ',', '<'].includes(opener.value)) return false;
+        // the bracket that holds the list: PROCEDURE( / FUNCTION( or a MAP prototype's `Label(`
+        let depth = 0;
+        for (let j = i - 1; j >= 0; j--) {
+            const v = toks[j].value;
+            if (v === ')') depth++;
+            else if (v === '(') {
+                if (depth > 0) { depth--; continue; }
+                const before = toks[j - 1];
+                if (!before) return false;
+                if (/^(PROCEDURE|FUNCTION)$/i.test(before.value)) return true;
+                return j === 1 && before.start === 0 && before.type === TokenType.Label && context.isInMapBlock;
+            }
+        }
+        return false;
     }
 
     /**
