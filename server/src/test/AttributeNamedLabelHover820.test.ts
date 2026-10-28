@@ -130,3 +130,19 @@ suite('A label named like an attribute or keyword keeps its own card (#820)', ()
         });
     });
 });
+
+suite('An array parameter named like an attribute keeps its own card (#820 review)', () => {
+    const lines = [
+        '  PROGRAM',
+        '  MAP',
+        '  END',
+        'MyClass CLASS,TYPE',
+        'Login     PROCEDURE(STRING pUser, *STRING[] Password),BYTE',
+        '        END',
+        '  CODE',
+    ];
+
+    test('*STRING[] Password in a CLASS method prototype', async () => {
+        assertLabelCard(await hoverAt(lines, 4, 'Password'), 'Password');
+    });
+});

@@ -5,6 +5,7 @@
 
 import LoggerManager from '../logger';
 import { DeclaredValueParser } from '../tokenizer/DeclaredValueParser';
+import { ClarionTokenizer } from '../ClarionTokenizer';
 
 const logger = LoggerManager.getLogger("ProcedureSignatureUtils");
 logger.setLevel("error");
@@ -353,7 +354,7 @@ export class ProcedureSignatureUtils {
             if (raw === undefined) break;
             const code = DeclaredValueParser.stripTrailingComment(raw.replace(/\r$/, '')).trimEnd();
             segments.push({ line: i, offset: header.length });
-            if (!code.endsWith('|')) { header += code; break; }
+            if (!ClarionTokenizer.endsWithContinuation(code)) { header += code; break; }
             header += code.slice(0, -1) + '  ';
         }
 
@@ -364,15 +365,16 @@ export class ProcedureSignatureUtils {
         let column = match.index + match[0].indexOf('(') + 1;
         for (const param of match[1].split(',')) {
             const stripped = param.trim().replace(/^<(.*)>$/, '$1').trim();
-            // [*&]? TYPE NAME [= default]; TYPE may carry a prefix (*HTTP:Query), NAME may be prefixed (LOC:test)
-            const m = stripped.match(/([*&]?\s*[\w:]+)\s+([A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*)?)(?:\s*=.*)?$/i);
+            // [*&]? TYPE[[]] NAME [= default]; TYPE may carry a prefix (*HTTP:Query) and an array's
+            // `[]` or `[,]` (*STRING[] Names), NAME may be prefixed (LOC:test)
+            const m = stripped.match(/([*&]?\s*[\w:]+(?:\s*\[[^\]]*\])?)\s+([A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*)?)(?:\s*=.*)?$/i);
             if (m) {
                 const name = m[2];
                 const nameLower = name.toLowerCase();
                 if (nameLower === wordLower || nameLower.endsWith(':' + wordLower)) {
-                    // The name as a whole word, so a type ending in the same word (HTTP:Query Query) is skipped.
-                    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-                    const at = param.search(new RegExp(`(?<![\\w:])${escaped}(?![\\w:])`, 'i'));
+                    // Where the match put the name, after its type: a type spelled like the name
+                    // (`&Window Window`, `HTTP:Query Query`) is never taken for it.
+                    const at = param.indexOf(stripped) + m.index! + m[0].indexOf(m[2], m[1].length);
                     const offset = column + Math.max(at, 0);
                     let seg = segments[0];
                     for (const s of segments) { if (s.offset <= offset) seg = s; else break; }

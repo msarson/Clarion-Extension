@@ -6,6 +6,7 @@ import { DefinitionProvider } from '../providers/DefinitionProvider';
 import { ReferencesProvider } from '../providers/ReferencesProvider';
 import { TokenCache } from '../TokenCache';
 import { setServerInitialized } from '../serverState';
+import { ProcedureSignatureUtils } from '../utils/ProcedureSignatureUtils';
 
 /**
  * #825 — a parameter declared on a `|` continuation line of a procedure or method
@@ -198,4 +199,22 @@ suite('A parameter on a | continuation line is a parameter (#825)', () => {
             });
         }
     }
+});
+
+suite('findHeaderParameter places a parameter named like its type on its name (#825 review)', () => {
+    const lines = [
+        'Show         PROCEDURE(&Window Window, |',
+        '                       *MyGroup MyGroup)',
+    ];
+    const at = (word: string) => ProcedureSignatureUtils.findHeaderParameter(n => lines[n], 0, word);
+
+    test('&Window Window: the name, not the type', () => {
+        const got = at('Window');
+        assert.deepStrictEqual(got && [got.line, got.character], [0, lines[0].lastIndexOf('Window')]);
+    });
+
+    test('*MyGroup MyGroup on a continuation line: the name, not the type', () => {
+        const got = at('MyGroup');
+        assert.deepStrictEqual(got && [got.line, got.character], [1, lines[1].lastIndexOf('MyGroup')]);
+    });
 });

@@ -118,13 +118,23 @@ export function parseDefineConstants(cwprojText: string, configuration: string):
         for (const constants of body.matchAll(/<DefineConstants>([\s\S]*?)<\/DefineConstants\s*>/gi)) {
             const value = decodeEntities(constants[1]);
             if (!/\$\(DefineConstants\)/i.test(value)) defines = {};
-            for (const entry of value.split(';')) {
-                const m = /^\s*([A-Za-z_][\w:]*)\s*=>?\s*(.*?)\s*$/.exec(entry);
-                if (m) defines[m[1].toLowerCase()] = m[2];
-            }
+            readDefineEntries(value, defines);
         }
     }
     return defines;
+}
+
+/**
+ * The entries of a define list into `into`, as the build task reads DefineConstants and a source's
+ * `defines` alike (CW.AddPragmas): split on ';', each on '=>' only; a bare name is on, so `A=1` is
+ * no define of A. Names in lower case.
+ */
+function readDefineEntries(value: string, into: Record<string, string>): void {
+    for (const entry of value.split(';')) {
+        const parts = entry.split('=>').map(p => p.trim()).filter(p => p !== '');
+        if (parts.length < 1 || parts.length > 2 || !/^[A-Za-z_][\w:]*$/.test(parts[0])) continue;
+        into[parts[0].toLowerCase()] = parts[1] ?? 'on';
+    }
 }
 
 /**
@@ -141,11 +151,9 @@ export function parseCompileDefines(cwprojText: string): Record<string, Record<s
         const include = /\bInclude\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(item[1]);
         if (!body || !include) continue;
         const own: Record<string, string> = {};
-        for (const meta of body.matchAll(/<defines\s*>([\s\S]*?)<\/defines\s*>/gi)) {
-            for (const entry of decodeEntities(meta[1]).split(';')) {
-                const m = /^\s*([A-Za-z_][\w:]*)\s*(?:=>\s*(.*?))?\s*$/.exec(entry);
-                if (m) own[m[1].toLowerCase()] = m[2] === undefined || m[2] === '' ? 'on' : m[2];
-            }
+        // CW.AddSources switches on the metadata name as written: `Defines` is not read.
+        for (const meta of body.matchAll(/<defines\s*>([\s\S]*?)<\/defines\s*>/g)) {
+            readDefineEntries(decodeEntities(meta[1]), own);
         }
         if (Object.keys(own).length) result[decodeEntities(include[1] ?? include[2]).toLowerCase()] = own;
     }

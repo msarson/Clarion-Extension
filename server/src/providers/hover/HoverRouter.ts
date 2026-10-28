@@ -156,8 +156,9 @@ export class HoverRouter {
             }
 
             // 8. Handle data types and controls
+            const isNameInCode = this.isNameInCode(context);
             const symbolHover = this.symbolResolver.resolve(word, {
-                hasLabelBefore, isInWindowContext, isFollowedByIdentifier, isNameInCode: this.isNameInCode(context),
+                hasLabelBefore, isInWindowContext, isFollowedByIdentifier, isNameInCode,
                 opensParameter: this.opensParameter(context),
             });
             mark('symbol');
@@ -170,7 +171,7 @@ export class HoverRouter {
 
             // 9. Handle attributes — never in a CODE section (#820): attributes belong to
             // declarations, so a word there that names one (`Check = 1`) is a variable.
-            const attributeHover = this.isNameInCode(context) ? null : this.handleAttribute(word, line, wordRange, document, position, documentStructure, isInClassBlock, tokens);
+            const attributeHover = isNameInCode ? null : this.handleAttribute(word, line, wordRange, document, position, documentStructure, isInClassBlock, tokens);
             mark('attribute');
             if (attributeHover) return attributeHover;
 
@@ -1022,10 +1023,17 @@ export class HoverRouter {
         if (!isWord(toks[i])) return false;
         const next = toks[i + 1];
         if (next && ![',', ')', '>', '='].includes(next.value)) return false;
-        // the type before it: a word, `*TYPE` or `&TYPE` (one token each), at the parameter's start
-        const type = toks[i - 1];
+        // the type before it: a word, `*TYPE` or `&TYPE` (one token each), at the parameter's start;
+        // an array parameter's `[]` or `[,]` after the type is skipped
+        let t = i - 1;
+        if (toks[t].value === ']' || toks[t].value === '[]') {
+            while (t > 0 && !toks[t].value.startsWith('[')) t--;
+            t--;
+        }
+        if (t < 1) return false;
+        const type = toks[t];
         if (!/^[*&]?\s*[A-Za-z_][\w:.]*$/.test(type.value)) return false;
-        const opener = toks[i - 2];
+        const opener = toks[t - 1];
         if (!['(', ',', '<'].includes(opener.value)) return false;
         // the bracket that holds the list: PROCEDURE( / FUNCTION( or a MAP prototype's `Label(`
         let depth = 0;

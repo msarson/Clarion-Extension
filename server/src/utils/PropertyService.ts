@@ -5,7 +5,7 @@ export type PropTarget = 'control' | 'file';
 
 export interface PropEntry {
     name: string;
-    /** The whole meaning: used by completion, and by the card when the target is not known. */
+    /** The whole meaning, used by completion; the hover card uses `targets` when there are any. */
     description: string;
     readOnly: boolean;
     /**

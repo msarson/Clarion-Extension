@@ -11,7 +11,7 @@ import { isAttributeKeyword, isDataType } from '../utils/AttributeKeywords';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { OmitCompileDetector, DirectiveBlock } from '../utils/OmitCompileDetector';
 import { resolvePrefixedName, prefixedNameStartsLine, continuesPreviousLine } from '../utils/PrefixChain';
-import { RESERVED as RESERVED_LABEL_WORDS } from './diagnostics/LabelDiagnostics';
+import { RESERVED_WORDS as RESERVED_LABEL_WORDS } from '../utils/ReservedWords';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
 /**

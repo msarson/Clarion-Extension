@@ -74,6 +74,18 @@ suite('COMPILE/OMIT decided from the project\'s defines (#812)', () => {
         assert.deepStrictEqual(parseDefineConstants(text, 'Debug'), { _abcdllmode_: '1', _abclinkmode_: '0', trace: 'on' });
     });
 
+    // The build task (CW.AddPragmas) reads DefineConstants and a source's `defines` alike: entries
+    // split on ';', each on '=>' only; a bare name is on, and `A=1` is no define of A.
+    test('DefineConstants and a source\'s defines read an entry as the build task does', () => {
+        const constants = '<Project><PropertyGroup><DefineConstants>A=1%3bB%3bC=&gt;2</DefineConstants></PropertyGroup></Project>';
+        assert.deepStrictEqual(parseDefineConstants(constants, 'Debug'), { b: 'on', c: '2' });
+        const items = '<Project><ItemGroup><Compile Include="X.clw"><defines>A=1;B;C=&gt;2</defines></Compile></ItemGroup></Project>';
+        assert.deepStrictEqual(parseCompileDefines(items), { 'x.clw': { b: 'on', c: '2' } });
+        // CW.AddSources switches on the metadata name as written: `Defines` is not `defines`.
+        const capital = '<Project><ItemGroup><Compile Include="Y.clw"><Defines>A=&gt;1</Defines></Compile></ItemGroup></Project>';
+        assert.deepStrictEqual(parseCompileDefines(capital), {});
+    });
+
     test('only the groups of the active configuration count', () => {
         const text = '<Project>'
             + "<PropertyGroup><DefineConstants>A=&gt;1%3bB=&gt;1</DefineConstants></PropertyGroup>"

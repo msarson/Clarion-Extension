@@ -113,4 +113,20 @@ suite('A structure keyword as a prototype parameter name opens nothing (#821)', 
             ""].join('\n');
         assert.deepStrictEqual(structureTokens(code).map(t => t.value.trim().toUpperCase()), ['MAP', 'WINDOW', 'OPTION']);
     });
+
+    test('regression: a comparison < leading a continued line opens no optional parameter', () => {
+        const code = [
+            "  PROGRAM",
+            "  MAP",
+            "  END",
+            "  CODE",
+            "  IF Total |",
+            "     < Limit |",
+            "     THEN LOOP 3 TIMES",
+            "      Total += 1",
+            "    END",
+            "  END",
+            ""].join('\n');
+        assert.deepStrictEqual(structureTokens(code).map(t => t.value.trim().toUpperCase()), ['MAP', 'IF', 'LOOP']);
+    });
 });
