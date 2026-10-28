@@ -179,6 +179,41 @@ export class ClarionTokenizer {
      * as OmitCompileDetector finds them) blanked to spaces, so columns are unchanged, and removes
      * those terminators from `open`.
      */
+    /**
+     * #415/#821 — the running '(' and optional-parameter '<' depth over line[0..pos), skipping
+     * string literals and stopping at a comment. `*Min` is the lowest the run dipped: below zero
+     * means a group opened on an earlier line closed on this one.
+     */
+    static bracketRuns(line: string, pos: number): { parenRun: number; parenMin: number; brkRun: number; brkMin: number } {
+        let parenRun = 0, parenMin = 0;
+        let brkRun = 0, brkMin = 0;
+        let inString = false;
+        for (let i = 0; i < pos; i++) {
+            const ch = line[i];
+            if (inString) {
+                if (ch === "'") {
+                    if (line[i + 1] === "'") { i++; continue; } // escaped '' stays in string
+                    inString = false;
+                }
+                continue;
+            }
+            if (ch === "'") { inString = true; continue; }
+            if (ch === '!') break; // rest of the line is a comment
+            if (ch === '(') parenRun++;
+            else if (ch === ')') { parenRun--; if (parenRun < parenMin) parenMin = parenRun; }
+            // #580 — '<' / '>' are also comparison operators (a<b, a > b, <>, <=, >=).
+            // Only a '<' where a parameter can start opens an optional parameter, and
+            // only a '>' where one can end closes it; otherwise a comparison left a
+            // bracket "open" (or dipped below zero) and demoted every later structure
+            // keyword on the line: `IF P<2 THEN x=1. ; IF P THEN c=2.`.
+            else if (ch === '<') { if (opensOptionalParameter(line, i)) brkRun++; }
+            else if (ch === '>') {
+                if (closesOptionalParameter(line, i, brkRun > 0)) { brkRun--; if (brkRun < brkMin) brkMin = brkRun; }
+            }
+        }
+        return { parenRun, parenMin, brkRun, brkMin };
+    }
+
     /** #771 — the line ends with the '|' continuation (outside a string, before any comment). */
     static endsWithContinuation(line: string): boolean {
         let inString = false;
@@ -357,6 +392,9 @@ export class ClarionTokenizer {
         const openTerminators: string[] = [];
         // #771: the previous line ended with '|', so this line continues its statement.
         let previousLineContinues = false;
+        // #821: open '(' / '<' depth at the end of the statement's lines so far.
+        let openParensCarried = 0;
+        let openBracketsCarried = 0;
 
         for (let lineNumber = 0; lineNumber < lines.length; lineNumber++) {
             const line = ClarionTokenizer.blankDirectiveTerminators(lines[lineNumber], openTerminators);
@@ -364,6 +402,17 @@ export class ClarionTokenizer {
             if (line.trim() === "") continue; // ✅ Skip blank lines
             const continuesStatement = previousLineContinues;
             previousLineContinues = ClarionTokenizer.endsWithContinuation(line);
+            // #821: '(' and '<' groups left open by the earlier lines of this statement.
+            const carriedParens = continuesStatement ? openParensCarried : 0;
+            const carriedBrackets = continuesStatement ? openBracketsCarried : 0;
+            if (previousLineContinues) {
+                const r = ClarionTokenizer.bracketRuns(line, line.length);
+                openParensCarried = Math.max(0, carriedParens + r.parenRun);
+                openBracketsCarried = Math.max(0, carriedBrackets + r.brkRun);
+            } else {
+                openParensCarried = 0;
+                openBracketsCarried = 0;
+            }
 
             let position = 0;
             tokensOnCurrentLine = 0; // Reset for new line
@@ -442,34 +491,12 @@ export class ClarionTokenizer {
                 //       Without this, a multi-line FORMAT(...) closing with `...'),FROM(QUEUE)` read
                 //       QUEUE as top-level and misclassified it as an (unterminated) structure opener.
                 const isInsideParamsOrTemplate = (pos: number): boolean => {
-                    let parenRun = 0, parenMin = 0;
-                    let brkRun = 0, brkMin = 0;
-                    let inString = false;
-                    for (let i = 0; i < pos; i++) {
-                        const ch = line[i];
-                        if (inString) {
-                            if (ch === "'") {
-                                if (line[i + 1] === "'") { i++; continue; } // escaped '' stays in string
-                                inString = false;
-                            }
-                            continue;
-                        }
-                        if (ch === "'") { inString = true; continue; }
-                        if (ch === '!') break; // rest of the line is a comment
-                        if (ch === '(') parenRun++;
-                        else if (ch === ')') { parenRun--; if (parenRun < parenMin) parenMin = parenRun; }
-                        // #580 — '<' / '>' are also comparison operators (a<b, a > b, <>, <=, >=).
-                        // Only a '<' where a parameter can start opens an optional parameter, and
-                        // only a '>' where one can end closes it; otherwise a comparison left a
-                        // bracket "open" (or dipped below zero) and demoted every later structure
-                        // keyword on the line: `IF P<2 THEN x=1. ; IF P THEN c=2.`.
-                        else if (ch === '<') { if (opensOptionalParameter(line, i)) brkRun++; }
-                        else if (ch === '>') {
-                            if (closesOptionalParameter(line, i, brkRun > 0)) { brkRun--; if (brkRun < brkMin) brkMin = brkRun; }
-                        }
-                    }
-                    const parenDepth = parenRun - Math.min(0, parenMin);
-                    const brkDepth = brkRun - Math.min(0, brkMin);
+                    const r = ClarionTokenizer.bracketRuns(line, pos);
+                    // #821 — a group opened on an earlier line of this continued statement
+                    // (`PROCEDURE(LONG a, |` then `LONG option, |`) is still open here.
+                    if (carriedParens + r.parenRun > 0 || carriedBrackets + r.brkRun > 0) return true;
+                    const parenDepth = r.parenRun - Math.min(0, r.parenMin);
+                    const brkDepth = r.brkRun - Math.min(0, r.brkMin);
                     return parenDepth > 0 || brkDepth > 0;
                 };
 
