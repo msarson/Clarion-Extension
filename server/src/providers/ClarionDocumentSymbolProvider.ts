@@ -11,6 +11,7 @@ import { isAttributeKeyword, isDataType } from '../utils/AttributeKeywords';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { OmitCompileDetector, DirectiveBlock } from '../utils/OmitCompileDetector';
 import { resolvePrefixedName, prefixedNameStartsLine, continuesPreviousLine } from '../utils/PrefixChain';
+import { RESERVED as RESERVED_LABEL_WORDS } from './diagnostics/LabelDiagnostics';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
 /**
@@ -730,7 +731,14 @@ export class ClarionDocumentSymbolProvider {
             // CRITICAL: Don't process variables after CODE statement
             // (#546: the FunctionArgumentParameter token type is no longer produced — a
             // parametrized type such as CSTRING(1024) is a Type token, spaced or not.)
-            if (!pastCodeStatement && (type === TokenType.Type || type === TokenType.TypeAnnotation || type === TokenType.ReferenceVariable || type === TokenType.Variable) && i > 0) {
+            // #819: a colon type such as `Q:Type` is one StructurePrefix token; it is a declaration's
+            // type when the name before it on the same line is a label - which starts in column 0
+            // (a colon name after `and` or `CASE` in code is not a type), and is not a reserved word
+            // (`OF STATE:Ohio` in column 1 starts a statement, #701).
+            const isColonType = type === TokenType.StructurePrefix && i > 0 && tokens[i - 1].line === line &&
+                resolvePrefixedName(tokens, i - 1).start === 0 &&
+                !RESERVED_LABEL_WORDS.has(tokens[i - 1].value.toUpperCase());
+            if (!pastCodeStatement && (type === TokenType.Type || type === TokenType.TypeAnnotation || type === TokenType.ReferenceVariable || type === TokenType.Variable || isColonType) && i > 0) {
                 logger.info(`✅ SymbolProvider: Calling handleVariableToken for token index=${i}, type=${type}, value="${token.value}", line=${token.line}`);
                 this.handleVariableToken(tokens, i, symbols, currentStructure, currentProcedure, lastMethodImplementation, parentStack);
 
@@ -1985,6 +1993,23 @@ export class ClarionDocumentSymbolProvider {
                 if (t.line !== line || t.type === TokenType.Comment) {
                     logger.info(`     - Stopping: line mismatch or comment`);
                     break;
+                }
+
+                // #819: a colon type arrives split - `&HTTP:Session` is `&HTTP` `:` `Session`,
+                // `&HTTP:A:B` is `&HTTP` `:` `A:B` - so a `:` welded to the type collected so far
+                // and to the next token carries the type on through that token. The token before
+                // the colon must be the one the type ends with: inside `STRING(SIZE(A:B:C.D))` the
+                // name was skipped, not collected, and the colon after it is not the type's.
+                if (!foundType && fullType !== '' && t.type === TokenType.Delimiter && t.value === ':') {
+                    const before = tokens[j - 1];
+                    const after = tokens[j + 1];
+                    if (after && after.line === line && fullType.endsWith(before.value) &&
+                        before.start + before.value.length === t.start && t.start + 1 === after.start) {
+                        fullType += ':' + after.value;
+                        fullDeclaration += ':' + after.value;
+                        j += 2;
+                        continue;
+                    }
                 }
 
                 // Skip label tokens (don't include the variable name in the type)

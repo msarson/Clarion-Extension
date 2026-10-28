@@ -19,7 +19,7 @@ import { Token, TokenType } from '../../ClarionTokenizer';
  *    QUEUE, SELF, PARENT, ...) is not enforced by either compiler: all 27 build as a PROCEDURE's
  *    label, a method, a field and a method's parameter or local, so nothing is reported for them.
  */
-const RESERVED = new Set([
+export const RESERVED = new Set([
     'ACCEPT', 'AND', 'ASSERT', 'BEGIN', 'BREAK', 'BY',
     'CASE', 'CATCH', 'CHOOSE', 'COMPILE', 'CONST',
     'CYCLE', 'DO', 'ELSE', 'ELSIF', 'END',
