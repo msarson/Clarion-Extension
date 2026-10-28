@@ -1,6 +1,7 @@
 import { compiledIncludeTest } from '../utils/ConditionalIncludes'; // #807
 import { Definition, Location, Position, Range, DocumentSymbol, CancellationToken } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
+import { ProcedureSignatureUtils } from '../utils/ProcedureSignatureUtils'; // #825
 import { SolutionManager } from '../solution/solutionManager';
 import * as path from 'path';
 import * as fs from 'fs';
@@ -1561,24 +1562,12 @@ export class DefinitionProvider {
                 const content = document?.getText();
                 if (content) {
                     const lines = content.split('\n');
-                    const procedureLine = lines[currentScope.line] ?? '';
-                    const sigMatch = procedureLine.match(/(?:PROCEDURE|FUNCTION)\s*\((.*?)\)/i); // #247
-                    if (sigMatch?.[1]) {
-                        const wordLower = variableName.toLowerCase();
-                        for (const param of sigMatch[1].split(',')) {
-                            const trimmed = param.trim().replace(/^<(.*)>$/, '$1').trim();
-                            const m = trimmed.match(/^([*&]?\s*[\w:]+)\s+([A-Za-z_][\w:]*)(?:\s*=.*)?$/i);
-                            if (!m) continue;
-                            const paramName = m[2];
-                            const pLower = paramName.toLowerCase();
-                            if (pLower === wordLower || pLower.endsWith(':' + wordLower)) {
-                                const typeName = m[1].trim().replace(/^[*&]\s*/, '').trim();
-                                if (typeName) {
-                                    logger.info(`findVariableType: "${variableName}" is parameter of type "${typeName}"`);
-                                    return typeName;
-                                }
-                            }
-                        }
+                    // #825 — the header's `|` continuation lines declare parameters too.
+                    const found = ProcedureSignatureUtils.findHeaderParameter(n => lines[n], currentScope.line, variableName);
+                    const typeName = found?.type.replace(/^[*&]\s*/, '').trim();
+                    if (typeName) {
+                        logger.info(`findVariableType: "${variableName}" is parameter of type "${typeName}"`);
+                        return typeName;
                     }
                 }
             }

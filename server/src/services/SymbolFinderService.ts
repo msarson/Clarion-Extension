@@ -24,6 +24,7 @@ import { TokenCache } from '../TokenCache';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { TokenHelper } from '../utils/TokenHelper';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
+import { ProcedureSignatureUtils } from '../utils/ProcedureSignatureUtils'; // #825
 import { ScopeResolver } from '../scope/ScopeResolver';
 import { SolutionManager } from '../solution/solutionManager';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
@@ -306,80 +307,40 @@ export class SymbolFinderService {
     ): SymbolInfo | null {
         logger.info(`Finding parameter: "${word}" in scope: ${scopeToken.value}`);
         
-        // #711 — the one line, not a split of the whole document on every hover.
-        const procedureLine = document.getText({
-            start: { line: scopeToken.line, character: 0 },
-            end: { line: scopeToken.line + 1, character: 0 },
+        // #711 — line by line, not a split of the whole document on every hover.
+        // #825 — the header's `|` continuation lines declare parameters too.
+        const lineCount = document.lineCount;
+        const getLine = (n: number): string | undefined => n >= lineCount ? undefined : document.getText({
+            start: { line: n, character: 0 },
+            end: { line: n + 1, character: 0 },
         }).replace(/\n$/, '');
-
-        if (!procedureLine) {
-            return null;
-        }
-        
-        // Match PROCEDURE(...)/FUNCTION(...) signature (#247)
-        const match = procedureLine.match(/(?:PROCEDURE|FUNCTION)\s*\((.*?)\)/i);
-        if (!match || !match[1]) {
-            return null;
-        }
-        
-        const paramString = match[1];
-        const params = paramString.split(',');
-        // Column tracking so indexOf() below resolves each parameter's OWN position,
-        // not the first line-wide substring match — without this, searching for a
-        // parameter whose name is a prefix of an earlier-declared parameter's name
-        // (e.g. "pPar" vs an earlier "pParName") incorrectly resolves to that earlier
-        // parameter's position instead of its own.
-        let currentColumn = procedureLine.indexOf('(') + 1;
-
-        for (const param of params) {
-            const trimmedParam = param.trim();
-            // Strip optional-parameter angle brackets: <Key K> → Key K
-            const stripped = trimmedParam.replace(/^<(.*)>$/, '$1').trim();
-            // Match: [*&]? TYPE NAME [= default]
-            // NAME may be a prefixed identifier: PREFIX:Name (e.g. LOC:test)
-            const paramMatch = stripped.match(/([*&]?\s*\w+)\s+([A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*)?)(?:\s*=.*)?$/i);
-            
-            if (paramMatch) {
-                const type = paramMatch[1].trim();
-                const paramName = paramMatch[2];
-                
-                // Match exact name (LOC:test === LOC:test) or bare suffix (test matches LOC:test)
-                const paramLower = paramName.toLowerCase();
-                const wordLower = word.toLowerCase();
-                const isMatch = paramLower === wordLower ||
-                    paramLower.endsWith(':' + wordLower);
-                
-                if (isMatch) {
-                    logger.info(`✅ Found parameter: ${paramName} of type ${type}`);
-                    
-                    // Create a synthetic token for the parameter
-                    const paramToken: Token = {
-                        type: TokenType.Variable,
-                        value: paramName,
-                        line: scopeToken.line,
-                        start: procedureLine.indexOf(paramName, currentColumn),
-                        maxLabelLength: 0
-                    };
-                    
-                    return {
-                        token: paramToken,
-                        type: type,
-                        scope: {
-                            token: scopeToken,
-                            type: 'parameter'
-                        },
-                        location: {
-                            uri: document.uri,
-                            line: scopeToken.line,
-                            character: paramToken.start
-                        },
-                        declaration: stripped,
-                        originalWord: word,
-                        searchWord: word
-                    };
-                }
-            }
-            currentColumn += param.length + 1; // +1 for comma
+        const found = ProcedureSignatureUtils.findHeaderParameter(getLine, scopeToken.line, word);
+        if (found) {
+            logger.info(`✅ Found parameter: ${found.name} of type ${found.type}`);
+            // A synthetic token for the parameter, at its name (#825: maybe on a continuation line)
+            const paramToken: Token = {
+                type: TokenType.Variable,
+                value: found.name,
+                line: found.line,
+                start: found.character,
+                maxLabelLength: 0
+            };
+            return {
+                token: paramToken,
+                type: found.type,
+                scope: {
+                    token: scopeToken,
+                    type: 'parameter'
+                },
+                location: {
+                    uri: document.uri,
+                    line: found.line,
+                    character: found.character
+                },
+                declaration: found.declaration,
+                originalWord: word,
+                searchWord: word
+            };
         }
 
         logger.info(`❌ Parameter "${word}" not found`);

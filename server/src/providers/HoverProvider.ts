@@ -2,7 +2,7 @@ import { compiledIncludeTest } from '../utils/ConditionalIncludes'; // #807
 import { Hover, Location, Position, Range } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import LoggerManager from '../logger';
-import { Token, TokenType } from '../ClarionTokenizer';
+import { ClarionTokenizer, Token, TokenType } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { ClarionDocumentSymbolProvider } from './ClarionDocumentSymbolProvider';
 import { TokenHelper } from '../utils/TokenHelper';
@@ -293,9 +293,14 @@ export class HoverProvider {
             // If cursor is on a PROCEDURE/FUNCTION declaration line, prioritize that exact
             // declaration scope for parameter hover (works even when currentScope is null
             // on declaration lines before CODE).
-            const declarationScope = tokensOnLine(tokens, position.line).find(t => // #711
-                TokenHelper.isProcedureOrFunction(t)
-            );
+            const isHeader = (t: Token) => TokenHelper.isProcedureOrFunction(t);
+            let declarationScope = tokensOnLine(tokens, position.line).find(isHeader); // #711
+            // #825 — on a `|` continuation line of a header, the PROCEDURE is on the line that opens it.
+            for (let l = position.line - 1, n = 0; !declarationScope && l >= 0 && n < 100; l--, n++) {
+                const above = document.getText({ start: { line: l, character: 0 }, end: { line: l + 1, character: 0 } }).replace(/\n$/, '');
+                if (!ClarionTokenizer.endsWithContinuation(above)) break;
+                declarationScope = tokensOnLine(tokens, l).find(isHeader);
+            }
             if (declarationScope) {
                 const declarationParamHover = this.variableResolver.findParameterHover(word, document, declarationScope);
                 mark('declParam');

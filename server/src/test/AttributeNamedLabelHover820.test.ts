@@ -64,10 +64,8 @@ suite('A label named like an attribute or keyword keeps its own card (#820)', ()
         });
 
         test(`${name}: parameter on a |-continued CLASS method prototype`, async () => {
-            // The parameter finder reads the PROCEDURE's own line only, so a parameter on a
-            // continuation line gets no parameter card yet; it must not get a wrong one.
-            const first = (await hoverAt(classProto, 7, name)).split('\n')[0];
-            assert.ok(!/Attribute/i.test(first) && !first.startsWith(`**${name.toUpperCase()}**`), `got: ${first}`);
+            // #825 — a parameter on a continuation line gets its parameter card too.
+            assertLabelCard(await hoverAt(classProto, 7, name), name);
         });
 
         test(`${name}: parameter of a MAP prototype`, async () => {

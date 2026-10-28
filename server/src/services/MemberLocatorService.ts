@@ -12,6 +12,7 @@
 import { tokensWithPrefix, includeTokens } from '../utils/TokenIndexes';
 import { Location } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
+import { ProcedureSignatureUtils } from '../utils/ProcedureSignatureUtils'; // #825
 import { ClarionTokenizer, Token, TokenType } from '../ClarionTokenizer';
 import { makeTimeSlicer } from '../utils/cooperativeScan'; // #367
 import { getCrossFileEpoch } from '../utils/crossFileEpoch'; // #373
@@ -319,34 +320,19 @@ export class MemberLocatorService {
         if (!scopeToken) return null;
 
         const lines = document.getText().split('\n');
-        const procedureLine = lines[scopeToken.line];
-        if (!procedureLine) return null;
+        // #825 — the header's `|` continuation lines declare parameters too.
+        const found = ProcedureSignatureUtils.findHeaderParameter(n => lines[n], scopeToken.line, varName);
+        if (!found) return null;
 
-        const sigMatch = procedureLine.match(/(?:PROCEDURE|FUNCTION)\s*\((.*?)\)/i); // #247
-        if (!sigMatch || !sigMatch[1]) return null;
+        const rawType = found.type;
+        const isRef = rawType.startsWith('&');
+        const typeName = rawType.replace(/^[*&]\s*/, '').trim();
+        if (!typeName) return null;
 
-        const wordLower = varName.toLowerCase();
-        for (const param of sigMatch[1].split(',')) {
-            const trimmed = param.trim().replace(/^<(.*)>$/, '$1').trim();
-            // [*&]? TYPE NAME [= default]  or  <*TYPE NAME>
-            const m = trimmed.match(/^([*&]?\s*[\w:]+)\s+([A-Za-z_][\w:]*)(?:\s*=.*)?$/i);
-            if (!m) continue;
-
-            const rawType = m[1].trim();
-            const paramName = m[2];
-            const pLower = paramName.toLowerCase();
-            if (pLower !== wordLower && !pLower.endsWith(':' + wordLower)) continue;
-
-            const isRef = rawType.startsWith('&');
-            const typeName = rawType.replace(/^[*&]\s*/, '').trim();
-            if (!typeName) continue;
-
-            logger.info(`resolveParameterType: "${varName}" → type "${typeName}" (isRef=${isRef})`);
-            // Treat the resolved parameter type as a user-defined type (isClass: true) so callers
-            // route through findMemberInClass which has SDI support for GROUP/QUEUE/CLASS types.
-            return { typeName, isClass: true, isReference: isRef };
-        }
-        return null;
+        logger.info(`resolveParameterType: "${varName}" → type "${typeName}" (isRef=${isRef})`);
+        // Treat the resolved parameter type as a user-defined type (isClass: true) so callers
+        // route through findMemberInClass which has SDI support for GROUP/QUEUE/CLASS types.
+        return { typeName, isClass: true, isReference: isRef };
     }
 
     /**

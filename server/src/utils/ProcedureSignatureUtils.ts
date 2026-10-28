@@ -328,7 +328,65 @@ export class ProcedureSignatureUtils {
                 count++;
             }
         }
-        
+
         return count;
+    }
+
+    /**
+     * #825 — the parameter `word` names in the PROCEDURE/FUNCTION header starting at
+     * `procedureLine`, following `|` continuation lines: a parameter declared on a continued
+     * line is a parameter. `getLine(n)` returns line n of the source (undefined past the end).
+     * A prefixed parameter (`LOC:test`) also matches its bare name. The returned position is
+     * the line and column of the parameter's name; `type` keeps a `*`/`&` and a colon type
+     * (`*HTTP:Query`); `declaration` is the parameter's text without `<` `>`.
+     */
+    public static findHeaderParameter(
+        getLine: (line: number) => string | undefined,
+        procedureLine: number,
+        word: string
+    ): { name: string; type: string; declaration: string; line: number; character: number } | null {
+        // The header as one string; segments map an offset in it back to a line and column.
+        let header = '';
+        const segments: { line: number; offset: number }[] = [];
+        for (let i = procedureLine; i < procedureLine + 100; i++) {
+            const raw = getLine(i);
+            if (raw === undefined) break;
+            const code = DeclaredValueParser.stripTrailingComment(raw.replace(/\r$/, '')).trimEnd();
+            segments.push({ line: i, offset: header.length });
+            if (!code.endsWith('|')) { header += code; break; }
+            header += code.slice(0, -1) + '  ';
+        }
+
+        const match = /(?:PROCEDURE|FUNCTION)\s*\((.*?)\)/i.exec(header); // #247
+        if (!match || !match[1]) return null;
+
+        const wordLower = word.toLowerCase();
+        let column = match.index + match[0].indexOf('(') + 1;
+        for (const param of match[1].split(',')) {
+            const stripped = param.trim().replace(/^<(.*)>$/, '$1').trim();
+            // [*&]? TYPE NAME [= default]; TYPE may carry a prefix (*HTTP:Query), NAME may be prefixed (LOC:test)
+            const m = stripped.match(/([*&]?\s*[\w:]+)\s+([A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*)?)(?:\s*=.*)?$/i);
+            if (m) {
+                const name = m[2];
+                const nameLower = name.toLowerCase();
+                if (nameLower === wordLower || nameLower.endsWith(':' + wordLower)) {
+                    // The name as a whole word, so a type ending in the same word (HTTP:Query Query) is skipped.
+                    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+                    const at = param.search(new RegExp(`(?<![\\w:])${escaped}(?![\\w:])`, 'i'));
+                    const offset = column + Math.max(at, 0);
+                    let seg = segments[0];
+                    for (const s of segments) { if (s.offset <= offset) seg = s; else break; }
+                    return {
+                        name,
+                        type: m[1].trim(),
+                        declaration: stripped,
+                        line: seg.line,
+                        character: offset - seg.offset,
+                    };
+                }
+            }
+            column += param.length + 1; // +1 for the comma
+        }
+        return null;
     }
 }
