@@ -30,6 +30,12 @@ suite('Project Properties: the fields of each page (#792)', () => {
         }
     });
 
+    test('#815: the link mode offers the IDE\'s three models, CustomDll as the IDE writes it', () => {
+        // The build task parses <Model> as Clarion.PRJ.ModelTypeEnum: Dll, Lib, CustomDll.
+        const model = PROJECT_PROPERTY_FIELDS.find(f => f.property === 'Model')!;
+        assert.deepStrictEqual(model.options!.map(o => o.value), ['Dll', 'Lib', 'CustomDll']);
+    });
+
     test('the properties a build targets file reads', () => {
         const props = targetsProperties(C12_TARGETS);
         assert.ok(props.has('dep') && props.has('dynamic_base') && props.has('outputtype'));

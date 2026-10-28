@@ -39,7 +39,8 @@ export const PROJECT_PROPERTY_FIELDS: ProjectPropertyField[] = [
     { tab: 'application', group: 'Output', label: 'Output type', property: 'OutputType', kind: 'select',
         options: [{ value: 'Exe', label: 'Exe' }, { value: 'WinExe', label: 'WinExe' }, { value: 'Library', label: 'Library (DLL)' }, { value: 'Lib', label: 'Lib' }] },
     { tab: 'application', group: 'Output', label: 'Link mode', property: 'Model', kind: 'select',
-        options: [{ value: 'Dll', label: 'Dll' }, { value: 'Lib', label: 'Lib' }],
+        // #815: the build task parses <Model> as the IDE's model enum: Dll, Lib, CustomDll.
+        options: [{ value: 'Dll', label: 'Dll' }, { value: 'Lib', label: 'Lib' }, { value: 'CustomDll', label: 'CustomDll' }],
         note: 'The runtime: in ClaRUN.dll, or linked in. Not whether this project is a DLL.' },
     { tab: 'application', group: 'Output', label: 'Application icon', property: 'ApplicationIcon', kind: 'text', placeholder: 'None' },
 
