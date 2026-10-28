@@ -7,7 +7,8 @@ import { switchValue } from '../utils/ConditionalCompile';
  * #812 — a COMPILE/OMIT switch can be a project define (the help's Conditional Switch). For a file
  * a project compiles, its switches are, last one winning: the .cwproj's DefineConstants for the
  * active configuration, the #pragma defines of the .prj files it includes, and the file's own
- * /define on its #compile line there.
+ * defines: those on its Compile item in the .cwproj (#816), then its /define on its #compile line
+ * in a .prj.
  *
  * Only for a file a project compiles (one of its sources, by full path), and only where every
  * project that compiles it agrees: a header many projects include is decided per includer by the
@@ -126,17 +127,51 @@ export function parseDefineConstants(cwprojText: string, configuration: string):
     return defines;
 }
 
-/** A .cwproj's DefineConstants, read again when its time or the configuration changes. */
-const cwprojCache = new Map<string, { mtimeMs: number; configuration: string; defines: Record<string, string> }>();
-function cwprojDefines(cwproj: string, mtimeMs: number | undefined): Record<string, string> {
-    if (mtimeMs === undefined) return {};
+/**
+ * #816 — a source's own defines in a .cwproj: the `defines` metadata of its Compile item, which the
+ * IDE writes (`<Compile Include="x.clw"><defines>name=&gt;value;...</defines></Compile>`) and the
+ * build task reads as that file's #pragma define, a bare name meaning on. Keyed by the Include as
+ * written, in lower case; names in lower case. Items are not per configuration.
+ */
+export function parseCompileDefines(cwprojText: string): Record<string, Record<string, string>> {
+    const result: Record<string, Record<string, string>> = {};
+    const text = cwprojText.replace(/<!--[\s\S]*?-->/g, '');
+    for (const item of text.matchAll(/<Compile\b([^>]*?)(?:\/>|>([\s\S]*?)<\/Compile\s*>)/gi)) {
+        const body = item[2];
+        const include = /\bInclude\s*=\s*(?:"([^"]*)"|'([^']*)')/i.exec(item[1]);
+        if (!body || !include) continue;
+        const own: Record<string, string> = {};
+        for (const meta of body.matchAll(/<defines\s*>([\s\S]*?)<\/defines\s*>/gi)) {
+            for (const entry of decodeEntities(meta[1]).split(';')) {
+                const m = /^\s*([A-Za-z_][\w:]*)\s*(?:=>\s*(.*?))?\s*$/.exec(entry);
+                if (m) own[m[1].toLowerCase()] = m[2] === undefined || m[2] === '' ? 'on' : m[2];
+            }
+        }
+        if (Object.keys(own).length) result[decodeEntities(include[1] ?? include[2]).toLowerCase()] = own;
+    }
+    return result;
+}
+
+/** A .cwproj's DefineConstants and its sources' own defines, read again when its time or the configuration changes. */
+interface CwprojDefines { defines: Record<string, string>; fileDefines: Record<string, Record<string, string>> }
+const cwprojCache = new Map<string, { mtimeMs: number; configuration: string; read: CwprojDefines }>();
+function cwprojDefines(cwproj: string, mtimeMs: number | undefined): CwprojDefines {
+    if (mtimeMs === undefined) return { defines: {}, fileDefines: {} };
     const configuration = serverSettings.configuration.toLowerCase();
     const cached = cwprojCache.get(cwproj.toLowerCase());
-    if (cached && cached.mtimeMs === mtimeMs && cached.configuration === configuration) return cached.defines;
-    let defines: Record<string, string> = {};
-    try { defines = parseDefineConstants(fs.readFileSync(cwproj, 'utf8'), configuration); } catch { /* unreadable: none */ }
-    cwprojCache.set(cwproj.toLowerCase(), { mtimeMs, configuration, defines });
-    return defines;
+    if (cached && cached.mtimeMs === mtimeMs && cached.configuration === configuration) return cached.read;
+    let read: CwprojDefines = { defines: {}, fileDefines: {} };
+    try {
+        const text = fs.readFileSync(cwproj, 'utf8');
+        // Keyed by full path, so `sub\x.clw` and `x.clw` in two folders stay apart.
+        const fileDefines: Record<string, Record<string, string>> = {};
+        for (const [include, own] of Object.entries(parseCompileDefines(text))) {
+            fileDefines[path.resolve(path.dirname(cwproj), include.replace(/\\/g, path.sep)).toLowerCase()] = own;
+        }
+        read = { defines: parseDefineConstants(text, configuration), fileDefines };
+    } catch { /* unreadable: none */ }
+    cwprojCache.set(cwproj.toLowerCase(), { mtimeMs, configuration, read });
+    return read;
 }
 
 export interface ProjectSwitches {
@@ -174,8 +209,10 @@ export function projectSwitches(filePath: string | null): ProjectSwitches {
             const cwproj = cwprojOf(project);
             const mtimeMs = mtimeOf(cwproj);
             deps.set(cwproj, mtimeMs ?? -1);
-            const merged: Record<string, string> = { ...cwprojDefines(cwproj, mtimeMs) };
-            const own: Record<string, string> = {};
+            const read = cwprojDefines(cwproj, mtimeMs);
+            const merged: Record<string, string> = { ...read.defines };
+            // #816: its own defines on its Compile item, then any /define on a .prj's #compile line.
+            const own: Record<string, string> = { ...(read.fileDefines[file] ?? {}) };
             for (const legacy of project.legacyProjects ?? []) {
                 for (const watched of legacy.watch) deps.set(watched, mtimeOf(watched) ?? -1);
                 Object.assign(merged, legacy.defines);

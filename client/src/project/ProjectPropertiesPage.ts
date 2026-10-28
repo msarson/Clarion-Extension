@@ -1,6 +1,6 @@
-import { addItem, ITEM_KINDS, listItems, ProjectItems, removeItem } from './CwprojItems';
+import { addItem, ITEM_KINDS, listItems, ProjectItems, removeItem, setItemMetadata } from './CwprojItems';
 import { configurationsOf, PropertyScope, readProperty } from './CwprojProperties';
-import { fieldAvailability, FILE_DRIVERS, PROJECT_PROPERTY_FIELDS, PROJECT_PROPERTY_TABS } from './ProjectPropertyFields';
+import { fieldAvailability, FILE_DRIVERS, PROJECT_PROPERTY_FIELDS, PROJECT_PROPERTY_TABS, SOURCE_PRAGMAS } from './ProjectPropertyFields';
 
 /**
  * #792 — what the Project Properties page shows for one configuration: each IDE page's groups
@@ -38,14 +38,24 @@ function configurationChoices(text: string, current: string): string[] {
     return names;
 }
 
-/** A Sources tab message: add or remove an item of a kind. */
-export interface ItemMessage { type: string; kind?: string; value?: string }
+/**
+ * A Sources tab message: add or remove an item of a kind; or (#816) set a source's own pragma,
+ * `name` on the Compile item `value`, an empty `pragma` meaning Default (none).
+ */
+export interface ItemMessage { type: string; kind?: string; value?: string; name?: string; pragma?: string }
 
 /** The text after a Sources tab message; unchanged for one it does not take. */
 export function editItems(text: string, msg: ItemMessage): string {
     const kind = ITEM_KINDS.find(k => k === msg.kind);
     const value = (msg.value ?? '').trim();
     if (!kind || !value) return text;
+    if (msg.type === 'setPragma') {
+        // Only a source's pragmas the build reads, and only the values it takes.
+        const pragma = SOURCE_PRAGMAS.find(p => p.name === msg.name);
+        const setting = (msg.pragma ?? '').trim();
+        if (kind !== 'Compile' || !pragma || (setting && pragma.options && !pragma.options.includes(setting))) return text;
+        return setItemMetadata(text, kind, value, pragma.name, setting || null);
+    }
     if (msg.type === 'removeItem') return removeItem(text, kind, value);
     // A reference needs the project's GUID and name, which the page does not ask for.
     if (msg.type === 'addItem' && kind !== 'ProjectReference') return addItem(text, kind, value);

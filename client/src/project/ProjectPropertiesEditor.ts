@@ -4,7 +4,7 @@ import * as path from 'path';
 import LoggerManager from '../utils/LoggerManager';
 import { globalSettings } from '../globals';
 import { setProperty, setPropertyScope } from './CwprojProperties';
-import { PROJECT_PROPERTY_FIELDS, PROJECT_PROPERTY_TABS, targetsProperties } from './ProjectPropertyFields';
+import { PROJECT_PROPERTY_FIELDS, PROJECT_PROPERTY_TABS, SOURCE_PRAGMAS, targetsProperties } from './ProjectPropertyFields';
 import { addItem, includeFor } from './CwprojItems';
 import { buildPageState, editItems } from './ProjectPropertiesPage';
 import { minimalEdit, pageHtml as kitPage, scriptJson } from '../webview/PageKit';
@@ -85,7 +85,7 @@ export class ProjectPropertiesEditorProvider implements vscode.CustomTextEditorP
             if (open.size === 0 && ProjectPropertiesEditorProvider.panels.get(key) === open) ProjectPropertiesEditorProvider.panels.delete(key);
         });
 
-        panel.webview.onDidReceiveMessage(async (msg: { type: string; property?: string; value?: string; kind?: string; scope?: 'all' | 'configuration' }) => {
+        panel.webview.onDidReceiveMessage(async (msg: { type: string; property?: string; value?: string; kind?: string; name?: string; pragma?: string; scope?: 'all' | 'configuration' }) => {
             try {
                 switch (msg.type) {
                     case 'ready':
@@ -111,6 +111,7 @@ export class ProjectPropertiesEditorProvider implements vscode.CustomTextEditorP
                         break;
                     case 'addItem':
                     case 'removeItem':
+                    case 'setPragma':
                         await applyText(document, editItems(document.getText(), msg));
                         break;
                     case 'pickSource': {
@@ -192,6 +193,8 @@ function pageHtml(webview: vscode.Webview): string {
     const meta = {
         tabs: PROJECT_PROPERTY_TABS,
         fields: Object.fromEntries(PROJECT_PROPERTY_FIELDS.map(f => [f.property, f])),
+        // #816: a source's own pragmas, edited on the Sources tab.
+        pragmas: SOURCE_PRAGMAS,
     };
     return kitPage({
         cspSource: webview.cspSource,
@@ -213,6 +216,9 @@ function pageHtml(webview: vscode.Webview): string {
   .item > span { min-width: 0; overflow-wrap: anywhere; }
   td.file { font-family: var(--vscode-editor-font-family); overflow-wrap: anywhere; }
   td.remove { text-align: right; width: 1%; }
+  .pragmas { display: flex; flex-wrap: wrap; gap: 10px 20px; padding: 6px 0; }
+  .pragma { display: flex; flex-direction: column; gap: 4px; flex: 0 1 auto; min-width: 0; }
+  .pragma input[type=text] { min-width: 220px; max-width: 100%; }
   .add { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 10px 16px; border-top: 1px solid var(--vscode-panel-border); }
   .add input[type=text] { flex: 1 1 160px; min-width: 0; }
 `,
@@ -266,15 +272,46 @@ function pageHtml(webview: vscode.Webview): string {
   const itemRow = (kind, include, ...rest) => el('div', { class: 'row item' }, el('span', {}, ...rest), remove(kind, include));
   const none = text => el('div', { class: 'empty' }, text);
 
+  // #816: a source's own pragmas (the IDE's File Options), each Default or its own value.
+  const pragmasOpen = new Set();
+  const setPragma = (include, name, pragma) => vscode.postMessage({ type: 'setPragma', kind: 'Compile', value: include, name, pragma });
+  const pragmaSummary = p => META.pragmas.filter(m => p && p[m.name]).map(m => m.name + ': ' + p[m.name]).join(' · ');
+  function pragmaEditor(i) {
+    const p = i.pragmas || {};
+    return el('div', { class: 'pragmas' }, ...META.pragmas.map(m => {
+      let control;
+      if (m.options) {
+        control = el('select', { 'aria-label': m.label + ' for ' + i.include, onchange: e => setPragma(i.include, m.name, e.target.value) },
+          el('option', { value: '' }, 'Default'), ...m.options.map(o => el('option', { value: o }, o)));
+        if (p[m.name] && !m.options.includes(p[m.name])) control.append(el('option', { value: p[m.name] }, p[m.name]));
+        control.value = p[m.name] || '';
+      } else {
+        control = el('input', { type: 'text', placeholder: m.placeholder || 'Default', 'aria-label': m.label + ' for ' + i.include,
+          onchange: e => setPragma(i.include, m.name, e.target.value) });
+        control.value = p[m.name] || '';
+      }
+      return el('label', { class: 'pragma' }, el('span', {}, m.label, ' ', el('code', {}, m.name)), control);
+    }));
+  }
+
   function sources(s) {
     const compiled = el('section', {},
       el('h2', {}, 'Compiled sources · ' + s.compile.length),
       s.compile.length === 0 ? none('No source files.') : el('div', { class: 'table-wrap' }, el('table', {},
-        el('thead', {}, el('tr', {}, el('th', {}, 'File'), el('th', {}, ''), el('th', {}, ''))),
-        el('tbody', {}, ...s.compile.map(i => el('tr', {},
-          el('td', { class: 'file' }, i.include),
-          el('td', {}, i.generated ? el('span', { class: 'pill info', title: 'The Clarion IDE generates this module' }, 'Generated') : ''),
-          el('td', { class: 'remove' }, remove('Compile', i.include))))))),
+        el('thead', {}, el('tr', {}, el('th', {}, 'File'), el('th', {}, ''), el('th', {}, 'Pragmas'), el('th', {}, ''))),
+        el('tbody', {}, ...s.compile.flatMap(i => {
+          const open = pragmasOpen.has(i.include.toLowerCase());
+          const summary = pragmaSummary(i.pragmas);
+          const row = el('tr', {},
+            el('td', { class: 'file' }, i.include),
+            el('td', {}, i.generated ? el('span', { class: 'pill info', title: 'The Clarion IDE generates this module' }, 'Generated') : ''),
+            el('td', {}, el('button', { type: 'button', class: 'secondary', 'aria-expanded': open ? 'true' : 'false',
+              title: 'This source’s own pragmas, as the Clarion IDE’s File Options',
+              onclick: () => { const k = i.include.toLowerCase(); pragmasOpen.has(k) ? pragmasOpen.delete(k) : pragmasOpen.add(k); render(); } },
+              summary || 'Default')),
+            el('td', { class: 'remove' }, remove('Compile', i.include)));
+          return open ? [row, el('tr', {}, el('td', { colspan: '4' }, pragmaEditor(i)))] : [row];
+        })))),
       el('div', { class: 'add' }, el('button', { type: 'button', class: 'primary', onclick: () => vscode.postMessage({ type: 'pickSource' }) }, 'Add source file…')));
 
     const references = el('section', {},

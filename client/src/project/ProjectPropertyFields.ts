@@ -72,6 +72,30 @@ export const PROJECT_PROPERTY_FIELDS: ProjectPropertyField[] = [
 ];
 
 /**
+ * #816 — a source's own pragmas: the IDE's File Options, stored as metadata on the source's
+ * Compile item (`<Compile Include="x.clw"><check_index>on</check_index></Compile>`). The build task
+ * reads exactly these names and makes each a #pragma for that file alone; the values are the
+ * IDE's. Default, the project's setting, is no metadata at all.
+ */
+export interface SourcePragma {
+    /** The metadata name, as the IDE writes it. */
+    name: string;
+    label: string;
+    /** A choice's values; none for free text. */
+    options?: string[];
+    placeholder?: string;
+}
+
+export const SOURCE_PRAGMAS: SourcePragma[] = [
+    { name: 'defines', label: 'Defines', placeholder: 'name=>value;name=>value' },
+    { name: 'vid', label: 'Debug info', options: ['off', 'full', 'min'] },
+    { name: 'warnings', label: 'Warnings', options: ['off', 'on', 'err'] },
+    { name: 'line_num', label: 'Line numbers', options: ['on', 'off'] },
+    { name: 'check_stack', label: 'Stack overflow check', options: ['on', 'off'] },
+    { name: 'check_index', label: 'Index out of range check', options: ['on', 'off'] },
+];
+
+/**
  * The Clarion file drivers a project can name in a FileDriver item, as the IDE registers them:
  * the drivers the help documents (In-Memory included) and the IDE's driver list ships.
  */

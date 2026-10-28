@@ -6,7 +6,7 @@ import { ClarionProjectServer } from '../solution/clarionProjectServer';
 import { SolutionManager } from '../solution/solutionManager';
 import { serverSettings } from '../serverSettings';
 import { dependenciesUnchanged, inactiveIncludeLines, recordedDependencies } from '../utils/ConditionalIncludes';
-import { parseDefineConstants } from '../solution/ProjectDefines';
+import { parseCompileDefines, parseDefineConstants } from '../solution/ProjectDefines';
 
 /**
  * #812 — a COMPILE/OMIT switch can be a project define (Conditional Switch): the .cwproj's
@@ -213,6 +213,33 @@ suite('COMPILE/OMIT decided from the project\'s defines (#812)', () => {
         cwproj('App', [], ['<Include Include="A.prj" />', '<Include Include="B.prj" />']);
         await load('App');
         assert.deepStrictEqual(decide(main), [LIB]);
+    });
+
+    // #816: the IDE stores a source's own defines as `defines` metadata on its Compile item, and the
+    // build task reads it as that file's #pragma define (`name=>value;...`, a bare name meaning on).
+    test('#816: a Compile item\'s defines, as the IDE writes them', () => {
+        const text = '<Project><ItemGroup>'
+            + '<Compile Include="Main.clw"><defines>_ABCDllMode_=&gt;1;TRACE</defines><Generated>true</Generated></Compile>'
+            + '<Compile Include="sub\\Other.clw">\r\n  <defines>A=&gt;0</defines>\r\n</Compile>'
+            + '<Compile Include="Plain.clw" />'
+            + '<!-- <Compile Include="Gone.clw"><defines>A=&gt;1</defines></Compile> -->'
+            + '</ItemGroup></Project>';
+        assert.deepStrictEqual(parseCompileDefines(text), {
+            'main.clw': { _abcdllmode_: '1', trace: 'on' },
+            'sub\\other.clw': { a: '0' },
+        });
+    });
+
+    test('#816: a source\'s own defines in the .cwproj come after DefineConstants, for that source only', async () => {
+        const main = write('Main.clw');
+        const other = write('Other.clw', source.replace('PROGRAM', "MEMBER('Main')"));
+        cwproj('App', [defines('_ABCDllMode_=&gt;0')], [
+            '<Compile Include="Main.clw" />',
+            '<Compile Include="Other.clw">\r\n      <defines>_ABCDllMode_=&gt;1</defines>\r\n    </Compile>',
+        ]);
+        await load('App');
+        assert.deepStrictEqual(decide(main), [DLL], 'DefineConstants says 0');
+        assert.deepStrictEqual(decide(other), [LIB], 'its own defines say 1');
     });
 
     test('a file decided before the solution loaded is decided again once it has', async () => {

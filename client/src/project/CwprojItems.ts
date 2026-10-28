@@ -1,5 +1,6 @@
 import * as path from 'path';
 import { blankBetween, decode, encode, eolOf, lineEndAfter, lineStartAt, mask, restOfLineBlank } from './CwprojProperties';
+import { SOURCE_PRAGMAS } from './ProjectPropertyFields';
 
 /**
  * #792 — a .cwproj's items as the Project Properties page's Sources tab sees them: the compiled
@@ -21,6 +22,8 @@ export interface ProjectItem {
     generated: boolean;
     /** A ProjectReference's `<Name>`. */
     name?: string;
+    /** #816: a Compile item's own pragmas, by metadata name (only those it has). */
+    pragmas?: Record<string, string>;
 }
 
 export interface ProjectItems {
@@ -33,6 +36,8 @@ export interface ProjectItems {
 
 interface Item extends ProjectItem {
     elementStart: number; elementEnd: number;
+    /** Where its open tag ends and its close tag starts; the same for a self-closed one. */
+    openEnd: number; bodyEnd: number;
     lineStart: number; lineEnd: number; alone: boolean;
     indent: string;
     /** How its tag closes when it has no children: `/>` or ` />`. */
@@ -69,6 +74,8 @@ function readGroups(text: string): Group[] {
         while ((e = element.exec(live)) && e.index < closeStart) {
             const elementStart = e.index;
             let elementEnd = element.lastIndex;
+            const openEnd = elementEnd;
+            let bodyEnd = openEnd;
             let body = '';
             if (!e[3]) {
                 // An element with children ends at its own close tag; items do not nest.
@@ -77,6 +84,7 @@ function readGroups(text: string): Group[] {
                 const c = close.exec(live);
                 if (!c || c.index > closeStart) break;
                 body = live.slice(elementEnd, c.index);
+                bodyEnd = c.index;
                 elementEnd = close.lastIndex;
                 element.lastIndex = elementEnd;
             }
@@ -89,7 +97,8 @@ function readGroups(text: string): Group[] {
                 include: decode(include[1] ?? include[2]),
                 generated: kind === 'Compile' && /^true$/i.test(childText(body, 'Generated') ?? ''),
                 ...(kind === 'ProjectReference' ? { name: childText(body, 'Name') } : {}),
-                elementStart, elementEnd,
+                ...(kind === 'Compile' ? { pragmas: pragmasOf(body) } : {}),
+                elementStart, elementEnd, openEnd, bodyEnd,
                 lineStart, lineEnd: lineEndAfter(text, elementEnd),
                 alone: blankBetween(text, lineStart, elementStart) && restOfLineBlank(text, elementEnd),
                 indent: indentAt(text, elementStart),
@@ -102,7 +111,21 @@ function readGroups(text: string): Group[] {
     return groups;
 }
 
-const strip = (i: Item): ProjectItem => ({ kind: i.kind, include: i.include, generated: i.generated, ...(i.name !== undefined ? { name: i.name } : {}) });
+/** #816: a Compile item's own pragmas, the metadata the build task reads (named as it reads them). */
+function pragmasOf(body: string): Record<string, string> {
+    const pragmas: Record<string, string> = {};
+    for (const p of SOURCE_PRAGMAS) {
+        const value = childText(body, p.name);
+        if (value) pragmas[p.name] = value;
+    }
+    return pragmas;
+}
+
+const strip = (i: Item): ProjectItem => ({
+    kind: i.kind, include: i.include, generated: i.generated,
+    ...(i.name !== undefined ? { name: i.name } : {}),
+    ...(i.pragmas !== undefined ? { pragmas: i.pragmas } : {}),
+});
 
 /** The project's items of each kind, in file order. */
 export function listItems(text: string): ProjectItems {
@@ -182,6 +205,75 @@ export function removeItem(text: string, kind: ItemKind, include: string): strin
         }
         result = result.slice(0, from) + result.slice(to);
     }
+}
+
+/**
+ * #816: sets one metadata child of the first item of a kind whose Include matches (in any case),
+ * as the IDE stores a source's own pragmas; null removes it. A self-closed item is opened for its
+ * first child, a child one line each, a step in from the item; one left with no children closes
+ * on one line again. A new child goes after the item's others; only the element concerned changes.
+ */
+export function setItemMetadata(text: string, kind: ItemKind, include: string, name: string, value: string | null): string {
+    const groups = readGroups(text);
+    const all = groups.flatMap(g => g.items);
+    const item = all.find(i => i.kind === kind && sameName(i.include, include));
+    if (!item || !/^[A-Za-z_][\w.]*$/.test(name)) return text;
+    const live = mask(text);
+    const eol = eolOf(text);
+    // The child, if any: by its name as written (the build task reads metadata names as written).
+    const childRe = new RegExp(`<${name}\\s*>([^<]*)</${name}\\s*>`, 'g');
+    childRe.lastIndex = item.openEnd;
+    const found = item.selfClose ? null : childRe.exec(live);
+    const child = found && found.index < item.bodyEnd ? found : null;
+
+    if (value === null) {
+        if (!child) return text;
+        const childStart = child.index, childEnd = child.index + child[0].length;
+        const lineStart = lineStartAt(text, childStart);
+        const alone = blankBetween(text, lineStart, childStart) && restOfLineBlank(text, childEnd);
+        const [from, to] = removalSpan(text, childStart, childEnd, alone, lineStart, lineEndAfter(text, childEnd));
+        if (/^\s*$/.test(text.slice(item.openEnd, from) + text.slice(to, item.bodyEnd))) {
+            // Nothing left inside: back to one line, closed as the project's other items are.
+            const selfClose = all.find(i => i.selfClose)?.selfClose ?? ' />';
+            const open = text.slice(item.elementStart, item.openEnd).replace(/\s*>$/, selfClose);
+            return text.slice(0, item.elementStart) + open + text.slice(item.elementEnd);
+        }
+        return text.slice(0, from) + text.slice(to);
+    }
+
+    const encoded = encode(value);
+    if (child) {
+        const valueStart = child.index + child[0].indexOf('>') + 1;
+        return text.slice(0, valueStart) + encoded + text.slice(valueStart + child[1].length);
+    }
+    const element = `<${name}>${encoded}</${name}>`;
+    // The last child already there, and its indent; else a step in from the item.
+    const childOpen = /<([A-Za-z_][\w.]*)(\s[^>]*?)?(\/?)>/g;
+    childOpen.lastIndex = item.openEnd;
+    let lastEnd = -1, lastIndent = '';
+    let c: RegExpExecArray | null;
+    while ((c = childOpen.exec(live)) && c.index < item.bodyEnd) {
+        let end = childOpen.lastIndex;
+        if (!c[3]) {
+            const close = new RegExp(`</${c[1]}\\s*>`, 'g');
+            close.lastIndex = end;
+            const m = close.exec(live);
+            if (!m || m.index > item.bodyEnd) break;
+            end = close.lastIndex;
+            childOpen.lastIndex = end;
+        }
+        lastEnd = end;
+        lastIndent = indentAt(text, c.index);
+    }
+    if (lastEnd >= 0) return text.slice(0, lastEnd) + eol + lastIndent + element + text.slice(lastEnd);
+    const group = groups.find(g => g.items.includes(item))!;
+    const step = item.indent.slice(group.indent.length) || '  ';
+    const inner = `${eol}${item.indent}${step}${element}${eol}${item.indent}`;
+    if (item.selfClose) {
+        const open = text.slice(item.elementStart, item.elementEnd).replace(/\s*\/>$/, '>');
+        return text.slice(0, item.elementStart) + open + inner + `</${kind}>` + text.slice(item.elementEnd);
+    }
+    return text.slice(0, item.openEnd) + inner + text.slice(item.bodyEnd);
 }
 
 /** The Include for a file added to a project: its path relative to the project's folder, with backslashes. */
