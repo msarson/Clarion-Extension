@@ -81,6 +81,26 @@ attribute exactly as the Language Reference draws it. Extension tests that close
 JOIN and its VIEW with one END, or wrote `INNER JOIN(`, were pinning source that does
 not compile and were corrected in #504.
 
+## MEMO and BLOB fields are projectable (#817)
+
+A MEMO or BLOB is declared in the FILE itself, before the RECORD, not inside it.
+Compiled the same way (Clarion 10.0.12567), with `Notes MEMO(1000)` and `Photo BLOB`
+before Customer's RECORD and `Remarks MEMO(500),BINARY` / `Scan BLOB,BINARY` before
+Orders':
+
+| variant | result |
+|---|---|
+| `PROJECT(CUS:Notes)`, `PROJECT(CUS:Photo)` in `VIEW(Customer)`, and `PROJECT(ORD:Remarks, ORD:Scan)` inside `JOIN(ORD:OrdKey, CUS:ID)` | compiles |
+| `PROJECT(Customer.Notes)` / `PROJECT(Notes)` | compiles |
+| `PROJECT(ORD:Remarks)` in `VIEW(Customer)` (another file's MEMO) | `Field not found in parent FILE` |
+| `PROJECT(CUS:Notes)` inside the Orders JOIN | `Field not found in parent FILE` |
+| `PROJECT(CUS:NoSuchMemo)` | `Field not found in parent FILE` |
+| `PROJECT(CUS:CusKey)` (a KEY, the other FILE-level label) | `Field not found in parent FILE` |
+| `Notes MEMO(1000)` inside the RECORD | `Illegal data type: MEMO` |
+
+So a MEMO or BLOB is a field of its FILE for PROJECT purposes, scoped like any other
+field; a KEY is not.
+
 ## Building it
 
 ```

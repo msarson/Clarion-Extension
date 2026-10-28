@@ -517,7 +517,7 @@ export function validateViewProjectFields(
             if (ownerCache.has(key)) return ownerCache.get(key)!;
             const resolved = fileResolver.resolveFileOrPrefixed(name);
             const entry = resolved
-                ? { label: resolved.fileLabel, fields: collectFieldNames(resolved.fileToken) }
+                ? { label: resolved.fileLabel, fields: collectFieldNames(resolved.fileToken, resolved.memoBlobLabels) }
                 : null;
             ownerCache.set(key, entry);
             return entry;
@@ -593,8 +593,15 @@ export function validateViewProjectFields(
  * both bare (`Id`) and prefix-form (`Cus:Id`) so the call site can address
  * either. Returns empty set if the FILE has no RECORD or no Label children.
  */
-function collectFieldNames(fileToken: Token): Set<string> {
+function collectFieldNames(fileToken: Token, memoBlobLabels: Token[] = []): Set<string> {
     const validFields = new Set<string>();
+    // #817: MEMO and BLOB fields sit in the FILE before the RECORD, addressable
+    // bare and as PRE:Name like any record field.
+    const filePrefix = fileToken.structurePrefix?.toUpperCase();
+    for (const label of memoBlobLabels) {
+        validFields.add(label.value.toUpperCase());
+        if (filePrefix) validFields.add(`${filePrefix}:${label.value.toUpperCase()}`);
+    }
     const record = fileToken.children?.find(c => c.isFileRecord === true);
     if (!record) return validFields;
 
@@ -629,6 +636,36 @@ function collectFieldNames(fileToken: Token): Set<string> {
 interface ResolvedFile {
     fileToken: Token;
     fileLabel: string;
+    /** #817 — labels of the FILE's MEMO and BLOB fields (see collectMemoBlobLabels). */
+    memoBlobLabels: Token[];
+}
+
+/**
+ * #817 — the labels of a FILE's MEMO and BLOB fields. Both are declared in the FILE
+ * itself, before its RECORD ("A MEMO must be declared before the RECORD structure",
+ * and the same for BLOB, Language Reference), so they are FILE children that
+ * `collectFieldNames`' RECORD walk never sees. They are real VIEW fields: compiled
+ * on Clarion 10.0.12567 (test-programs/ViewJoinTest README), `PROJECT(CUS:Notes)` of
+ * a MEMO and `PROJECT(CUS:Photo)` of a BLOB build, while a KEY label - the other
+ * kind of FILE-level label - fails with `Field not found in parent FILE`. So only a
+ * label whose declaration keyword is MEMO or BLOB is taken.
+ *
+ * `fileIndex` is the FILE token's index in `tokens`; the scan stops at the FILE's END.
+ */
+function collectMemoBlobLabels(tokens: Token[], fileIndex: number): Token[] {
+    const fileToken = tokens[fileIndex];
+    const lastLine = fileToken.finishesAt ?? fileToken.line;
+    const labels: Token[] = [];
+    for (let j = fileIndex + 1; j < tokens.length; j++) {
+        const label = tokens[j];
+        if (label.line > lastLine) break;
+        if (label.type !== TokenType.Label || label.parent !== fileToken) continue;
+        const keyword = tokens[j + 1];
+        if (!keyword || keyword.line !== label.line) continue;
+        const kw = keyword.value.toUpperCase();
+        if (kw === 'MEMO' || kw === 'BLOB') labels.push(label);
+    }
+    return labels;
 }
 
 /**
@@ -750,17 +787,23 @@ class FileResolver {
     }
 
     private indexFiles(tokens: Token[]): void {
-        for (const t of tokens) {
+        for (let i = 0; i < tokens.length; i++) {
+            const t = tokens[i];
             if (t.type === TokenType.Structure && t.value.toUpperCase() === 'FILE' && t.label) {
+                const entry: ResolvedFile = {
+                    fileToken: t,
+                    fileLabel: t.label,
+                    memoBlobLabels: collectMemoBlobLabels(tokens, i)
+                };
                 const key = t.label.toUpperCase();
                 if (!this.filesByName.has(key)) {
-                    this.filesByName.set(key, { fileToken: t, fileLabel: t.label });
+                    this.filesByName.set(key, entry);
                 }
                 // Also index by PRE() prefix: a JOIN names a KEY, not a file --
                 // JOIN(CUS:Key, ...) -- so scoping a JOIN's fields needs prefix -> file.
                 const pre = t.structurePrefix?.toUpperCase();
                 if (pre && !this.filesByPrefix.has(pre)) {
-                    this.filesByPrefix.set(pre, { fileToken: t, fileLabel: t.label });
+                    this.filesByPrefix.set(pre, entry);
                 }
             }
         }
