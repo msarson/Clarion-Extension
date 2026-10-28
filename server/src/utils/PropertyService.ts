@@ -1,9 +1,19 @@
 import * as propertiesData from '../data/clarion-properties.json';
 
+/** What a property is applied to: `?Control{PROP:x}` or `FileLabel{PROP:x}`. */
+export type PropTarget = 'control' | 'file';
+
 export interface PropEntry {
     name: string;
+    /** The whole meaning: used by completion, and by the card when the target is not known. */
     description: string;
     readOnly: boolean;
+    /**
+     * For a property that means different things on different targets (#823): the meaning
+     * per target. The hover card shows the one matching the target, or every one when the
+     * target cannot be told.
+     */
+    targets?: Partial<Record<PropTarget, string>>;
 }
 
 interface PropertiesData {

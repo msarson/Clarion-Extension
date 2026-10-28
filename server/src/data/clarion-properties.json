@@ -1582,8 +1582,12 @@
     },
     {
       "name": "PROP:Value",
-      "description": "An array property of a FILE that sets or returns the data contained in a specified MEMO or BLOB column (use the WHAT procedure for any other type of column). The array element for PROP:Value is a simple negative number which indicates the MEMO or BLOB. MEMO and BLOB fields are numbered negatively. MEMO and BLOB declarations begin with -1 and decrement by 1 for each subsequent MEMO and BLOB, in the order in which they appear within the FILE structure.",
-      "readOnly": false
+      "description": "On a control: the VALUE attribute. On a RADIO, the value the OPTION's USE variable gets when the radio is chosen; on a CHECK, the values its USE variable gets when checked ({PROP:Value,1}) and unchecked ({PROP:Value,2}). On a FILE: an array property that sets or returns the contents of a MEMO or BLOB, numbered -1, -2, ... in declaration order.",
+      "readOnly": false,
+      "targets": {
+        "control": "The VALUE attribute (PROP:VALUE). On a RADIO it is the value assigned to the OPTION structure's USE variable when the user chooses that radio, in place of the radio's text. On a CHECK it holds the values assigned to the CHECK's USE variable when the box is checked ({PROP:Value,1}, same as PROP:TrueValue) and unchecked ({PROP:Value,2}, same as PROP:FalseValue), in place of the default 1 and 0. Normal type conversion applies to the assignment. Read from an ENTRY, SPIN or COMBO, it returns the value UPDATE would put in the USE variable, without updating it (this can generate EVENT:Rejected).",
+        "file": "An array property of a FILE that sets or returns the data contained in a specified MEMO or BLOB column (use the WHAT procedure for any other type of column). The array element for PROP:Value is a simple negative number which indicates the MEMO or BLOB. MEMO and BLOB fields are numbered negatively. MEMO and BLOB declarations begin with -1 and decrement by 1 for each subsequent MEMO and BLOB, in the order in which they appear within the FILE structure."
+      }
     },
     {
       "name": "PROP:Vcr",

@@ -21,7 +21,7 @@ function readCachedOrDiskFile(fileUri: string): string {
 }
 import LoggerManager from '../../logger';
 import { DocCommentReader, DocComment } from '../../utils/DocCommentReader';
-import { PropEntry } from '../../utils/PropertyService';
+import { PropEntry, PropTarget } from '../../utils/PropertyService';
 import { EventEntry } from '../../utils/EventService';
 import { DirectiveEntry } from '../../utils/DirectiveService';
 import { KeywordEntry } from '../../utils/KeywordService';
@@ -840,13 +840,28 @@ export class HoverFormatter {
     }
 
     /** Formats hover for a PROP: runtime property equate. */
-    public formatPropEquate(entry: PropEntry): Hover {
+    public formatPropEquate(entry: PropEntry, target?: PropTarget): Hover {
         const isPropPrint = entry.name.toUpperCase().startsWith('PROPPRINT:');
         let content = `**${entry.name}**\n\n`;
         if (isPropPrint) {
             content += entry.readOnly ? `_Read-only printer control property_\n\n` : `_Printer control property_\n\n`;
         } else {
             content += entry.readOnly ? `_Read-only runtime property_\n\n` : `_Runtime property_\n\n`;
+        }
+        if (entry.targets) {
+            // #823: one meaning per target. Show the target's own when it is known,
+            // otherwise each meaning under its own heading.
+            const usage = (t: PropTarget) => t === 'file' ? `FileLabel{${entry.name}}` : `?Control{${entry.name}}`;
+            const label = (t: PropTarget) => t === 'file' ? 'On a FILE' : 'On a control';
+            const own = target ? entry.targets[target] : undefined;
+            if (target && own) {
+                content += `${own}\n\n**Usage:** \`${usage(target)}\``;
+            } else {
+                const parts = (Object.keys(entry.targets) as PropTarget[])
+                    .map(t => `**${label(t)}:** ${entry.targets![t]}\n\n**Usage:** \`${usage(t)}\``);
+                content += parts.join('\n\n---\n\n');
+            }
+            return { contents: { kind: 'markdown', value: content.trim() } };
         }
         if (entry.description) {
             content += `${entry.description}\n\n`;

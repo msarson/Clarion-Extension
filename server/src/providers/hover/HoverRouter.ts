@@ -14,7 +14,7 @@ import { LogicalLine } from '../../DocumentStructure';
 import { clientFeatures } from '../../utils/ClientFeatures';
 import { isGeneratedFile } from '../../utils/GeneratedFile';
 import { isDotSuffix, isDotBase, isNestedInsideAttributeArgs, isDeclarationLabel, HANDLED_BY_SPECIAL_KEYWORDS } from '../../utils/AttributeContextGuards';
-import { PropertyService } from '../../utils/PropertyService';
+import { PropertyService, PropTarget } from '../../utils/PropertyService';
 import { EventService } from '../../utils/EventService';
 import { DirectiveService } from '../../utils/DirectiveService';
 import { KeywordService } from '../../utils/KeywordService';
@@ -169,7 +169,7 @@ export class HoverRouter {
             if (attributeHover) return attributeHover;
 
             // 9.5 Handle PROP: runtime property equates
-            const propHover = this.handlePropEquate(word);
+            const propHover = this.handlePropEquate(word, line, wordRange.start.character, tokens);
             if (propHover) return propHover;
 
             // 9.6 Handle EVENT: equates
@@ -1084,11 +1084,29 @@ export class HoverRouter {
     /**
      * Handle PROP: runtime property equates (e.g. PROP:Enabled, PROP:Handle)
      */
-    private handlePropEquate(word: string): Hover | null {
+    private handlePropEquate(word: string, line: string, wordStart: number, tokens: Token[]): Hover | null {
         const entry = this.propertyService.getPropEntry(word);
         if (!entry) return null;
         logger.info(`Found PROP: equate: ${word}`);
-        return this.formatter.formatPropEquate(entry);
+        const target = entry.targets ? this.propTarget(line, wordStart, tokens) : undefined;
+        return this.formatter.formatPropEquate(entry, target);
+    }
+
+    /**
+     * #823: what `target{PROP:x}` is applied to, for a property with a meaning per target.
+     * `?Name` (optionally `window $ ?Name`) is a control; a label declared as a FILE in this
+     * document is a FILE. Anything else - a variable holding a field equate, a FILE declared
+     * elsewhere, an expression - is not known, and the card shows every meaning.
+     */
+    private propTarget(line: string, wordStart: number, tokens: Token[]): PropTarget | undefined {
+        const brace = line.lastIndexOf('{', wordStart);
+        if (brace < 0 || line.slice(brace + 1, wordStart).trim() !== '') return undefined;
+        const before = /(\?)?([A-Za-z_][A-Za-z0-9_:]*)\s*$/.exec(line.slice(0, brace));
+        if (!before) return undefined;
+        if (before[1]) return 'control';
+        const name = before[2].toUpperCase();
+        const label = tokens.find(t => t.type === TokenType.Label && t.label?.toUpperCase() === name && t.structureType !== undefined);
+        return label?.structureType?.toUpperCase() === 'FILE' ? 'file' : undefined;
     }
 
     /**
