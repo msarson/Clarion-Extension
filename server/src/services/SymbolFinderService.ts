@@ -306,7 +306,15 @@ export class SymbolFinderService {
         scopeToken: Token
     ): SymbolInfo | null {
         logger.info(`Finding parameter: "${word}" in scope: ${scopeToken.value}`);
-        
+
+        // #757 — a ROUTINE has no parameters of its own; it sees its procedure's, so the
+        // procedure is the scope (and the one the card names, #755).
+        if (scopeToken.subType === TokenType.Routine) {
+            const procedure = this.procedureOfRoutine(document, scopeToken);
+            if (!procedure) return null;
+            scopeToken = procedure;
+        }
+
         // #711 — line by line, not a split of the whole document on every hover.
         // #825 — the header's `|` continuation lines declare parameters too.
         const lineCount = document.lineCount;
@@ -345,6 +353,19 @@ export class SymbolFinderService {
 
         logger.info(`❌ Parameter "${word}" not found`);
         return null;
+    }
+
+    /** #757 — the procedure or method implementation a ROUTINE belongs to: the last one before it. */
+    private procedureOfRoutine(document: TextDocument, routine: Token): Token | undefined {
+        let procedure: Token | undefined;
+        for (const t of this.tokenCache.getTokens(document)) {
+            if (t.line >= routine.line) break;
+            if (TokenHelper.isProcedureOrFunction(t)
+                && (t.subType === TokenType.GlobalProcedure || t.subType === TokenType.MethodImplementation)) {
+                procedure = t;
+            }
+        }
+        return procedure;
     }
     
     /**
