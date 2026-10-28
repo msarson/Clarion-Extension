@@ -12,7 +12,7 @@
     },
     {
       "name": "PROP:AcceptAll",
-      "description": "Property of a WINDOW which returns one (1) if AcceptAll mode is active and zero (0) if it is not, and may also be used to toggle AcceptAll (non-stop) mode. SELECT with no parameters usually initiates AcceptAll mode. This is a field edit mode in which each control in the window is processed by generating EVENT:Accepted for each. This allows data entry validation code to execute for all controls, including those that the user has not touched. AcceptAll mode immediately terminates when any of the following conditions is met:",
+      "description": "Property of a WINDOW that returns 1 while AcceptAll (non-stop) mode is active and 0 when it is not; assigning it starts (1) or stops (0) the mode. SELECT with no parameters normally starts AcceptAll mode, which generates EVENT:Accepted for each control in turn so that validation code runs for every control, even those the user never touched. The mode ends early when code calls SELECT(?) to send the user back to a control, when code sets PROP:AcceptAll to 0, or when a REQ control is blank or zero; once every control has been processed, EVENT:Completed is posted. Only controls with a USE variable (not a USE field equate) receive EVENT:Accepted.",
       "readOnly": false
     },
     {
@@ -22,7 +22,7 @@
     },
     {
       "name": "PROP:Alias",
-      "description": "PROP:Alias is a read/write file property that sets or returns the alias the SQL Accelerator driver uses when generating SELECT statements for a view. It will return an empty string if PROP:Alias has not previously been called to set the alias. PROP:Alias only returns a value previously set using PROP:Alias. For example:",
+      "description": "Read/write FILE property that sets or returns the alias the SQL Accelerator driver uses for the file when it builds SELECT statements for a VIEW, e.g. Customer{PROP:Alias} = 'C'. It returns an empty string until it has been set; without it the driver names the files of a view A, B, C and so on, which matters when PROP:Filter uses SQL(). The setting lasts while the file is in scope: per thread for a THREAD file, otherwise for the whole program.",
       "readOnly": false
     },
     {
@@ -157,7 +157,7 @@
     },
     {
       "name": "PROP:Centered",
-      "description": "The CENTERED attribute (PROP:CENTERED) indicates an image displayed at its default size and centered in its display area:",
+      "description": "The CENTERED attribute (PROP:CENTERED) shows an image at its default size, centered in its display area: on an IMAGE control, within the area given by the AT attribute; on a TOOLBAR with WALLPAPER, within the toolbar; on an APPLICATION or WINDOW with WALLPAPER, within the client area.",
       "readOnly": false
     },
     {
@@ -252,7 +252,7 @@
     },
     {
       "name": "PROP:Codepage",
-      "description": "Setting PROP:Codepage and PROP:Locale properties respectively for the internal SYSTEM variable,",
+      "description": "Property of the SYSTEM built-in variable that sets the code page the runtime library uses, e.g. SYSTEM{PROP:Codepage} = 1253 for Greek. Used together with PROP:Locale.",
       "readOnly": false
     },
     {
@@ -267,7 +267,7 @@
     },
     {
       "name": "PROP:ColorHighByte",
-      "description": "A property of the SYSTEM built-in variable that sets the high byte of the RGB DWORD using",
+      "description": "Property of the SYSTEM built-in variable that sets the high byte of the RGB DWORD used for colors: SYSTEM{PROP:ColorHighByte} = n. Setting n to 0 turns on color dithering in 256-color mode; 2 (the default) uses solid colors only.",
       "readOnly": false
     },
     {
@@ -502,7 +502,7 @@
     },
     {
       "name": "PROP:First",
-      "description": "The FIRST and LAST attributes (PROP:FIRST and PROP:LAST) specify menu selection positioning within the global pulldown menu, when a WINDOW's MENUBAR is merged into the global menu. The order of priorities is:",
+      "description": "The FIRST and LAST attributes (PROP:FIRST and PROP:LAST) position menu selections in the global pulldown menu when a WINDOW's MENUBAR is merged into it. Selections are ordered: global with FIRST, local with FIRST, global with neither, local with neither, global with LAST, then local with LAST.",
       "readOnly": false
     },
     {
@@ -532,7 +532,7 @@
     },
     {
       "name": "PROP:Font",
-      "description": "Here is a brief summary of the FONT attribute, and FONT language support:",
+      "description": "The FONT attribute (PROP:FONT) sets the default display font for a window or control: FONT([typeface] [,size] [,color] [,style] [,charset]). As a runtime property it is an array: element 1 is the typeface, 2 the size, 3 the color, 4 the style and 5 the charset. SETFONT and GETFONT change and read the same settings, and FONTDIALOG / FONTDIALOGA let the user pick a font.",
       "readOnly": false
     },
     {
@@ -607,7 +607,7 @@
     },
     {
       "name": "PROP:henv",
-      "description": "PROP:henv returns the current henv (environment handle) used by the SQL driver. Thus ?MyFile{PROP:henv} may be used for ODBC API calls requiring henv. For example, for the SQLDataSources function:",
+      "description": "Returns the environment handle (henv) the SQL driver is using, so that MyFile{PROP:henv} can be passed to ODBC API calls that need one, such as SQLDataSources. Not valid for the Oracle Accelerator.",
       "readOnly": false
     },
     {
@@ -637,7 +637,7 @@
     },
     {
       "name": "PROP:hstmt",
-      "description": "PROP:hstmt returns the current hstmt used by the SQL driver. Thus ?MyFile{PROP:hstmt} may be used for ODBC API calls requiring hstmt. For example, the SQLDescribeCol function:",
+      "description": "Returns the statement handle (hstmt) the SQL driver is using, so that MyFile{PROP:hstmt} can be passed to ODBC API calls that need one, such as SQLDescribeCol after a PROP:SQL query. Not valid for the Oracle Accelerator.",
       "readOnly": false
     },
     {
@@ -742,7 +742,7 @@
     },
     {
       "name": "PROP:LastChanceHook",
-      "description": "This is a SYSTEM read/write property (returning a LONG) that allows you to specify your own function that will be invoked if an exception has occurred. The hook function allows you to display information about the exception and choose one of the following actions:",
+      "description": "Read/write SYSTEM property (a LONG) naming a procedure the runtime calls when an exception occurs. The hook can report the exception and then continue the thread (when the exception is not fatal), stop the thread (or the whole process, from the main thread) without the runtime's own handler, or pass the exception on to the runtime's handler. The runtime handler in turn offers to stop the thread, stop the process, invoke the system debugger, or raise a debug event when already under the debugger. The hook can also set the exit code the program returns to the operating system without halting immediately.",
       "readOnly": false
     },
     {
@@ -817,7 +817,7 @@
     },
     {
       "name": "PROP:LoginTimeout",
-      "description": "PROP:LoginTimeout sets a time limit in seconds for an SQL database's login screen. If the user does not respond in the allotted time, the connection fails and the login is aborted. The default is to wait indefinitely for user input. Some servers do not support this feature and may ignore the instruction. For example:",
+      "description": "Sets a time limit, in seconds, for an SQL database's login screen; if the user does not answer in time the connection fails and the login is aborted. By default the driver waits indefinitely. Some servers ignore it. Example: AFile{PROP:LoginTimeout} = 60. Not valid for the Oracle Accelerator.",
       "readOnly": false
     },
     {
@@ -832,7 +832,7 @@
     },
     {
       "name": "PROP:LogoutIsolationLevel",
-      "description": "PROP:LogoutIsolationLevel uses the ODBC isolation level standard. This may not be the same as the isolation levels documented on the target driver�s native back end. For example, with Sybase's ASA, the documented isolation levels are 0, 1, 2 and 3 and they correspond to",
+      "description": "Property of a FILE that sets the isolation level used inside a transaction frame (LOGOUT/COMMIT). Valid for all SQL drivers except Oracle; the default is 8. The values follow the ODBC standard (1, 2, 4, 8, 16), which may differ from the back end's own numbering: on Sybase ASA, for example, ODBC levels 1, 2, 4 and 8 correspond to its levels 0, 1, 2 and 3, and 16 has no equivalent.",
       "readOnly": false
     },
     {
@@ -917,7 +917,7 @@
     },
     {
       "name": "PROP:Name",
-      "description": "All of the SQL Accelerator Drivers now support the following syntax:",
+      "description": "On a VIEW with an SQL Accelerator driver, view{'field_label', PROP:Name} = string changes the name used for that field in the generated SQL, normally the column name in the SELECT list. On a FILE or field, PROP:Name is the NAME attribute (the external name).",
       "readOnly": false
     },
     {
@@ -1312,7 +1312,7 @@
     },
     {
       "name": "PROP:Status",
-      "description": "The Status bar implementation exposes a set of 3 interfaces:",
+      "description": "The STATUS attribute (PROP:STATUS) adds a status bar to an APPLICATION or WINDOW. As a runtime property it is an array holding the width, in dialog units, of each status bar zone (a negative width makes the zone expandable with that minimum); the last element must be 0 to end the array. Text for each zone is set or read through PROP:StatusText.",
       "readOnly": true
     },
     {
@@ -1367,7 +1367,7 @@
     },
     {
       "name": "PROP:SystemPropHook",
-      "description": "A property of the SYSTEM built-in variable that allows you to trap when SYSTEM{property} is being called. Equivalent to {PROP:LibHook,12}. You need to pass the address of a procedure which has a prototype of",
+      "description": "Property of the SYSTEM built-in variable that lets you trap reads and writes of SYSTEM{property}; equivalent to {PROP:LibHook,12}. Assign the address of a procedure prototyped PROCEDURE(SIGNED Property, BYTE DoingSet, *BYTE Done, STRING Value),STRING. Property is the property equate; DoingSet is TRUE when SYSTEM{property} is being assigned and FALSE when it is being read; set Done to TRUE to stop the runtime processing the property itself; Value holds the value being assigned (only when DoingSet is TRUE). The returned string is used as the result of a read when DoingSet is FALSE and Done is TRUE.",
       "readOnly": false
     },
     {
@@ -1602,12 +1602,12 @@
     },
     {
       "name": "PROP:VLBproc",
-      "description": "The procedure's prototype must take three parameters:",
+      "description": "Sets the procedure that supplies the data for a \"Virtual List Box\": a LIST or COMBO control without a FROM attribute. The procedure takes three parameters, PROCEDURE(LONG,LONG,SHORT),STRING: the first LONG is the value set with PROP:VLBval (or SELF, when the procedure is a CLASS method, where it is implicit); the second LONG is the row the list wants, or -1 to ask for the number of rows, -2 for the number of fields in the nominal queue (data plus color/tree/icon fields), and -3 to ask whether anything has changed (return 1 if so); the SHORT is the column. Assign PROP:VLBval first, then PROP:VLBproc, e.g. ?List{PROP:VLBproc} = ADDRESS(SELF.VLBproc).",
       "readOnly": false
     },
     {
       "name": "PROP:VLBval",
-      "description": "The procedure's prototype must take three parameters:",
+      "description": "Sets the source object for a \"Virtual List Box\" (a LIST or COMBO control without a FROM attribute): any 32-bit value that identifies the list, usually ADDRESS(SELF) when the PROP:VLBproc procedure is a CLASS method. It is passed as the first LONG of the PROP:VLBproc procedure, whose prototype is PROCEDURE(LONG,LONG,SHORT),STRING (the second LONG is the row, or -1/-2/-3 to ask for the row count, field count or whether anything changed; the SHORT is the column). Assign PROP:VLBval before PROP:VLBproc.",
       "readOnly": false
     },
     {
