@@ -10,7 +10,7 @@ import { SymbolFinder } from './utils/SymbolFinder';
 import { isAttributeKeyword, isDataType } from '../utils/AttributeKeywords';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { OmitCompileDetector, DirectiveBlock } from '../utils/OmitCompileDetector';
-import { resolvePrefixedName, prefixedNameStartsLine } from '../utils/PrefixChain';
+import { resolvePrefixedName, prefixedNameStartsLine, continuesPreviousLine } from '../utils/PrefixChain';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
 /**
@@ -205,7 +205,8 @@ export class ClarionDocumentSymbolProvider {
     }
 
     public extractStringContents(rawString: string): string {
-        const match = rawString.match(/'([^']+)'/);
+        // `*`, not `+`: an empty string `''` has empty contents, not itself (#818, MODULE('')).
+        const match = rawString.match(/'([^']*)'/);
         return match ? match[1] : rawString;
     }
 
@@ -1888,6 +1889,16 @@ export class ClarionDocumentSymbolProvider {
             logger.info(`   ✅ Added unlabeled structure to parentStack (finishesAt=${token.finishesAt}, depth now: ${parentStack.length})`);
             
             return; // Done processing this structure declaration
+        }
+
+        // #818: a line continued from the one above with `|` does not start a statement, so
+        // nothing on it is declared (#790 says the same for a MAP prototype). A parameter typed
+        // with a colon name, `*HTTP:Query  request, |`, splits into `*HTTP` `:` `Query`, and
+        // `Query request` then reads like a label and its type.
+        let firstOnLine = index;
+        while (firstOnLine > 0 && tokens[firstOnLine - 1].line === line) firstOnLine--;
+        if (continuesPreviousLine(tokens, firstOnLine)) {
+            return;
         }
 
         // CRITICAL FIX: Skip if we're inside a PROCEDURE declaration's parameter list
