@@ -224,6 +224,11 @@ export class HoverRouter {
             if (openerHover) return openerHover;
         }
 
+        if (upperWord === 'BREAK' || upperWord === 'CYCLE') {
+            const loopHover = this.handleLoopExitKeyword(upperWord, position, tokens, document);
+            if (loopHover) return loopHover;
+        }
+
         if (upperWord === 'ELSE' || upperWord === 'ELSIF' || upperWord === 'OF' || upperWord === 'OROF') {
             const branchHover = this.handleBranchKeyword(upperWord, position, tokens, document);
             if (branchHover) return branchHover;
@@ -587,6 +592,82 @@ export class HoverRouter {
         }
 
         return withDescription(lines);
+    }
+
+    /**
+     * Handle hover over BREAK / CYCLE — shows the LOOP or ACCEPT it acts on, as the END hover
+     * shows the structure it closes: the opening line and a link to it, and for BREAK the line
+     * of the END (or UNTIL / WHILE) that execution continues after.
+     *
+     * `BREAK Label` / `CYCLE Label` acts on the innermost enclosing LOOP or ACCEPT with that
+     * label (matched as the BREAK/CYCLE diagnostic matches it); a bare BREAK / CYCLE on the
+     * innermost enclosing LOOP or ACCEPT. Returns null (falling through to the generic keyword
+     * card) when there is none, which the diagnostic already reports, and for a REPORT's BREAK
+     * structure, which is not a keyword token.
+     */
+    private handleLoopExitKeyword(
+        word: string,
+        position: { line: number; character: number },
+        tokens: Token[],
+        document: any
+    ): Hover | null {
+        const onLine = tokensOnLine(tokens, position.line);
+        const index = onLine.findIndex(t =>
+            t.type === TokenType.Keyword &&
+            t.value.toUpperCase() === word &&
+            position.character >= t.start &&
+            position.character <= t.start + t.value.length
+        );
+        if (index === -1) return null;
+        const keyword = onLine[index];
+        const next = onLine[index + 1];
+        const target = next && (next.type === TokenType.Variable || next.type === TokenType.Label)
+            ? next.value.toUpperCase() : undefined;
+
+        // A LOOP or ACCEPT contains the keyword when it opens before it and its terminator
+        // (or the end of the file, when it has none) comes after it.
+        const before = (a: Token, b: Token) => a.line < b.line || (a.line === b.line && a.start < b.start);
+        const contains = (loop: Token) => {
+            if (!before(loop, keyword)) return false;
+            if (loop.finishesAt === undefined || loop.finishesAt > keyword.line) return true;
+            const terminator = this.findTerminator(tokens, loop);
+            return loop.finishesAt === keyword.line && terminator !== undefined && before(keyword, terminator);
+        };
+        let loop: Token | undefined;
+        for (const t of tokens) {
+            if (t.type !== TokenType.Structure) continue;
+            const kind = t.value.toUpperCase();
+            if (kind !== 'LOOP' && kind !== 'ACCEPT') continue;
+            if (target !== undefined && t.label?.toUpperCase() !== target) continue;
+            if (contains(t) && (!loop || before(loop, t))) loop = t;
+        }
+        if (!loop) return null;
+
+        const kind = loop.value.toUpperCase();
+        const labelText = loop.label ? ` \`${loop.label}\`` : '';
+        const lines: string[] = [`**${word}** — ${word === 'BREAK' ? 'leaves' : 'returns to the top of'} ${kind}${labelText}`];
+
+        const openerLine = (document.getText() as string).split(/\r?\n/)[loop.line];
+        if (openerLine && openerLine.trim()) {
+            lines.push('', '```clarion', openerLine.trim(), '```');
+        }
+        lines.push(this.formatter.locationLink(document.uri, loop.line));
+
+        if (word === 'BREAK') {
+            if (loop.finishesAt === undefined) {
+                lines.push('', `This ${kind} is not terminated: no END or period closes it.`);
+            } else {
+                const terminator = this.findTerminator(tokens, loop);
+                const ends = terminator?.value === '.' ? 'period'
+                    : terminator?.type === TokenType.Keyword ? terminator.value.toUpperCase()
+                    : 'END';
+                lines.push('', `Continues after the ${ends} on line ${loop.finishesAt + 1}`, '', this.formatter.locationLink(document.uri, loop.finishesAt));
+            }
+        }
+
+        const description = this.keywordService.getKeyword(word)?.description;
+        if (description) lines.push('', '---', '', description);
+        return { contents: { kind: 'markdown', value: lines.join('\n') } };
     }
 
     /**
