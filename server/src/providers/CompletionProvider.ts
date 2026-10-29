@@ -479,7 +479,7 @@ export class CompletionProvider {
         logger.info(`CompletionProvider: "${chain}" → class="${className}", caller="${callerClass ?? 'external'}"`);
 
         // Enumerate all members (with inheritance + access filtering)
-        const members = await this.memberLocator.enumerateMembersInClass(className, document, callerClass);
+        const members = await this.memberLocator.enumerateMembersInClass(className, document, callerClass, { atLine: position.line });
         if (members.length === 0) {
             logger.info(`CompletionProvider: no members found for "${className}"`);
             return [];
@@ -686,7 +686,7 @@ export class CompletionProvider {
         // Walk each segment and carry the current structure type forward.
         for (let i = 1; i < segments.length; i++) {
             const seg = segments[i];
-            const members = await this.memberLocator.enumerateMembersInClass(currentClass, document, callerClass);
+            const members = await this.memberLocator.enumerateMembersInClass(currentClass, document, callerClass, { atLine: position.line });
             const member = members.find(m => m.name.toUpperCase() === seg.toUpperCase());
             if (!member) return null;
 
