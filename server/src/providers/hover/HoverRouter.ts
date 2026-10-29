@@ -600,7 +600,8 @@ export class HoverRouter {
      * of the END (or UNTIL / WHILE) that execution continues after.
      *
      * `BREAK Label` / `CYCLE Label` acts on the innermost enclosing LOOP or ACCEPT with that
-     * label (matched as the BREAK/CYCLE diagnostic matches it); a bare BREAK / CYCLE on the
+     * label (read as the BREAK/CYCLE diagnostic reads it, though matched by position rather
+     * than by line range); a bare BREAK / CYCLE on the
      * innermost enclosing LOOP or ACCEPT. Returns null (falling through to the generic keyword
      * card) when there is none, which the diagnostic already reports, and for a REPORT's BREAK
      * structure, which is not a keyword token.
@@ -647,7 +648,7 @@ export class HoverRouter {
         const labelText = loop.label ? ` \`${loop.label}\`` : '';
         const lines: string[] = [`**${word}** — ${word === 'BREAK' ? 'leaves' : 'returns to the top of'} ${kind}${labelText}`];
 
-        const openerLine = (document.getText() as string).split(/\r?\n/)[loop.line];
+        const openerLine: string = document.getText({ start: { line: loop.line, character: 0 }, end: { line: loop.line + 1, character: 0 } }).replace(/\r?\n$/, '');
         if (openerLine && openerLine.trim()) {
             lines.push('', '```clarion', openerLine.trim(), '```');
         }

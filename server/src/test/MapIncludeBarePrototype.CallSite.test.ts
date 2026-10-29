@@ -10,6 +10,7 @@ import { createF12Resolver } from '../providers/diagnostics/UnresolvedProcedureC
 import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
 import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
+import { MapProcedureResolver } from '../utils/MapProcedureResolver';
 
 /**
  * #649 — a call to a procedure whose prototype is bare (not in a MODULE block) in a file
@@ -131,6 +132,26 @@ suite('#649 call to a bare prototype in a MAP-included file', () => {
         assert.deepStrictEqual(def, { file: 'protos.inc', line: 0 });
         const text = hoverText(await new HoverProvider().provideHover(doc, call));
         assert.ok(/\[protos\.inc:1\]\([^)]*\) → \[prog\.clw:7\]/.test(text), `expected protos.inc:1 → prog.clw:7, got:\n${text}`);
+    });
+
+    // #837 review: hover and the unresolved-call check skip a built-in before the walk; F12 ran
+    // it for CLIP, LEN and the like, a cold walk on a large PROGRAM, to prove a certain miss.
+    test('F12 on a built-in call does not walk the MAP includes', async () => {
+        write('protos.inc', ['Worker        PROCEDURE']);
+        const doc = open(write('mod.clw', [...MODULE_LINES, '  S = CLIP(S)']));   // 9
+        const proto = MapProcedureResolver.prototype as unknown as Record<string, (...a: unknown[]) => unknown>;
+        const original = proto.findDeclarationInMapIncludes;
+        const walked: string[] = [];
+        proto.findDeclarationInMapIncludes = function (this: unknown, ...args: unknown[]) {
+            walked.push(String(args[0]));
+            return original.apply(this, args);
+        };
+        try {
+            await new DefinitionProvider().provideDefinition(doc, { line: 9, character: 7 });
+        } finally {
+            proto.findDeclarationInMapIncludes = original;
+        }
+        assert.ok(!walked.some(w => w.toUpperCase() === 'CLIP'), `walked for: ${walked.join(', ')}`);
     });
 
     test('a MODULE-block prototype in the included file is unchanged', async () => {

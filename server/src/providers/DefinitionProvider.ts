@@ -757,8 +757,10 @@ export class DefinitionProvider {
         // #649 — a prototype in a file INCLUDEd in this module's or the MEMBER parent's MAP,
         // which the lookups above do not reach when it is bare (not in a MODULE block). The
         // same walk hover and Go to Implementation use. Not for the weak argument shape,
-        // whose words are mostly ordinary variables (see ProcedureHoverResolver).
-        if (!detection.isArgumentReference) {
+        // whose words are mostly ordinary variables (see ProcedureHoverResolver), and not for a
+        // built-in, which hover and the unresolved-call check also skip (#374: a cold walk to
+        // prove a certain miss).
+        if (!detection.isArgumentReference && !BuiltinFunctionService.getInstance().isBuiltin(word)) {
             const includeHit = await this.mapResolver.findDeclarationInMapIncludes(word, document, tokens, true);
             if (includeHit) {
                 const declLineText = includeHit.doc.getText({
