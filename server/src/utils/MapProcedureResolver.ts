@@ -59,7 +59,15 @@ logger.setLevel("error");
  * — the same invalidation every other cross-file memo uses). Module-level so it
  * survives across the per-request resolver instances.
  */
-interface MapDeclWalkHit { docUri: string; declLine: number; }
+interface MapDeclWalkHit { docUri: string; declLine: number; hostPath?: string; }
+
+/**
+ * A declaration found by the MAP include walk. `hostPath` is set for a bare prototype
+ * (acceptBarePrototype): the file whose MAP includes it, which is where its procedure is
+ * implemented, as for a prototype written in that MAP directly.
+ */
+export interface MapIncludeDeclaration { doc: TextDocument; tokens: Token[]; declLine: number; hostPath?: string; }
+type WalkDeclaration = { doc: TextDocument; tokens: Token[]; declLine: number; bare?: true };
 const mapDeclWalkCache = new Map<string, MapDeclWalkHit | null>();
 let mapDeclWalkEpoch = -1;
 
@@ -129,15 +137,17 @@ export class MapProcedureResolver {
      *
      * `acceptBarePrototype` also accepts a prototype that is not inside a MODULE
      * block. An included file's text becomes part of the MAP that includes it, so a
-     * bare `Name PROCEDURE` there is a local prototype. Off by default: the existing
-     * callers look for procedures implemented in another module.
+     * bare `Name PROCEDURE` there is a prototype for a procedure of the module whose
+     * MAP includes it: this document, or the MEMBER parent when the INCLUDE is in the
+     * parent's MAP (#649). That module is returned as `hostPath`; see
+     * findImplementationForMapInclude.
      */
     public async findDeclarationInMapIncludes(
         procName: string,
         document: TextDocument,
         tokens: Token[],
         acceptBarePrototype = false
-    ): Promise<{ doc: TextDocument; tokens: Token[]; declLine: number } | null> {
+    ): Promise<MapIncludeDeclaration | null> {
         // #313 follow-up: MAP procedure names never contain dots — a dotted word is
         // member access, and running this walk for it cost 12s per hover on
         // PARENT._FindFirstBreak in a PROGRAM file (the walk exhaustively cold-loaded
@@ -162,7 +172,7 @@ export class MapProcedureResolver {
             // stale document object is never handed out.
             const reloaded = await this.loadDocForWalk(
                 decodeURIComponent(cached.docUri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\'));
-            if (reloaded) return { doc: reloaded.document, tokens: reloaded.tokens, declLine: cached.declLine };
+            if (reloaded) return { doc: reloaded.document, tokens: reloaded.tokens, declLine: cached.declLine, hostPath: cached.hostPath };
             // Reload failed (file gone) — fall through to a fresh walk.
         }
 
@@ -213,12 +223,46 @@ export class MapProcedureResolver {
         for (const start of startPaths) {
             const hit = await this.findModuleDeclarationInIncludesOf(start, procName, visited, 0, /* mapScopedRoot */ true, acceptBarePrototype);
             if (hit) {
-                mapDeclWalkCache.set(cacheKey, { docUri: hit.doc.uri, declLine: hit.declLine });
-                return hit;
+                const hostPath = hit.bare ? start : undefined;
+                mapDeclWalkCache.set(cacheKey, { docUri: hit.doc.uri, declLine: hit.declLine, hostPath });
+                return { doc: hit.doc, tokens: hit.tokens, declLine: hit.declLine, hostPath };
             }
         }
         mapDeclWalkCache.set(cacheKey, null);
         return null;
+    }
+
+    /**
+     * The implementation of a procedure declared where findDeclarationInMapIncludes found it.
+     * A MODULE-block prototype names its source file, so the search starts from the
+     * declaration. A bare prototype names none: its procedure is in the module whose MAP
+     * includes it (`hostPath`), so the search runs from that module's MAP, as for a prototype
+     * written there directly. That module is the MEMBER parent when the INCLUDE sits in the
+     * parent's MAP; the procedure is then in the parent, not in the calling module (#649).
+     */
+    public async findImplementationForMapInclude(
+        procName: string,
+        hit: MapIncludeDeclaration
+    ): Promise<Location | null> {
+        const declLineText = hit.doc.getText({
+            start: { line: hit.declLine, character: 0 },
+            end: { line: hit.declLine, character: Number.MAX_SAFE_INTEGER }
+        });
+        if (!hit.hostPath) {
+            return this.findProcedureImplementation(
+                procName, hit.tokens, hit.doc, { line: hit.declLine, character: 0 },
+                declLineText, TokenCache.getInstance().getStructure(hit.doc));
+        }
+        const host = await this.loadDocForWalk(hit.hostPath);
+        if (!host) return null;
+        const structure = TokenCache.getInstance().getStructure(host.document);
+        // Any line inside one of the host's MAPs: with no MODULE block naming the procedure,
+        // the search is the in-file one, whichever MAP it starts from.
+        const map = structure.getMapBlocks().find(m => m.finishesAt !== undefined && m.finishesAt > m.line + 1);
+        if (!map) return null;
+        return this.findProcedureImplementation(
+            procName, host.tokens, host.document, { line: map.line + 1, character: 0 },
+            declLineText, structure);
     }
 
     /**
@@ -425,7 +469,7 @@ export class MapProcedureResolver {
         mapScopedRoot = false,
         acceptBarePrototype = false,
         passThrough = false
-    ): Promise<{ doc: TextDocument; tokens: Token[]; declLine: number } | null> {
+    ): Promise<WalkDeclaration | null> {
         if (depth > 4) return null;
         const key = fromPath.toLowerCase();
         if (visited.has(key)) return null;
@@ -456,7 +500,7 @@ export class MapProcedureResolver {
         depth: number,
         mapScopedRoot: boolean,
         acceptBarePrototype: boolean
-    ): Promise<{ doc: TextDocument; tokens: Token[]; declLine: number } | null> {
+    ): Promise<WalkDeclaration | null> {
         // #313 follow-up: at the ROOT files, only INCLUDEs that sit INSIDE a MAP block
         // can carry MODULE prototype blocks — walking every include of a PROGRAM file
         // (equates, class headers, …) multiplied the walk by an order of magnitude for
@@ -500,13 +544,16 @@ export class MapProcedureResolver {
 
             // Declaration = MapProcedure/Function token with our name, inside a MODULE block
             // (for an include outside a MAP: a MODULE block inside the file's own MAP).
-            const declLine = outsideMap
+            const moduleLine = outsideMap
                 ? this.findModuleScopedProcDeclLine(inc.tokens, nameLower, /* withinOwnMaps */ true)
-                : this.findModuleScopedProcDeclLine(inc.tokens, nameLower)
-                    ?? (acceptBarePrototype ? this.findBareProcDeclLine(inc.tokens, nameLower) : null);
+                : this.findModuleScopedProcDeclLine(inc.tokens, nameLower);
+            const bareLine = moduleLine === null && !outsideMap && acceptBarePrototype
+                ? this.findBareProcDeclLine(inc.tokens, nameLower)
+                : null;
+            const declLine = moduleLine ?? bareLine;
             if (declLine !== null) {
                 logger.info(`✅ #313: declaration of ${procName} found in MAP-included ${pathUtil.basename(incPath)}:${declLine}`);
-                return { doc: inc.document, tokens: inc.tokens, declLine };
+                return { doc: inc.document, tokens: inc.tokens, declLine, ...(bareLine !== null ? { bare: true } : {}) };
             }
 
             const nested = await this.findModuleDeclarationInIncludesOf(incPath, procName, visited, depth + 1, outsideMap, acceptBarePrototype);

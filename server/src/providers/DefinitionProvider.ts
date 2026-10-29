@@ -754,6 +754,28 @@ export class DefinitionProvider {
             }
         }
 
+        // #649 — a prototype in a file INCLUDEd in this module's or the MEMBER parent's MAP,
+        // which the lookups above do not reach when it is bare (not in a MODULE block). The
+        // same walk hover and Go to Implementation use. Not for the weak argument shape,
+        // whose words are mostly ordinary variables (see ProcedureHoverResolver).
+        if (!detection.isArgumentReference) {
+            const includeHit = await this.mapResolver.findDeclarationInMapIncludes(word, document, tokens, true);
+            if (includeHit) {
+                const declLineText = includeHit.doc.getText({
+                    start: { line: includeHit.declLine, character: 0 },
+                    end: { line: includeHit.declLine, character: Number.MAX_SAFE_INTEGER }
+                });
+                const nameStart = Math.max(0, declLineText.toLowerCase().indexOf(word.toLowerCase()));
+                logger.info(`✅ Found MAP-included declaration for procedure call: ${word}`);
+                return {
+                    location: Location.create(includeHit.doc.uri, {
+                        start: { line: includeHit.declLine, character: nameStart },
+                        end: { line: includeHit.declLine, character: nameStart + word.length }
+                    })
+                };
+            }
+        }
+
         logger.info(`❌ No MAP declaration found for procedure call: ${word}`);
         return null;
     }
