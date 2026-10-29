@@ -303,19 +303,20 @@ export class SignatureHelpProvider {
 
         // A chained receiver (`Request.Payload.KeepOnly(`, `SELF.Order.Add(`) is walked as hover
         // and Go to Definition walk it, to the class of its last segment.
-        const chainOwner = prefix.includes('.')
+        const isChain = prefix.includes('.');
+        const chainOwner = isChain
             ? await this.chains.resolveFinalOwner(prefix, document, { line: currentLine, character: 0 })
             : null;
 
         // #654: the receiver as hover and Go to Definition read it (#651) - SELF the method's class,
         // PARENT its parent, a local `ThisWindow CLASS(Base)` itself rather than Base (#642).
-        const receiver = chainOwner ? null : await this.memberLocator.resolveReceiverAt(prefix, document, currentLine);
-        if (chainOwner) {
-            if (chainOwner.kind !== 'class') return [];
+        const receiver = isChain ? null : await this.memberLocator.resolveReceiverAt(prefix, document, currentLine);
+        if (isChain) {
+            if (chainOwner?.kind !== 'class') {
+                if (!chainOwner) logger.info(`Could not resolve the receiver chain ${prefix}`);
+                return [];
+            }
             className = chainOwner.name;
-        } else if (prefix.includes('.')) {
-            logger.info(`Could not resolve the receiver chain ${prefix}`);
-            return [];
         } else if (receiver) {
             className = receiver.className;
         } else if (prefix.toLowerCase() === 'self') {

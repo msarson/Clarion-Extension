@@ -8,9 +8,11 @@ import { TokenType } from '../tokenizer/TokenTypes';
 
 /**
  * #834 — the interface-implementation check reported implemented methods as missing:
- * - a method with the same label as a field of the implementing class (`Proxy` / `proxy`);
- * - a method labelled like a keyword (`Data`);
- * - a method whose colon-typed reference parameters are continued over several lines with `|`.
+ * - a method labelled like a keyword (`Data`), read as a DATA section;
+ * - a method whose colon-typed reference parameters are continued over several lines with `|`,
+ *   counted from its first line only.
+ * The report also named a method labelled like a field of the class (`Proxy` / `proxy`); that
+ * did not reproduce, so its rows here are controls, not a fixed bug.
  */
 const IFACES = [
     'Net:Query           INTERFACE',
