@@ -104,8 +104,11 @@ export class ProcedureHoverResolver {
         // its result is memoized). A callback's prototype is visible to the compiler
         // from the calling module, which the cheap in-document MAP scan above
         // already covers.
+        //
+        // #649: a bare prototype counts too. The INCLUDE puts it in the MAP, and the walk
+        // reports which module's MAP that is, which is where the procedure is implemented.
         if (!mapDecl && !detection.isArgumentReference) {
-            const hit = await this.mapResolver.findDeclarationInMapIncludes(word, document, tokens);
+            const hit = await this.mapResolver.findDeclarationInMapIncludes(word, document, tokens, true);
             mk('walkIncludes');
             if (hit) {
                 const declLineText = hit.doc.getText({
@@ -119,9 +122,7 @@ export class ProcedureHoverResolver {
                         end: { line: hit.declLine, character: declLineText.length }
                     }
                 };
-                const includeImpl = await this.mapResolver.findProcedureImplementation(
-                    word, hit.tokens, hit.doc, { line: hit.declLine, character: 0 }, declLineText
-                );
+                const includeImpl = await this.mapResolver.findImplementationForMapInclude(word, hit);
                 mk('implFromWalk');
                 if (mapDecl || includeImpl) {
                     return this.formatter.formatProcedure(word, mapDecl, includeImpl, document, position);
