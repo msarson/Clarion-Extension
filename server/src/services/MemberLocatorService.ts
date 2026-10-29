@@ -665,16 +665,20 @@ export class MemberLocatorService {
      *                       only when their PROTOTYPES match (same name + param shape),
      *                       so inherited *sibling* overloads survive a single derived
      *                       override. Default false = shadow by name (completion/hover).
+     * @param options.atLine The line asking. A module can declare the same local structure
+     *                       label in several procedures (`Request GROUP` in each one); the
+     *                       declaration that line sees is the nearest one above it. Omit to
+     *                       take the document's first declaration, as before.
      * @returns Flat, deduped, access-filtered list of MemberEnumItem
      */
     async enumerateMembersInClass(
         className: string,
         document: TextDocument,
         callerClass?: string,
-        options?: { overloadAware?: boolean }
+        options?: { overloadAware?: boolean; atLine?: number }
     ): Promise<MemberEnumItem[]> {
         return this.collectInheritedMembers(
-            className, document, callerClass, new Set(), options?.overloadAware ?? false
+            className, document, callerClass, new Set(), options?.overloadAware ?? false, options?.atLine
         );
     }
 
@@ -1915,6 +1919,26 @@ export class MemberLocatorService {
 
 
     /**
+     * Which of several same-labelled structure declarations in `doc` the code at `atLine` sees.
+     * A local declaration of the enclosing scope (a ROUTINE's DATA, then its procedure's) shadows
+     * the module-level one; anywhere else the module-level declaration answers. Module data
+     * precedes every procedure, so with no module-level declaration the first one is kept, as
+     * before. `declarations` is in document order.
+     */
+    private declarationInScopeAt(declarations: Token[], doc: TextDocument, atLine: number): Token | undefined {
+        if (declarations.length <= 1) return declarations[0];
+        const structure = this.tokenCache.getStructure(doc);
+        const scopeOf = new Map(declarations.map(t => [t, TokenHelper.getInnermostScopeAtLine(structure, t.line)]));
+        for (let scope = TokenHelper.getInnermostScopeAtLine(structure, atLine), depth = 0;
+            scope && depth < 4;
+            scope = TokenHelper.getParentScopeOfRoutine(structure, scope), depth++) {
+            const own = declarations.find(t => scopeOf.get(t) === scope);
+            if (own) return own;
+        }
+        return declarations.find(t => !scopeOf.get(t)) ?? declarations[0];
+    }
+
+    /**
      * Token-based replacement for scanClassBodyForAllMembers.
      * Uses the DocumentStructure token tree: finds the CLASS/QUEUE/GROUP token by label,
      * collects Label tokens in its line range, and skips members inside nested structures.
@@ -1925,14 +1949,19 @@ export class MemberLocatorService {
         doc: TextDocument,
         className: string,
         filePath: string,
-        structureType: 'CLASS' | 'QUEUE' | 'GROUP' | 'FILE' = 'CLASS'
+        structureType: 'CLASS' | 'QUEUE' | 'GROUP' | 'FILE' = 'CLASS',
+        atLine?: number
     ): MemberEnumItem[] {
-        const classToken = tokens.find(t =>
+        const declarations = tokens.filter(t =>
             t.type === TokenType.Structure &&
             t.value.toUpperCase() === structureType &&
             t.label?.toLowerCase() === className.toLowerCase() &&
             t.finishesAt !== undefined
         );
+        // Each procedure of a module may declare its own local structure with the same label.
+        const classToken = atLine === undefined
+            ? declarations[0]
+            : this.declarationInScopeAt(declarations, doc, atLine);
         if (!classToken || classToken.finishesAt === undefined) return [];
         const classEnd = classToken.finishesAt;
 
@@ -2296,14 +2325,15 @@ export class MemberLocatorService {
         document: TextDocument,
         callerClass: string | undefined,
         visited: Set<string>,
-        overloadAware: boolean = false
+        overloadAware: boolean = false,
+        atLine?: number
     ): Promise<MemberEnumItem[]> {
         const key = className.toLowerCase();
         if (visited.has(key)) return [];
         visited.add(key);
 
         // 1. Find raw members of this class
-        const ownMembers = await this.findAllMembersInClass(className, document);
+        const ownMembers = await this.findAllMembersInClass(className, document, atLine);
 
         // 2. Determine access filter relative to the caller
         const accessAllowed = this.accessFilter(className, callerClass, document);
@@ -2318,7 +2348,7 @@ export class MemberLocatorService {
 
         // 4. Recurse into the parent
         const parentMembers = await this.collectInheritedMembers(
-            parentClassName, document, callerClass, visited, overloadAware
+            parentClassName, document, callerClass, visited, overloadAware, atLine
         );
 
         // 5. Merge child-first: child members shadow parent members.
@@ -2351,15 +2381,16 @@ export class MemberLocatorService {
      */
     private async findAllMembersInClass(
         className: string,
-        document: TextDocument
+        document: TextDocument,
+        atLine?: number
     ): Promise<MemberEnumItem[]> {
         const docPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         const tokens = this.tokenCache.getTokens(document);
 
         // 1. Current document — token-based first, disk fallback
-        const tokenMembersClass = this.extractMembersFromTokens(tokens, document, className, docPath, 'CLASS');
-        const tokenMembersGroup = this.extractMembersFromTokens(tokens, document, className, docPath, 'GROUP');
-        const tokenMembersQueue = this.extractMembersFromTokens(tokens, document, className, docPath, 'QUEUE');
+        const tokenMembersClass = this.extractMembersFromTokens(tokens, document, className, docPath, 'CLASS', atLine);
+        const tokenMembersGroup = this.extractMembersFromTokens(tokens, document, className, docPath, 'GROUP', atLine);
+        const tokenMembersQueue = this.extractMembersFromTokens(tokens, document, className, docPath, 'QUEUE', atLine);
         const tokenMembers = tokenMembersClass.length > 0
             ? tokenMembersClass
             : tokenMembersGroup.length > 0
