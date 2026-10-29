@@ -39,6 +39,11 @@ import { inactiveIncludeLines } from '../utils/ConditionalIncludes';
 import { resolveEnclosingClassName } from '../utils/EnclosingClassResolver';
 
 const logger = LoggerManager.getLogger("MemberLocatorService");
+
+/** One line of `doc`, without its line break: no split of the whole text for one declaration line. */
+function lineText(doc: TextDocument, line: number): string {
+    return doc.getText({ start: { line, character: 0 }, end: { line: line + 1, character: 0 } }).replace(/\r?\n$/, '');
+}
 const dotAccessTraceEnabled = process.env.CLARION_TRACE_DOT_ACCESS === '1';
 logger.setLevel(dotAccessTraceEnabled ? "test" : "error");
 
@@ -353,9 +358,10 @@ export class MemberLocatorService {
     /**
      * #650 — `className` declared as a CLASS in the document (a generated procedure's local
      * `ThisWindow`; a module may declare it in several procedures): the declaration a member
-     * access at `atLine` belongs to is the nearest above it (#608). Its own body answers, else
-     * its own parent does. Undefined when the document does not declare the class, so those
-     * lookups, and every caller without a line, keep the tiers below.
+     * access at `atLine` belongs to is the one its scope chain sees (#831, visibleDeclaration).
+     * Its own body answers, else its own parent does. Undefined when the document does not
+     * declare the class where the line can see it, so those lookups, and every caller without a
+     * line, keep the tiers below.
      *
      * Also the fast path for an inherited member of a local class: the tiers below go to the
      * declaration index first, which holds a `ThisWindow` from nearly every generated file, so
@@ -375,26 +381,25 @@ export class MemberLocatorService {
         const declarations = tokens.filter(t =>
             t.type === TokenType.Structure && t.value.toUpperCase() === 'CLASS' &&
             t.label?.toLowerCase() === wanted && t.finishesAt !== undefined);
-        if (declarations.length === 0) return undefined;
-        const own = [...declarations].reverse().find(t => t.line <= atLine) ?? declarations[0];
+        const own = this.visibleDeclaration(declarations, document, atLine);
+        if (!own) return undefined;
 
         const inBody = this.findMemberFromTokens(tokens, document, docPath, className, memberName, paramCount, 'CLASS', own.line);
         if (inBody) return inBody;
         // #779: `SELF.IFace` in a chain names the INTERFACE the class implements, as in the tiers (#773)
         const implemented = await this.findImplementedInterface(className, memberName, document, docPath);
         if (implemented) return implemented;
-        const declLine = document.getText().split(/\r?\n/)[own.line] ?? '';
-        const parent = extractParentName(declLine);
+        const parent = extractParentName(lineText(document, own.line));
         return parent ? this.findMemberInClass(parent, memberName, document, paramCount) : null;
     }
 
     /**
      * The GROUP / QUEUE counterpart of findMemberInNearestLocalClass: `className` declared as a
      * GROUP or QUEUE in the document, where each procedure of a module may declare its own local
-     * `Request GROUP`. The declaration is the one `atLine` sees (declarationInScopeAt). Its own
+     * `Request GROUP`. The declaration is the one `atLine` sees (visibleDeclaration). Its own
      * fields answer, else the fields of its type argument (`Request GROUP(RequestType)`); a
      * structure without one has no other fields, so a miss is null. Undefined when the document
-     * declares no such structure, so those lookups keep the tiers below.
+     * declares no such structure where the line can see it, so those lookups keep the tiers below.
      *
      * Without it, tier 0 read the module's FIRST `Request GROUP`: a field only a later procedure's
      * structure has was a miss that walked the declaration index, INCLUDE and MEMBER tiers, and hover
@@ -413,14 +418,13 @@ export class MemberLocatorService {
         const declarations = tokens.filter(t =>
             t.type === TokenType.Structure && (t.value.toUpperCase() === 'GROUP' || t.value.toUpperCase() === 'QUEUE') &&
             t.label?.toLowerCase() === wanted && t.finishesAt !== undefined);
-        const own = this.declarationInScopeAt(declarations, document, atLine);
+        const own = this.visibleDeclaration(declarations, document, atLine);
         if (!own) return undefined;
         const kind = own.value.toUpperCase() as 'GROUP' | 'QUEUE';
 
         const inBody = this.findMemberFromTokens(tokens, document, docPath, className, memberName, paramCount, kind, own.line);
         if (inBody) return inBody;
-        const declLine = document.getText().split(/\r?\n/)[own.line] ?? '';
-        const type = extractParentName(declLine, ['GROUP', 'QUEUE']);
+        const type = extractParentName(lineText(document, own.line), ['GROUP', 'QUEUE']);
         return type ? this.findMemberInClass(type, memberName, document, paramCount) : null;
     }
 
@@ -468,12 +472,15 @@ export class MemberLocatorService {
             const structure = await this.findMemberInVisibleLocalStructure(tokens, className, memberName, document, docPath, paramCount, atLine);
             if (structure !== undefined) return structure;
         }
+        // #831: declared in this document only where the line cannot see it (another procedure's
+        // local): the document's first declaration is not the answer, the tiers past it are.
+        const hiddenHere = atLine !== undefined && this.declaresStructure(tokens, className);
 
         // 0. Current document tokens (keep CLASS path behavior; add GROUP/QUEUE fallback).
         // #314: use the tokens already in hand — scanBodyForMember re-loaded the CURRENT
         // document from disk three times (once per structure kind), and its disk content
         // can be STALE against the live buffer anyway.
-        const fromCurrentDoc =
+        const fromCurrentDoc = hiddenHere ? null :
             this.findMemberFromTokens(tokens, document, docPath, className, memberName, paramCount, 'CLASS') ??
             this.findMemberFromTokens(tokens, document, docPath, className, memberName, paramCount, 'GROUP') ??
             this.findMemberFromTokens(tokens, document, docPath, className, memberName, paramCount, 'QUEUE');
@@ -705,9 +712,9 @@ export class MemberLocatorService {
      *                       override. Default false = shadow by name (completion/hover).
      * @param options.atLine The line asking. A module can declare the same local structure
      *                       label in several procedures (`Request GROUP` in each one); the
-     *                       declaration that line sees is its ROUTINE's or procedure's own,
-     *                       else the module-level one (declarationInScopeAt). Omit to take
-     *                       the document's first declaration, as before.
+     *                       declaration that line sees is the one on its scope chain
+     *                       (visibleDeclaration). Omit to take the document's first
+     *                       declaration, as before.
      * @returns Flat, deduped, access-filtered list of MemberEnumItem
      */
     async enumerateMembersInClass(
@@ -1958,23 +1965,28 @@ export class MemberLocatorService {
 
 
     /**
-     * Which of several same-labelled structure declarations in `doc` the code at `atLine` sees.
-     * A local declaration of the enclosing scope (a ROUTINE's DATA, then its procedure's) shadows
-     * the module-level one; anywhere else the module-level declaration answers. Module data
-     * precedes every procedure, so with no module-level declaration the first one is kept, as
-     * before. `declarations` is in document order.
+     * #831: which of several same-labelled structure declarations in `doc` the code at `atLine`
+     * sees, walking its visible scope chain innermost first: a ROUTINE's own DATA, its procedure's,
+     * for a method of a procedure's local CLASS that procedure's (Rule 4), then the module level.
+     * Undefined when none is on the chain, e.g. when only another procedure declares it.
      */
-    private declarationInScopeAt(declarations: Token[], doc: TextDocument, atLine: number): Token | undefined {
-        if (declarations.length <= 1) return declarations[0];
+    private visibleDeclaration(declarations: Token[], doc: TextDocument, atLine: number): Token | undefined {
+        if (declarations.length === 0) return undefined;
         const structure = this.tokenCache.getStructure(doc);
-        const scopeOf = new Map(declarations.map(t => [t, TokenHelper.getInnermostScopeAtLine(structure, t.line)]));
-        for (let scope = TokenHelper.getInnermostScopeAtLine(structure, atLine), depth = 0;
-            scope && depth < 4;
-            scope = TokenHelper.getParentScopeOfRoutine(structure, scope), depth++) {
-            const own = declarations.find(t => scopeOf.get(t) === scope);
+        const scopeOf = new Map(declarations.map(t => [t, TokenHelper.getInnermostScopeAtLine(structure, t.line) ?? null]));
+        for (const scope of structure.getScopeResolver().getVisibleScopeChain(atLine)) {
+            const own = declarations.find(t => scopeOf.get(t) === scope.token);
             if (own) return own;
         }
-        return declarations.find(t => !scopeOf.get(t)) ?? declarations[0];
+        return undefined;
+    }
+
+    /** #831: whether `doc`'s tokens declare a CLASS, GROUP or QUEUE labelled `name`, wherever it is. */
+    private declaresStructure(tokens: Token[], name: string): boolean {
+        const wanted = name.toLowerCase();
+        return tokens.some(t =>
+            t.type === TokenType.Structure && ['CLASS', 'GROUP', 'QUEUE'].includes(t.value.toUpperCase()) &&
+            t.label?.toLowerCase() === wanted && t.finishesAt !== undefined);
     }
 
     /**
@@ -2000,7 +2012,7 @@ export class MemberLocatorService {
         // Each procedure of a module may declare its own local structure with the same label.
         const classToken = atLine === undefined
             ? declarations[0]
-            : this.declarationInScopeAt(declarations, doc, atLine);
+            : this.visibleDeclaration(declarations, doc, atLine);
         if (!classToken || classToken.finishesAt === undefined) return [];
         const classEnd = classToken.finishesAt;
 
@@ -2436,6 +2448,17 @@ export class MemberLocatorService {
                 ? tokenMembersGroup
                 : tokenMembersQueue;
         if (tokenMembers.length > 0) return tokenMembers;
+        // #831: declared here only where the line cannot see it (another procedure's local): the
+        // buffer scan would read that declaration again, so the tiers past this document answer,
+        // and only when none does is the document's first declaration kept, as before.
+        if (atLine !== undefined && this.declaresStructure(tokens, className)) {
+            const elsewhere = await this.findAllMembersBeyondDocument(className, document, docPath, tokens, true);
+            if (elsewhere.length > 0) return elsewhere;
+            const first = this.extractMembersFromTokens(tokens, document, className, docPath, 'CLASS');
+            if (first.length > 0) return first;
+            const firstGroup = this.extractMembersFromTokens(tokens, document, className, docPath, 'GROUP');
+            return firstGroup.length > 0 ? firstGroup : this.extractMembersFromTokens(tokens, document, className, docPath, 'QUEUE');
+        }
         // Scan the live buffer, not the file on disk: an unsaved edit is otherwise invisible
         // here, and re-reading a large open document three times per class (once per
         // structure type) on every enumeration is a measurable share of a validation pass.
@@ -2449,7 +2472,21 @@ export class MemberLocatorService {
                 ? diskMembersGroup
                 : diskMembersQueue;
         if (diskMembers.length > 0) return diskMembers;
+        return this.findAllMembersBeyondDocument(className, document, docPath, tokens);
+    }
 
+    /**
+     * The tiers of findAllMembersInClass past the asking document itself: the declaration index,
+     * the INCLUDE chain, then the index's ambiguous entries. With `skipOwn`, an index entry for the
+     * asking document is left out (#831: its declarations are the ones the line cannot see).
+     */
+    private async findAllMembersBeyondDocument(
+        className: string,
+        document: TextDocument,
+        docPath: string,
+        tokens: Token[],
+        skipOwn = false
+    ): Promise<MemberEnumItem[]> {
         // 2. SDI, when it UNAMBIGUOUSLY names the declaring file (#310). The include-chain
         // walk below loads + tokenizes every reachable INC until the class turns up —
         // ~1.2s per cold ancestor on a real solution (8.5s for one generated module's 7
@@ -2459,7 +2496,8 @@ export class MemberLocatorService {
         // keep the scoped chain walk so the closest declaration wins; several copies of the
         // same filename are resolved in redirection order — see the branch below.
         await this.ensureIndexBuilt();
-        const indexed = this.sdi.findFor(className, docPath); // #571
+        const indexed = this.sdi.findFor(className, docPath) // #571
+            .filter(d => !skipOwn || d.filePath.toLowerCase() !== docPath.toLowerCase());
         // #732: with several declaring files, the ones the document can reach (itself, or its
         // PROGRAM) are the ones the compiler sees - as resolveSdiDeclaration ranks them for hover
         // and F12 (#728). A stray copy of an include that nothing compiles drops out; with nothing

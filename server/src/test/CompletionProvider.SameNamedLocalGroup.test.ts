@@ -109,3 +109,103 @@ suite('obj. completion reads the same-named GROUP the cursor\'s code sees', () =
         assert.ok(!names.includes('KIND') && !names.includes('FIRSTONLY'), `another procedure's fields must not appear in [${names.join(', ')}]`);
     });
 });
+
+/**
+ * #831: what a line sees is its scope chain, not only its structural parents. A method of a CLASS
+ * declared in a procedure's local data (`ThisWindow.Init`, written after the procedure as generated
+ * code does) sees that procedure's local data. And where no declaration is visible, another
+ * procedure's local is not the answer: the module's INCLUDEd global is.
+ */
+const GLOBAL_INC = [
+    'Req          GROUP',                   // 0
+    'IncOnly        LONG',                  // 1
+    '             END',                     // 2
+];
+
+const METHODS_CLW = [
+    '  MEMBER()',                           // 0
+    "  INCLUDE('glob.inc')",               // 1
+    '  MAP',                                // 2
+    '  END',                                // 3
+    'FirstProc PROCEDURE',                  // 4
+    'Request      GROUP',                   // 5
+    'FirstOnly      LONG',                  // 6
+    '             END',                     // 7
+    'ThisWindow   CLASS',                   // 8
+    'Init           PROCEDURE',             // 9
+    '             END',                     // 10
+    '  CODE',                               // 11
+    '  RETURN',                             // 12
+    'ThisWindow.Init PROCEDURE',            // 13
+    '  CODE',                               // 14
+    '  Request.',                           // 15 -> FirstOnly
+    'SecondProc PROCEDURE',                 // 16
+    'Request      GROUP',                   // 17
+    'Payload        LONG',                  // 18
+    '             END',                     // 19
+    'Req          GROUP',                   // 20
+    'LocalReq       LONG',                  // 21
+    '             END',                     // 22
+    'ThisWindow   CLASS',                   // 23
+    'Init           PROCEDURE',             // 24
+    '             END',                     // 25
+    '  CODE',                               // 26
+    '  RETURN',                             // 27
+    'ThisWindow.Init PROCEDURE',            // 28
+    '  CODE',                               // 29
+    '  Request.',                           // 30 -> Payload
+    '  Req.',                               // 31 -> LocalReq
+    'ThirdProc PROCEDURE',                  // 32
+    '  CODE',                               // 33
+    '  Req.',                               // 34 -> IncOnly
+];
+
+suite('obj. completion follows the scope chain: local class methods, nothing visible (#831)', () => {
+    let fx: DiskSolution;
+    let doc: TextDocument;
+
+    suiteSetup(() => {
+        setServerInitialized(true);
+        fx = createDiskSolution({ 'glob.inc': GLOBAL_INC, 'methods.clw': METHODS_CLW });
+        doc = fx.open('methods.clw');
+        TokenCache.getInstance().getTokens(doc);
+    });
+    suiteTeardown(() => fx.dispose());
+
+    async function labelsAt(line: number) {
+        const params = {
+            textDocument: { uri: doc.uri },
+            position: { line, character: METHODS_CLW[line].length },
+            context: { triggerKind: 2, triggerCharacter: '.' },
+        } as never;
+        const items = await new CompletionProvider().onCompletion(params, doc);
+        return items.map(i => String(i.label).split(/\s+/)[0].toUpperCase());
+    }
+
+    test('CONTROL: the first procedure\'s local class method offers its procedure\'s GROUP', async function () {
+        this.timeout(10000);
+        const names = await labelsAt(15);
+        assert.ok(names.includes('FIRSTONLY'), `expected FirstOnly in [${names.join(', ')}]`);
+    });
+
+    test('a later procedure\'s local class method offers that procedure\'s GROUP', async function () {
+        this.timeout(10000);
+        const names = await labelsAt(30);
+        assert.ok(names.includes('PAYLOAD'), `expected Payload in [${names.join(', ')}]`);
+        assert.ok(!names.includes('FIRSTONLY'), `FirstProc's fields must not appear in [${names.join(', ')}]`);
+    });
+
+    test('a local class method sees its procedure\'s GROUP over the INCLUDEd global', async function () {
+        this.timeout(10000);
+        const names = await labelsAt(31);
+        assert.ok(names.includes('LOCALREQ'), `expected LocalReq in [${names.join(', ')}]`);
+        assert.ok(!names.includes('INCONLY'), `the global must be shadowed in [${names.join(', ')}]`);
+    });
+
+    test('with no local declaration visible, the INCLUDEd global answers, not another procedure\'s local', async function () {
+        this.timeout(10000);
+        const names = await labelsAt(34);
+        assert.ok(names.includes('INCONLY'), `expected IncOnly in [${names.join(', ')}]`);
+        assert.ok(!names.includes('LOCALREQ'), `SecondProc's local must not appear in [${names.join(', ')}]`);
+    });
+});

@@ -109,3 +109,99 @@ suite('Group.Field hover reads the same-named GROUP the hovered line sees', () =
         assert.ok(card.includes('FromType'), card);
     });
 });
+
+/**
+ * #831: a method of a CLASS declared in a procedure's local data sees that procedure's GROUP
+ * (the scope chain climbs through the declaring procedure), and a local CLASS follows the same
+ * rule as a GROUP: a procedure without its own reads the module-level one, not the previous
+ * procedure's.
+ */
+const METHODS_CLW = [
+    '  MEMBER()',                           // 0
+    '  MAP',                                // 1
+    '  END',                                // 2
+    'Shared       CLASS',                   // 3  module-level
+    'ModuleVal      LONG',                  // 4
+    '             END',                     // 5
+    'FirstProc PROCEDURE',                  // 6
+    'Request      GROUP',                   // 7
+    'FirstOnly      LONG',                  // 8
+    '             END',                     // 9
+    'ThisWindow   CLASS',                   // 10
+    'Init           PROCEDURE',             // 11
+    '             END',                     // 12
+    '  CODE',                               // 13
+    '  RETURN',                             // 14
+    'ThisWindow.Init PROCEDURE',            // 15
+    '  CODE',                               // 16
+    '  Request.FirstOnly = 1',              // 17
+    'SecondProc PROCEDURE',                 // 18
+    'Request      GROUP',                   // 19
+    'Payload        LONG',                  // 20
+    '             END',                     // 21
+    'Shared       CLASS',                   // 22  SecondProc's own
+    'LocalVal       LONG',                  // 23
+    '             END',                     // 24
+    'ThisWindow   CLASS',                   // 25
+    'Init           PROCEDURE',             // 26
+    '             END',                     // 27
+    '  CODE',                               // 28
+    '  RETURN',                             // 29
+    'ThisWindow.Init PROCEDURE',            // 30
+    '  CODE',                               // 31
+    '  Request.Payload = 1',                // 32
+    'ThirdProc PROCEDURE',                  // 33
+    '  CODE',                               // 34
+    '  Shared.ModuleVal = 1',               // 35
+];
+
+suite('Group.Field hover follows the scope chain (#831)', () => {
+    let fx: DiskSolution;
+    let doc: TextDocument;
+    let includeWalks = 0;
+    const proto = MemberLocatorService.prototype as unknown as Record<string, (...a: unknown[]) => unknown>;
+    const original = proto.findInIncludeChain;
+
+    suiteSetup(() => {
+        setServerInitialized(true);
+        fx = createDiskSolution({ 'methods.clw': METHODS_CLW });
+        doc = fx.open('methods.clw');
+        TokenCache.getInstance().getTokens(doc);
+        proto.findInIncludeChain = function (this: unknown, ...args: unknown[]) {
+            includeWalks++;
+            return original.apply(this, args);
+        };
+    });
+    suiteTeardown(() => {
+        proto.findInIncludeChain = original;
+        fx.dispose();
+    });
+
+    async function hoverAt(line: number, word: string): Promise<string> {
+        includeWalks = 0;
+        const character = METHODS_CLW[line].indexOf(word) + 1;
+        const h = await new HoverProvider().provideHover(doc, Position.create(line, character));
+        const c = h?.contents as { value?: string } | undefined;
+        return c?.value ?? '';
+    }
+
+    test('CONTROL: the first procedure\'s local class method reads its procedure\'s GROUP', async function () {
+        this.timeout(10000);
+        const card = await hoverAt(17, 'FirstOnly');
+        assert.ok(card.includes('**Request.FirstOnly**'), card);
+    });
+
+    test('a later procedure\'s local class method reads that procedure\'s GROUP, without an include-chain walk', async function () {
+        this.timeout(10000);
+        const card = await hoverAt(32, 'Payload');
+        assert.ok(card.includes('**Request.Payload**'), card);
+        assert.strictEqual(includeWalks, 0, `include chain walked ${includeWalks} time(s)`);
+    });
+
+    test('a procedure without its own CLASS reads the module-level one, not the previous procedure\'s', async function () {
+        this.timeout(10000);
+        const card = await hoverAt(35, 'ModuleVal');
+        assert.ok(card.includes('ModuleVal') && /LONG/.test(card), card);
+        assert.ok(!card.includes('LocalVal'), card);
+    });
+});
