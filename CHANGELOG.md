@@ -29,6 +29,7 @@ All notable changes to the Clarion Extension are documented here.
 - **PROP:Value on a control shows what it means for a control.** `?Radio{PROP:Value}` and `?Check{PROP:Value}` showed the FILE meaning; a control shows the control meaning, a FILE the FILE meaning, and both are shown when the target is not known. [#823](https://github.com/msarson/Clarion-Extension/issues/823)
 - **Hover, Go to Definition and Find All References find a parameter of a header continued with `|`.** When a procedure's parameters ran over several lines, none of them, not even those on the first line, had a card or a definition; a parameter on a continued MAP or CLASS prototype line now has its card too. [#825](https://github.com/msarson/Clarion-Extension/issues/825)
 - **A procedure's parameter has its card inside the procedure's ROUTINEs.** A ROUTINE sees its procedure's parameters, but hovering one there showed nothing; the card now shows it and names the procedure. [#757](https://github.com/msarson/Clarion-Extension/issues/757)
+- **Completion and hover read the local GROUP the code sees.** When several procedures of a module each declare their own `Request GROUP`, typing `Request.` offered the first procedure's fields, and hover on a field only a later GROUP has showed a different card, slowly; both now use the ROUTINE's or procedure's own GROUP, else the module-level one. [#829](https://github.com/msarson/Clarion-Extension/pull/829), [#830](https://github.com/msarson/Clarion-Extension/pull/830) @geircodes
 
 #### Diagnostics
 

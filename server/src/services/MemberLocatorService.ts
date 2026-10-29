@@ -705,8 +705,9 @@ export class MemberLocatorService {
      *                       override. Default false = shadow by name (completion/hover).
      * @param options.atLine The line asking. A module can declare the same local structure
      *                       label in several procedures (`Request GROUP` in each one); the
-     *                       declaration that line sees is the nearest one above it. Omit to
-     *                       take the document's first declaration, as before.
+     *                       declaration that line sees is its ROUTINE's or procedure's own,
+     *                       else the module-level one (declarationInScopeAt). Omit to take
+     *                       the document's first declaration, as before.
      * @returns Flat, deduped, access-filtered list of MemberEnumItem
      */
     async enumerateMembersInClass(
