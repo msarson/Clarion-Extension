@@ -15,6 +15,7 @@ import { SolutionManager } from '../solution/solutionManager';
 import { resolveViaProjectRedirection } from '../utils/RedirectionResolution';
 import { DocumentStructure } from '../DocumentStructure';
 import { MemberLocatorService } from '../services/MemberLocatorService';
+import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 import { BuiltinFunctionService } from '../utils/BuiltinFunctionService';
 import { AttributeService } from '../utils/AttributeService';
 import { ControlService, ControlDefinition } from '../utils/ControlService';
@@ -34,6 +35,7 @@ export class SignatureHelpProvider {
     private argClassifier = new CallSiteArgumentClassifier();
     private argTypeResolver = new ArgumentTypeResolver();
     private memberLocator = new MemberLocatorService();
+    private chains = new ChainedPropertyResolver();
     private builtinService = BuiltinFunctionService.getInstance();
     private attributeService = AttributeService.getInstance();
     private controlService = ControlService.getInstance();
@@ -201,9 +203,9 @@ export class SignatureHelpProvider {
         const beforeParen = line.substring(0, lastOpenParen).trim();
         
         // Match pattern: [prefix.]methodName — [\w:] so a colon-containing prefix
-        // (SELF is fine, but a chained "SELF.Order.") or method name (My:My:Method)
-        // doesn't get truncated at the colon.
-        const match = beforeParen.match(/([\w:]+\.)?([\w:]+)\s*$/);
+        // or method name (My:My:Method) doesn't get truncated at the colon. The prefix is the
+        // whole receiver chain (`SELF.Order` in `SELF.Order.Add(`), not just its last segment.
+        const match = beforeParen.match(/((?:[\w:]+\.)+)?([\w:]+)\s*$/);
         if (!match) {
             return null;
         }
@@ -299,10 +301,22 @@ export class SignatureHelpProvider {
         // Determine the class name
         let className: string | null = null;
 
+        // A chained receiver (`Request.Payload.KeepOnly(`, `SELF.Order.Add(`) is walked as hover
+        // and Go to Definition walk it, to the class of its last segment.
+        const chainOwner = prefix.includes('.')
+            ? await this.chains.resolveFinalOwner(prefix, document, { line: currentLine, character: 0 })
+            : null;
+
         // #654: the receiver as hover and Go to Definition read it (#651) - SELF the method's class,
         // PARENT its parent, a local `ThisWindow CLASS(Base)` itself rather than Base (#642).
-        const receiver = await this.memberLocator.resolveReceiverAt(prefix, document, currentLine);
-        if (receiver) {
+        const receiver = chainOwner ? null : await this.memberLocator.resolveReceiverAt(prefix, document, currentLine);
+        if (chainOwner) {
+            if (chainOwner.kind !== 'class') return [];
+            className = chainOwner.name;
+        } else if (prefix.includes('.')) {
+            logger.info(`Could not resolve the receiver chain ${prefix}`);
+            return [];
+        } else if (receiver) {
             className = receiver.className;
         } else if (prefix.toLowerCase() === 'self') {
             // #622: shared walk. Note this copy did NOT bail when a routine had no parent scope —
