@@ -209,3 +209,41 @@ suite('obj. completion follows the scope chain: local class methods, nothing vis
         assert.ok(!names.includes('LOCALREQ'), `SecondProc's local must not appear in [${names.join(', ')}]`);
     });
 });
+
+suite('obj. completion keeps the document\'s declaration when nothing else declares the label (#831 review)', () => {
+    const ONLY_LOCAL_CLW = [
+        '  MEMBER()',                       // 0
+        '  MAP',                            // 1
+        '  END',                            // 2
+        'SecondProc PROCEDURE',             // 3
+        'Req          GROUP',               // 4
+        'LocalReq       LONG',              // 5
+        '             END',                 // 6
+        '  CODE',                           // 7
+        'ThirdProc PROCEDURE',              // 8
+        '  CODE',                           // 9
+        '  Req.',                           // 10 -> LocalReq, as before
+    ];
+    let fx: DiskSolution;
+    let doc: TextDocument;
+
+    suiteSetup(() => {
+        setServerInitialized(true);
+        fx = createDiskSolution({ 'only.clw': ONLY_LOCAL_CLW });
+        doc = fx.open('only.clw');
+        TokenCache.getInstance().getTokens(doc);
+    });
+    suiteTeardown(() => fx.dispose());
+
+    test('out of sight but the only declaration anywhere: still offered, as before', async function () {
+        this.timeout(10000);
+        const params = {
+            textDocument: { uri: doc.uri },
+            position: { line: 10, character: ONLY_LOCAL_CLW[10].length },
+            context: { triggerKind: 2, triggerCharacter: '.' },
+        } as never;
+        const items = await new CompletionProvider().onCompletion(params, doc);
+        const names = items.map(i => String(i.label).split(/\s+/)[0].toUpperCase());
+        assert.ok(names.includes('LOCALREQ'), `expected LocalReq in [${names.join(', ')}]`);
+    });
+});

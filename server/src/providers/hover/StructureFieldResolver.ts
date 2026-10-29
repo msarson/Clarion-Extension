@@ -270,7 +270,9 @@ export class StructureFieldResolver {
             if (!tokens.some(t => t.type === TokenType.Structure && t.label?.toLowerCase() === ownerLower)) return null;
         }
         const scope = TokenHelper.getInnermostScopeAtLine(this.tokenCache.getStructure(document), position.line);
-        if (scope) {
+        // #831: a structure this document declares only out of sight (another procedure's local)
+        // is not the one the line reads, even when it has a field of that name.
+        if (scope && !this.memberLocator.declaresOnlyOutOfSight(document, owner, position.line)) {
             const reference = `${owner}.${fieldName}`;
             const info = this.variableResolver.findLocalVariableInfo(fieldName, tokens, scope, document, reference)
                 // #657: the dotted name is not in the outline for every structure (a QUEUE's fields,

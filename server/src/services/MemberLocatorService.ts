@@ -37,15 +37,16 @@ import { findLabelQualifiedMember } from '../utils/LabelQualifiedMember';
 import { isAncestorOf, ancestorChain, pickDeclaration } from '../utils/ClassAncestry';
 import { inactiveIncludeLines } from '../utils/ConditionalIncludes';
 import { resolveEnclosingClassName } from '../utils/EnclosingClassResolver';
+import { ScopeKind } from '../scope/ScopeTypes';
 
 const logger = LoggerManager.getLogger("MemberLocatorService");
+const dotAccessTraceEnabled = process.env.CLARION_TRACE_DOT_ACCESS === '1';
+logger.setLevel(dotAccessTraceEnabled ? "test" : "error");
 
 /** One line of `doc`, without its line break: no split of the whole text for one declaration line. */
 function lineText(doc: TextDocument, line: number): string {
     return doc.getText({ start: { line, character: 0 }, end: { line: line + 1, character: 0 } }).replace(/\r?\n$/, '');
 }
-const dotAccessTraceEnabled = process.env.CLARION_TRACE_DOT_ACCESS === '1';
-logger.setLevel(dotAccessTraceEnabled ? "test" : "error");
 
 /**
  * #373 — walk-RESULT cache for findVariableTokenInParentChain, keyed by
@@ -368,7 +369,7 @@ export class MemberLocatorService {
      * the index could not name the one declaring file and fell through to the INCLUDE and MEMBER
      * walks - 80-400ms for F12 on `SELF.Request`, where the answer is the parent's own member.
      */
-    private async findMemberInNearestLocalClass(
+    private async findMemberInVisibleLocalClass(
         tokens: Token[],
         className: string,
         memberName: string,
@@ -394,7 +395,7 @@ export class MemberLocatorService {
     }
 
     /**
-     * The GROUP / QUEUE counterpart of findMemberInNearestLocalClass: `className` declared as a
+     * The GROUP / QUEUE counterpart of findMemberInVisibleLocalClass: `className` declared as a
      * GROUP or QUEUE in the document, where each procedure of a module may declare its own local
      * `Request GROUP`. The declaration is the one `atLine` sees (visibleDeclaration). Its own
      * fields answer, else the fields of its type argument (`Request GROUP(RequestType)`); a
@@ -467,7 +468,7 @@ export class MemberLocatorService {
         const tokens = this.tokenCache.getTokensByUri(document.uri) ?? this.tokenCache.getTokens(document);
 
         if (atLine !== undefined) {
-            const local = await this.findMemberInNearestLocalClass(tokens, className, memberName, document, docPath, paramCount, atLine);
+            const local = await this.findMemberInVisibleLocalClass(tokens, className, memberName, document, docPath, paramCount, atLine);
             if (local !== undefined) return local;
             const structure = await this.findMemberInVisibleLocalStructure(tokens, className, memberName, document, docPath, paramCount, atLine);
             if (structure !== undefined) return structure;
@@ -495,7 +496,9 @@ export class MemberLocatorService {
         // guaranteed full-chain COLD misses in that case (the class lives nowhere else):
         // hover on PARENT._FindFirstBreak measured 12.1s walking them before the ascent.
         await this.ensureIndexBuilt();
-        const sdiInfos = this.sdi.findFor(className, docPath); // #571
+        const sdiInfos = this.sdi.findFor(className, docPath) // #571
+            // #831: a hidden declaration is not read back from disk either.
+            .filter(d => !hiddenHere || d.filePath.toLowerCase() !== docPath.toLowerCase());
         const sdiDeclFiles = new Set(sdiInfos.map(d => d.filePath.toLowerCase()));
         if (sdiDeclFiles.size === 1) {
             const info = sdiInfos.find(d => !d.isType) || sdiInfos[0];
@@ -1974,11 +1977,32 @@ export class MemberLocatorService {
         if (declarations.length === 0) return undefined;
         const structure = this.tokenCache.getStructure(doc);
         const scopeOf = new Map(declarations.map(t => [t, TokenHelper.getInnermostScopeAtLine(structure, t.line) ?? null]));
-        for (const scope of structure.getScopeResolver().getVisibleScopeChain(atLine)) {
+        const chain = structure.getScopeResolver().getVisibleScopeChain(atLine);
+        for (const scope of chain) {
             const own = declarations.find(t => scopeOf.get(t) === scope.token);
             if (own) return own;
         }
+        // A CLASS declared in a METHOD's own local data has no declaring-procedure link (Rule 4
+        // links procedures only), so its methods' chain does not reach it: there the nearest
+        // declaration above answers, as #650 did.
+        const innermost = chain.find(n => n.kind !== ScopeKind.Routine);
+        if (innermost?.kind === ScopeKind.Method && !innermost.declaringProcedure &&
+            declarations[0].value.toUpperCase() === 'CLASS') {
+            return [...declarations].reverse().find(t => t.line <= atLine);
+        }
         return undefined;
+    }
+
+    /**
+     * #831: whether `doc` declares a CLASS, GROUP or QUEUE labelled `name` only where `atLine`
+     * cannot see it (another procedure's local), so its fields must not answer there.
+     */
+    public declaresOnlyOutOfSight(doc: TextDocument, name: string, atLine: number): boolean {
+        const wanted = name.toLowerCase();
+        const declarations = this.tokenCache.getTokens(doc).filter(t =>
+            t.type === TokenType.Structure && ['CLASS', 'GROUP', 'QUEUE'].includes(t.value.toUpperCase()) &&
+            t.label?.toLowerCase() === wanted && t.finishesAt !== undefined);
+        return declarations.length > 0 && !this.visibleDeclaration(declarations, doc, atLine);
     }
 
     /** #831: whether `doc`'s tokens declare a CLASS, GROUP or QUEUE labelled `name`, wherever it is. */

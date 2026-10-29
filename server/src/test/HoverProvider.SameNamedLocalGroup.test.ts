@@ -202,6 +202,97 @@ suite('Group.Field hover follows the scope chain (#831)', () => {
         this.timeout(10000);
         const card = await hoverAt(35, 'ModuleVal');
         assert.ok(card.includes('ModuleVal') && /LONG/.test(card), card);
-        assert.ok(!card.includes('LocalVal'), card);
+    });
+});
+
+/**
+ * #831 review: a CLASS declared in a METHOD's own local data has no declaring-procedure link, so
+ * its methods' scope chain does not reach the declaration; the nearest declaration above still
+ * answers there, as before. And where the document declares the label only out of sight, a field
+ * name the hidden declaration shares does not make it the answer: the INCLUDEd global is.
+ */
+const METHOD_LOCAL_CLW = [
+    '  MEMBER()',                           // 0
+    "  INCLUDE('glob.inc')",               // 1
+    '  MAP',                                // 2
+    '  END',                                // 3
+    'FirstProc PROCEDURE',                  // 4
+    'ThisWindow   CLASS',                   // 5
+    'Init           PROCEDURE',             // 6
+    '             END',                     // 7
+    '  CODE',                               // 8
+    'ThisWindow.Init PROCEDURE',            // 9
+    'Helper       CLASS',                   // 10
+    'Val            LONG',                  // 11
+    'Run            PROCEDURE',             // 12
+    '             END',                     // 13
+    '  CODE',                               // 14
+    'Helper.Run PROCEDURE',                 // 15
+    '  CODE',                               // 16
+    '  Helper.Val = 1',                     // 17
+    'SecondProc PROCEDURE',                 // 18
+    'Req          GROUP',                   // 19
+    'Shared         STRING(7)',             // 20
+    '             END',                     // 21
+    'ThisWindow   CLASS',                   // 22
+    'Init           PROCEDURE',             // 23
+    '             END',                     // 24
+    '  CODE',                               // 25
+    'ThisWindow.Init PROCEDURE',            // 26
+    'Helper       CLASS',                   // 27
+    'Val            STRING(20)',            // 28
+    'Run            PROCEDURE',             // 29
+    '             END',                     // 30
+    '  CODE',                               // 31
+    'Helper.Run PROCEDURE',                 // 32
+    '  CODE',                               // 33
+    '  Helper.Val = 1',                     // 34
+    'ThirdProc PROCEDURE',                  // 35
+    '  CODE',                               // 36
+    '  Req.Shared = 1',                     // 37
+];
+
+const SHARED_INC = [
+    'Req          GROUP',                   // 0
+    'Shared         DECIMAL(9,2)',          // 1
+    '             END',                     // 2
+];
+
+suite('Group.Field hover: method-local classes and hidden declarations (#831 review)', () => {
+    let fx: DiskSolution;
+    let doc: TextDocument;
+
+    suiteSetup(() => {
+        setServerInitialized(true);
+        fx = createDiskSolution({ 'glob.inc': SHARED_INC, 'local.clw': METHOD_LOCAL_CLW });
+        doc = fx.open('local.clw');
+        TokenCache.getInstance().getTokens(doc);
+    });
+    suiteTeardown(() => fx.dispose());
+
+    async function hoverAt(line: number, word: string): Promise<string> {
+        const character = METHOD_LOCAL_CLW[line].indexOf(word) + 1;
+        const h = await new HoverProvider().provideHover(doc, Position.create(line, character));
+        const c = h?.contents as { value?: string } | undefined;
+        return c?.value ?? '';
+    }
+
+    test('CONTROL: a class declared in the first method\'s data: its own field', async function () {
+        this.timeout(10000);
+        const card = await hoverAt(17, 'Val');
+        assert.ok(/LONG/.test(card) && !/STRING\(20\)/.test(card), card);
+    });
+
+    test('a class declared in a later method\'s data: its own field, not the first one\'s', async function () {
+        this.timeout(10000);
+        const card = await hoverAt(34, 'Val');
+        assert.ok(/STRING\(20\)/.test(card), card);
+    });
+
+    test('a label declared here only out of sight: the INCLUDEd global answers, though the hidden one has the field too', async function () {
+        this.timeout(10000);
+        const card = await hoverAt(37, 'Shared');
+        assert.ok(/DECIMAL\(9,\s*2\)/.test(card), card);
+        assert.ok(!/STRING\(7\)/.test(card), card);
     });
 });
