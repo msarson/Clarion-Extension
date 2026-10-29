@@ -31,6 +31,11 @@ suite('A changed .sln is read again on the next load (#795)', () => {
         sln = path.join(tmpRoot, 'Sales.sln');
         fs.writeFileSync(sln, 'Microsoft Visual Studio Solution File, Format Version 12.00\r\n'
             + project('Sales', '{79500000-0000-0000-0000-000000000001}') + 'Global\r\nEndGlobal\r\n');
+        // #835: a file written just now can read a moment later than the clock the parse starts
+        // by, so the first load records it as written during the parse (#801) and the next load
+        // reparses it: an "unchanged" fixture failed now and then. Its files are older than that.
+        const earlier = new Date(Date.now() - 60_000);
+        for (const f of fs.readdirSync(tmpRoot)) fs.utimesSync(path.join(tmpRoot, f), earlier, earlier);
         savedSlnPath = serverSettings.solutionFilePath;
         savedConfig = serverSettings.configuration;
         serverSettings.solutionFilePath = sln;
