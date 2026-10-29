@@ -1523,8 +1523,8 @@ export class MemberLocatorService {
             if (parts.length !== 3) continue;
             if (parts[0].toLowerCase() !== clsLower) continue;
             const methodName = parts[2].toLowerCase();
-            const lineText = docLines[t.line] ?? '';
-            const paramCount = countParametersInDeclaration(lineText);
+            // #834: a header continued with `|` is counted whole, as the interface's prototype is (#805)
+            const paramCount = countParametersInDeclaration(docLines[t.line] === undefined ? '' : withContinuations(docLines, t.line));
             impls.add(`${parts[1].toLowerCase()}.${methodName}#${paramCount}`);
         }
         return impls;

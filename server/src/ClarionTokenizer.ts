@@ -742,7 +742,8 @@ export class ClarionTokenizer {
                     if (match && match.index === 0) {
                         // ✅ CRITICAL FIX: For Keyword tokens, check if preceded by : or . in original line
                         // This prevents matching keywords that are part of qualified identifiers like nts:case or obj.case
-                        if (tokenType === TokenType.Keyword && position > 0) {
+                        // #834: CODE/DATA too - `Class.Iface.Data PROCEDURE` names a method called Data
+                        if ((tokenType === TokenType.Keyword || tokenType === TokenType.ExecutionMarker) && position > 0) {
                             const prevChar = line[position - 1];
                             if (prevChar === ':' || prevChar === '.') {
                                 // Skip this match - it's part of a qualified identifier

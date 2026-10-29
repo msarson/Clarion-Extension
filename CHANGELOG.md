@@ -41,6 +41,7 @@ All notable changes to the Clarion Extension are documented here.
 - **A RETURN on one branch of an EXECUTE no longer greys out the branches after it.** Each statement of an EXECUTE, or a BEGIN ... END block, is its own branch and only one runs, so the next one is still reachable. [#808](https://github.com/msarson/Clarion-Extension/issues/808)
 - **A MEMO or BLOB in a VIEW's PROJECT is not reported as a missing field.** A MEMO or BLOB is declared in the FILE before its RECORD, and only the RECORD's fields were counted; a field the FILE does not have is still reported. [#817](https://github.com/msarson/Clarion-Extension/issues/817)
 - **A parameter named like a structure no longer opens one.** In a prototype continued with `|`, a parameter called `option` (or GROUP, QUEUE, MENU and the like) opened an OPTION structure, so the MAP was reported as having no END and the MODULE's END was said to close OPTION. [#821](https://github.com/msarson/Clarion-Extension/issues/821)
+- **An implemented interface method is no longer reported as missing when its header spans several lines or it is named Data or Code.** The implementation's parameters were counted from its first line only, and `Class.Interface.Data PROCEDURE` was read as a DATA section rather than a method. [#834](https://github.com/msarson/Clarion-Extension/issues/834)
 
 #### Syntax
 
