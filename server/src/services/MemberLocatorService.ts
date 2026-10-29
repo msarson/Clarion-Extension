@@ -1919,6 +1919,26 @@ export class MemberLocatorService {
 
 
     /**
+     * Which of several same-labelled structure declarations in `doc` the code at `atLine` sees.
+     * A local declaration of the enclosing scope (a ROUTINE's DATA, then its procedure's) shadows
+     * the module-level one; anywhere else the module-level declaration answers. Module data
+     * precedes every procedure, so with no module-level declaration the first one is kept, as
+     * before. `declarations` is in document order.
+     */
+    private declarationInScopeAt(declarations: Token[], doc: TextDocument, atLine: number): Token | undefined {
+        if (declarations.length <= 1) return declarations[0];
+        const structure = this.tokenCache.getStructure(doc);
+        const scopeOf = new Map(declarations.map(t => [t, TokenHelper.getInnermostScopeAtLine(structure, t.line)]));
+        for (let scope = TokenHelper.getInnermostScopeAtLine(structure, atLine), depth = 0;
+            scope && depth < 4;
+            scope = TokenHelper.getParentScopeOfRoutine(structure, scope), depth++) {
+            const own = declarations.find(t => scopeOf.get(t) === scope);
+            if (own) return own;
+        }
+        return declarations.find(t => !scopeOf.get(t)) ?? declarations[0];
+    }
+
+    /**
      * Token-based replacement for scanClassBodyForAllMembers.
      * Uses the DocumentStructure token tree: finds the CLASS/QUEUE/GROUP token by label,
      * collects Label tokens in its line range, and skips members inside nested structures.
@@ -1938,11 +1958,10 @@ export class MemberLocatorService {
             t.label?.toLowerCase() === className.toLowerCase() &&
             t.finishesAt !== undefined
         );
-        // The declaration `atLine` sees is the nearest one above it (#608, #650): each procedure
-        // of a module may declare its own local structure with the same label.
+        // Each procedure of a module may declare its own local structure with the same label.
         const classToken = atLine === undefined
             ? declarations[0]
-            : ([...declarations].reverse().find(t => t.line <= atLine) ?? declarations[0]);
+            : this.declarationInScopeAt(declarations, doc, atLine);
         if (!classToken || classToken.finishesAt === undefined) return [];
         const classEnd = classToken.finishesAt;
 
