@@ -389,6 +389,42 @@ export class MemberLocatorService {
     }
 
     /**
+     * The GROUP / QUEUE counterpart of findMemberInNearestLocalClass: `className` declared as a
+     * GROUP or QUEUE in the document, where each procedure of a module may declare its own local
+     * `Request GROUP`. The declaration is the one `atLine` sees (declarationInScopeAt). Its own
+     * fields answer, else the fields of its type argument (`Request GROUP(RequestType)`); a
+     * structure without one has no other fields, so a miss is null. Undefined when the document
+     * declares no such structure, so those lookups keep the tiers below.
+     *
+     * Without it, tier 0 read the module's FIRST `Request GROUP`: a field only a later procedure's
+     * structure has was a miss that walked the declaration index, INCLUDE and MEMBER tiers, and hover
+     * fell back to its own card.
+     */
+    private async findMemberInVisibleLocalStructure(
+        tokens: Token[],
+        className: string,
+        memberName: string,
+        document: TextDocument,
+        docPath: string,
+        paramCount: number | undefined,
+        atLine: number
+    ): Promise<MemberInfo | null | undefined> {
+        const wanted = className.toLowerCase();
+        const declarations = tokens.filter(t =>
+            t.type === TokenType.Structure && (t.value.toUpperCase() === 'GROUP' || t.value.toUpperCase() === 'QUEUE') &&
+            t.label?.toLowerCase() === wanted && t.finishesAt !== undefined);
+        const own = this.declarationInScopeAt(declarations, document, atLine);
+        if (!own) return undefined;
+        const kind = own.value.toUpperCase() as 'GROUP' | 'QUEUE';
+
+        const inBody = this.findMemberFromTokens(tokens, document, docPath, className, memberName, paramCount, kind, own.line);
+        if (inBody) return inBody;
+        const declLine = document.getText().split(/\r?\n/)[own.line] ?? '';
+        const type = extractParentName(declLine, ['GROUP', 'QUEUE']);
+        return type ? this.findMemberInClass(type, memberName, document, paramCount) : null;
+    }
+
+    /**
      * #611: a class that declares the name but no overload the call fits does not hide an
      * inherited one that does - `ThisWindow.Run()` on a ThisWindow overriding only
      * Run(USHORT,BYTE) is the parent's Run(). Climb from the class the hit came from and take
@@ -429,6 +465,8 @@ export class MemberLocatorService {
         if (atLine !== undefined) {
             const local = await this.findMemberInNearestLocalClass(tokens, className, memberName, document, docPath, paramCount, atLine);
             if (local !== undefined) return local;
+            const structure = await this.findMemberInVisibleLocalStructure(tokens, className, memberName, document, docPath, paramCount, atLine);
+            if (structure !== undefined) return structure;
         }
 
         // 0. Current document tokens (keep CLASS path behavior; add GROUP/QUEUE fallback).
