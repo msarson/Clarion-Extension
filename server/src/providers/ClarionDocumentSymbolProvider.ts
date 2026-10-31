@@ -1933,6 +1933,19 @@ export class ClarionDocumentSymbolProvider {
             logger.info(`   ⚠️ Skipping - this token is part of a PROCEDURE/FUNCTION declaration`);
             return;
         }
+
+        // #840: nor is anything inside a parenthesis declared. A MAP prototype written without
+        // PROCEDURE, `Name (HINTERNET handle)`, has no keyword for the check above, and a
+        // parameter of a user-defined type reads like a label and its type.
+        let depth = 0;
+        for (let k = firstOnLine; k < index; k++) {
+            if (tokens[k].type !== TokenType.Delimiter) continue;
+            if (tokens[k].value === '(') depth++;
+            else if (tokens[k].value === ')' && depth > 0) depth--;
+        }
+        if (depth > 0) {
+            return;
+        }
         logger.info(`   ℹ️ No PROCEDURE/FUNCTION keyword found, proceeding with variable parsing`);
 
         // CRITICAL: Skip if previous token is a Label that's part of a method name
