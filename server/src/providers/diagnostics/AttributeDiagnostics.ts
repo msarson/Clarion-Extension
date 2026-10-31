@@ -221,9 +221,10 @@ export function validateAttributeApplicability(tokens: Token[], document: TextDo
 
 /**
  * Attributes the catalogue does not carry, compiled on Clarion 10 (#806): a control's
- * justification (LEFT, RIGHT, DECIMAL), RTF on a TEXT, and COM on an INTERFACE.
+ * justification (LEFT, RIGHT, DECIMAL), RTF on a TEXT, and COM on an INTERFACE; and EXPORT on
+ * a CLASS, which the help does not document (#839, Clarion 10 and 12).
  */
-const OTHER_ATTRIBUTE_WORDS = new Set(['LEFT', 'RIGHT', 'DECIMAL', 'RTF', 'COM']);
+const OTHER_ATTRIBUTE_WORDS = new Set(['LEFT', 'RIGHT', 'DECIMAL', 'RTF', 'COM', 'EXPORT']);
 
 /**
  * The keyword token types a declaration opens with: a structure (CLASS, GROUP, QUEUE...), a data

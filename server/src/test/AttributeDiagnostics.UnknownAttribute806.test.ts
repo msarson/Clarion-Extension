@@ -112,6 +112,20 @@ suite('Unknown attribute on a declaration (#806)', () => {
         assert.deepStrictEqual(unknownAttributes(lines), []);
     });
 
+    // #839: EXPORT on a CLASS compiles on Clarion 10 and 12, though the help documents no EXPORT
+    // attribute; EXPORTX in the same place fails with "Unknown attribute: EXPORTX".
+    test('EXPORT on a CLASS is an attribute; a misspelling of it is not (#839)', () => {
+        const lines = program([
+            'MyClass        CLASS,TYPE,EXPORT',
+            'Value            LONG',
+            'Init             PROCEDURE',
+            '               END',
+            'Other          CLASS,TYPE,EXPORTX',
+            '               END',
+        ]);
+        assert.deepStrictEqual(unknownAttributes(lines).map(u => u.message), ['Unknown attribute: EXPORTX']);
+    });
+
     test('attributes the catalogue lacks that compile on Clarion 10: COM, LEFT, RIGHT, DECIMAL, RTF', () => {
         const lines = program([
             'IFace          INTERFACE,COM',
