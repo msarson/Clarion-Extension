@@ -829,7 +829,7 @@ export class HoverFormatter {
         });
 
         content += `**Applicable to:** ${attribute.applicableTo.join(', ')}\n\n`;
-        content += `**Property Equate:** ${attribute.propertyEquate}`;
+        if (attribute.propertyEquate) content += `**Property Equate:** ${attribute.propertyEquate}`;
 
         return {
             contents: {

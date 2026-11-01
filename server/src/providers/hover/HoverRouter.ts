@@ -1200,8 +1200,8 @@ export class HoverRouter {
         const first = logical.tokens.find(t => t.type !== TokenType.Label);
         const keyword = first && findDeclarationKeyword(logical, first.line, first.start);
         if (!keyword) return null;
-        const def = this.controlService.getDeclarationStructure(/^\w+/.exec(keyword.value)?.[0] ?? keyword.value);
-        if (!def?.attributes) return null;
+        const keywordName = /^\w+/.exec(keyword.value)?.[0] ?? keyword.value;
+        const def = this.controlService.getDeclarationStructure(keywordName);
         const declared = readDeclaredAttributes(logical, keyword);
         const hit = declared.find(d =>
             d.name === word.toUpperCase() &&
@@ -1211,6 +1211,11 @@ export class HoverRouter {
         if (!hit) return null;
 
         const attribute = this.attributeService.getAttribute(hit.name);
+        // #843: a CLASS, a QUEUE or a variable of a data type has no list of its own to check
+        // against, so its attributes take the catalogue's card as they are.
+        if (!def?.attributes) {
+            return attribute ? this.formatter.formatAttribute(hit.name, attribute, null, keywordName.toUpperCase()) : null;
+        }
         let value = '';
         if (attribute) {
             const card = this.formatter.formatAttribute(hit.name, attribute, null, def.name ?? keyword.value).contents as MarkupContent;
