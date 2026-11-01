@@ -1353,7 +1353,9 @@ export class ReferencesProvider {
             const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined, overloadFilter, context.includeDeclaration, document, candidateOverloads, scanScope, pendingChains);
             locations.push(...hits);
             if (pendingChains.length > 0) {
-                locations.push(...await this.keepChainHitsOfClassFamily(pendingChains, fileUri, document, memberName, className ?? undefined, classFamily));
+                const kept = await this.keepChainHitsOfClassFamily(pendingChains, fileUri, document, memberName, className ?? undefined, classFamily, token);
+                if (kept === null) return null;
+                locations.push(...kept);
             }
         }
         this.trace({ scan_files: scanCount, scan_pruned: prunedCount, scan_ms: Date.now() - scanStart, index_built: String(refIdx.isBuilt) });
@@ -2274,7 +2276,8 @@ export class ReferencesProvider {
      * way hover and F12 name it (DottedAccessResolver), so `SELF.Field` is the type `Field` is
      * declared with in SELF's class, wherever that class is declared. One resolve per receiver
      * per method: SELF is the same class throughout a method. A receiver that does not resolve
-     * is kept, the bias of the other receiver checks here (rename must not miss a use).
+     * is kept, the bias of the other receiver checks here (rename must not miss a use), and so
+     * is one whose resolve fails. Null when the search is cancelled.
      */
     private async keepChainHitsOfClassFamily(
         pending: PendingChainHit[],
@@ -2282,8 +2285,9 @@ export class ReferencesProvider {
         cursorDocument: TextDocument,
         memberName: string,
         className: string | undefined,
-        classFamily: Set<string> | undefined
-    ): Promise<Location[]> {
+        classFamily: Set<string> | undefined,
+        token?: CancellationToken
+    ): Promise<Location[] | null> {
         const classLower = className?.toLowerCase();
         if (!classLower) return pending.map(p => p.location);
         let doc: TextDocument | null = cursorDocument;
@@ -2299,13 +2303,19 @@ export class ReferencesProvider {
             t.subType === TokenType.MethodImplementation && t.finishesAt !== undefined);
         const verdicts = new Map<string, boolean>();
         const kept: Location[] = [];
+        let resolves = 0;
         for (const p of pending) {
             const method = methods.find(t => p.line >= t.line && p.line <= t.finishesAt!);
             const key = p.receiver.toLowerCase() + '@' + (method ? method.line : -1);
             let keep = verdicts.get(key);
             if (keep === undefined) {
-                const r = await this.dottedAccess.resolve(p.receiver, memberName, doc, p.line, undefined);
-                keep = !r || inFamily(r.receiverClass) || inFamily(r.member.className);
+                if (await this.yieldIfNeeded(resolves++, token)) return null;
+                try {
+                    const r = await this.dottedAccess.resolve(p.receiver, memberName, doc, p.line, undefined);
+                    keep = !r || inFamily(r.receiverClass) || inFamily(r.member.className);
+                } catch {
+                    keep = true;
+                }
                 verdicts.set(key, keep);
             }
             if (keep) kept.push(p.location);

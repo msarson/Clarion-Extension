@@ -80,3 +80,51 @@ suite('Find All References: SELF.<field>.<member> is type-checked by the field\'
         assertInOut(await refsAt(2), 'the declaration');
     });
 });
+
+/**
+ * Review of #838: a PARENT-rooted chain is checked the same way, and a receiver whose type does
+ * not resolve is kept - Rename relies on Find All References, and must not miss a use.
+ */
+const PARENT_LINES = [
+    '  MEMBER()',                                  // 0
+    'Token      CLASS,TYPE',                       // 1
+    'Hits         LONG',                           // 2  the target
+    '           END',                              // 3
+    'Engine     CLASS,TYPE',                       // 4
+    'Hits         LONG',                           // 5
+    '           END',                              // 6
+    'Base       CLASS,TYPE',                       // 7
+    'Inner        &Engine',                        // 8
+    'Tok          &Token',                         // 9
+    'Mystery      &NoSuchClass',                   // 10
+    'Go           PROCEDURE(),VIRTUAL',            // 11
+    '           END',                              // 12
+    'Derived    CLASS(Base),TYPE',                 // 13
+    'Go           PROCEDURE(),VIRTUAL',            // 14
+    '           END',                              // 15
+    'Base.Go    PROCEDURE()',                      // 16
+    '  CODE',                                      // 17
+    '  SELF.Mystery.Hits = 1',                     // 18 IN  (unresolved: kept)
+    'Derived.Go PROCEDURE()',                      // 19
+    '  CODE',                                      // 20
+    '  PARENT.Inner.Hits = 2',                     // 21 OUT (Engine)
+    '  PARENT.Tok.Hits = 3',                       // 22 IN  (Token)
+];
+
+suite('Find All References: PARENT chains and unresolved receivers (#838 review)', () => {
+    let doc: TextDocument;
+
+    setup(() => {
+        setServerInitialized(true);
+        TokenCache.getInstance().clearAllTokens();
+        doc = TextDocument.create('file:///c:/test-self-chain/parent.clw', 'clarion', 1, PARENT_LINES.join('\r\n'));
+    });
+
+    test('from Token.Hits: PARENT.Tok.Hits and the unresolved SELF.Mystery.Hits are in, PARENT.Inner.Hits is out', async () => {
+        const col = PARENT_LINES[2].indexOf('Hits');
+        const r = await new ReferencesProvider().provideReferences(doc, { line: 2, character: col + 1 }, { includeDeclaration: true });
+        const lines = [...new Set((r ?? []).map(l => l.range.start.line))].sort((a, b) => a - b);
+        for (const l of [2, 18, 22]) assert.ok(lines.includes(l), `expected line ${l} IN; got [${lines.join(',')}]`);
+        for (const l of [5, 21]) assert.ok(!lines.includes(l), `expected line ${l} OUT; got [${lines.join(',')}]`);
+    });
+});
