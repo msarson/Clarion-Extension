@@ -88,8 +88,10 @@ for (const structure of Object.keys(results[0].headers ?? {})) {
 // every declaration, and the compiler takes a few the help never describes there (AUTO on a KEY,
 // DUP and PRIMARY on an INDEX); a declaration offers only what its help page lists and the
 // compiler accepts. A version without a FILE phase (Clarion 11.1 so far) does not vote.
+// #842: EXPORT is the exception. The help documents it nowhere, but it is a real attribute, in the
+// compiler since Clarion 6.
 const FILE_DOCUMENTED = {
-    FILE: 'DRIVER NAME PRE CREATE RECLAIM OWNER ENCRYPT BINDABLE THREAD EXTERNAL DLL OEM',
+    FILE: 'DRIVER NAME PRE CREATE RECLAIM OWNER ENCRYPT BINDABLE THREAD EXTERNAL DLL EXPORT OEM',
     KEY: 'DUP NOCASE OPT PRIMARY NAME',
     INDEX: 'NOCASE OPT NAME',
     MEMO: 'BINARY NAME',

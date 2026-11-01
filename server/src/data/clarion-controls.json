@@ -339,7 +339,7 @@
       "description": "Declares a data file: its driver, its keys and memos, and its RECORD",
       "syntax": "label FILE,DRIVER(type) [,attributes...]",
       "commonAttributes": [],
-      "attributes": ["DRIVER()", "NAME()", "PRE()", "CREATE", "RECLAIM", "OWNER()", "ENCRYPT", "BINDABLE", "THREAD", "EXTERNAL", "DLL", "OEM"],
+      "attributes": ["DRIVER()", "NAME()", "PRE()", "CREATE", "RECLAIM", "OWNER()", "ENCRYPT", "BINDABLE", "THREAD", "EXTERNAL", "DLL", "EXPORT", "OEM"],
       "requires": {"ENCRYPT":"OWNER", "DLL":"EXTERNAL"},
       "required": ["DRIVER"]
     },

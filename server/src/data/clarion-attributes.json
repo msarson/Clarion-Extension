@@ -1250,6 +1250,26 @@
       "propertyEquate": ""
     },
     {
+      "name": "EXPORT",
+      "applicableTo": [
+        "DATA_TYPE",
+        "VARIABLE",
+        "FILE",
+        "QUEUE",
+        "GROUP",
+        "CLASS",
+        "PROCEDURE"
+      ],
+      "signatures": [
+        {
+          "params": [],
+          "description": "No parameters"
+        }
+      ],
+      "description": "Puts the declaration in the export list of the DLL being built, so other programs and DLLs can use it (they declare it with EXTERNAL and DLL). Applies to a procedure prototype, a CLASS type, a FILE, and data whose memory is not on the stack: global, STATIC or THREAD variables, GROUPs and QUEUEs. The Clarion help does not document EXPORT, but the compiler has accepted it since Clarion 6.\n\nKnown compiler issues: when a parent CLASS and a class derived from it both have EXPORT, some methods can be exported twice and the link fails; and a procedure with both EXPORT and NAME is exported under its mangled name rather than the NAME.",
+      "propertyEquate": ""
+    },
+    {
       "name": "STATIC",
       "applicableTo": [
         "DATA_TYPE",

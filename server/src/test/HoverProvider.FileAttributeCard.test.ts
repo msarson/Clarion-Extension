@@ -157,7 +157,7 @@ suite('FILE, KEY, INDEX, MEMO and BLOB list their attributes like a control card
         const { card } = await hoverOn(program(HEADER), 'FILE,');
         assert.ok(card.startsWith('**Customer FILE**'), card);
         assert.deepStrictEqual(namesIn(card, 'Attributes'), ['DRIVER', 'PRE', 'CREATE']);
-        assert.deepStrictEqual(namesIn(card, 'Available'), ['BINDABLE', 'DLL', 'ENCRYPT', 'EXTERNAL', 'OEM', 'RECLAIM', 'THREAD']);
+        assert.deepStrictEqual(namesIn(card, 'Available'), ['BINDABLE', 'DLL', 'ENCRYPT', 'EXPORT', 'EXTERNAL', 'OEM', 'RECLAIM', 'THREAD']);
         assert.deepStrictEqual(namesIn(card, 'With value'), ['NAME', 'OWNER']);
         assert.ok(!/\bTYPE\b/.test(card), `TYPE is Clarion# only: ${card}`);
     });
@@ -278,7 +278,7 @@ suite('FILE, KEY, INDEX, MEMO and BLOB list their attributes like a control card
 
     test('completion after a comma offers the list for that declaration, less what it sets', async () => {
         assert.deepStrictEqual(await complete(program("Customer FILE,DRIVER('TOPSPEED'),CREATE,¦")),
-            ['BINDABLE', 'DLL', 'ENCRYPT', 'EXTERNAL', 'NAME', 'OEM', 'OWNER', 'PRE', 'RECLAIM', 'THREAD']);
+            ['BINDABLE', 'DLL', 'ENCRYPT', 'EXPORT', 'EXTERNAL', 'NAME', 'OEM', 'OWNER', 'PRE', 'RECLAIM', 'THREAD']);
         assert.deepStrictEqual(await complete(program(HEADER, ['CusKey    KEY(Cus:ID),NOCASE,¦'])), ['DUP', 'NAME', 'OPT', 'PRIMARY']);
         assert.deepStrictEqual(await complete(program(HEADER, ['Notes     MEMO(200),¦'])), ['BINARY', 'NAME']);
     });

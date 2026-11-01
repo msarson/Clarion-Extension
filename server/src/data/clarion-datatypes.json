@@ -414,7 +414,7 @@
       "description": "Declares a file structure for data storage",
       "syntax": "label FILE,DRIVER('driver') [,PRE(prefix)] [,attributes...]",
       "parameters": [],
-      "attributes": ["DRIVER", "NAME", "PRE", "CREATE", "RECLAIM", "OWNER", "ENCRYPT", "BINDABLE", "THREAD", "EXTERNAL", "DLL", "OEM"],
+      "attributes": ["DRIVER", "NAME", "PRE", "CREATE", "RECLAIM", "OWNER", "ENCRYPT", "BINDABLE", "THREAD", "EXTERNAL", "DLL", "EXPORT", "OEM"],
       "size": "N/A (file structure)",
       "notes": "File declaration with DRIVER, RECORD, and KEY sections. DRIVER specifies file type (TOPSPEED, ASCII, BASIC, DOS, etc.). Contains RECORD for fields and KEY for indexes. Must specify DRIVER attribute."
     },
