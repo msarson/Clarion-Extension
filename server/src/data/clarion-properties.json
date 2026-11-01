@@ -37,7 +37,7 @@
     },
     {
       "name": "PROP:AlwaysDrop",
-      "description": "MDIChild WINDOW('Child One'),AT(0,0,320,200),MDI,MAX,HVSCROLL",
+      "description": "Property of a COMBO or LIST control with the DROP attribute that sets how its list drops down. At 0 the list drops only when the user clicks the drop button, and the down arrow key steps through the entries without opening it; any other value lets the down arrow key open the list as well.",
       "readOnly": false
     },
     {
@@ -62,12 +62,12 @@
     },
     {
       "name": "PROP:AssertHook2",
-      "description": "AssertMy1 PROCEDURE(STRING filename,UNSIGNED LineNumber)",
+      "description": "Write-only SYSTEM property that replaces the runtime's ASSERT handling with your own procedure, the same as {PROP:LibHook,13}. Assign ADDRESS() of a procedure prototyped (UNSIGNED LineNumber, STRING filename, STRING message); assign 0 to restore the built-in handler. Unlike PROP:AssertHook, the hook also receives the assertion's message.",
       "readOnly": false
     },
     {
       "name": "PROP:At",
-      "description": "AT( [ x ] [, y ] [, width ] [, height ] )",
+      "description": "The AT attribute: the position and size of a window, control or report structure. As a runtime property it is an array: element 1 is x, 2 is y, 3 the width and 4 the height (the same as PROP:Xpos, PROP:Ypos, PROP:Width and PROP:Height), in the owning window's or report's units.",
       "readOnly": false
     },
     {
@@ -77,7 +77,7 @@
     },
     {
       "name": "PROP:AutoPaper",
-      "description": "SYSTEM{PROP:AutoPaper} = '' !Turn off best-fit paper selection",
+      "description": "SYSTEM property that turns the report engine's automatic best-fit paper selection on or off; it is on by default. Assign an empty string to turn it off.",
       "readOnly": false
     },
     {
@@ -97,7 +97,7 @@
     },
     {
       "name": "PROP:Bevel",
-      "description": "BEVEL( outer [, inner ] [, style ] )",
+      "description": "The BEVEL attribute: the 3-D border of a PANEL, GROUP, OPTION or REGION. As a runtime property it is an array: element 1 is the outer bevel, 2 the inner bevel (PROP:BevelOuter, PROP:BevelInner) and 3 the style (PROP:BevelStyle); positive widths raise the edge and negative ones sink it.",
       "readOnly": false
     },
     {
@@ -117,7 +117,7 @@
     },
     {
       "name": "PROP:Break",
-      "description": "BREAK( variable ) [, USE( ) ] [, NOCASE ]",
+      "description": "Not declared in PROPERTY.CLW. A REPORT's BREAK structure is reached at runtime through PROP:BreakVar, which sets or returns the variable whose change starts a new group.",
       "readOnly": false
     },
     {
@@ -132,17 +132,17 @@
     },
     {
       "name": "PROP:Busyhandling",
-      "description": "DRIVER('SQLDriver', '/BUSYHANDLING = 1|2|3|4 ' )",
+      "description": "Sets which strategy an MSSQL or ODBC driver uses when a connection is busy with another statement: 1 do nothing (single-threaded programs), 2 open a separate connection per thread, 3 retry (the default), 4 lock the connection while a statement runs. The setting applies to every table on every thread and must be made before any table is opened. Also available as the BUSYHANDLING driver string.",
       "readOnly": false
     },
     {
       "name": "PROP:Busymessage",
-      "description": "DRIVER('SQLDriver', '/BUSYMESSAGE = str ' )",
+      "description": "MSSQL and ODBC drivers only: the error text the driver looks for to recognise a busy connection, since those servers give the error no unique code. Set it when the server reports its messages in a language other than English. Also available as the BUSYMESSAGE driver string.",
       "readOnly": false
     },
     {
       "name": "PROP:Busyretries",
-      "description": "DRIVER('SQLDriver', '/BUSYRETRIES = n ' )",
+      "description": "MSSQL and ODBC drivers only: how many times the driver retries a statement on a busy connection before giving up (20 by default). Used by the retry strategy of PROP:BusyHandling. Also available as the BUSYRETRIES driver string.",
       "readOnly": false
     },
     {
@@ -257,7 +257,7 @@
     },
     {
       "name": "PROP:Color",
-      "description": "COLOR( color [, selected fore ] [, selected back ] )",
+      "description": "The COLOR attribute: the colors of a window, control or report structure. As a runtime property it is an array: element 1 is the background or fill color (PROP:FillColor), 2 the text color of a selected item (PROP:SelectedColor) and 3 its background (PROP:SelectedFillColor). COLOR:None means no color is set.",
       "readOnly": false
     },
     {
@@ -317,7 +317,7 @@
     },
     {
       "name": "PROP:DBMSver",
-      "description": "Applicable for all SQL Drivers except Oracle.",
+      "description": "FILE property of the SQL drivers (all but Oracle) that returns the version of the database server the driver is talking to, as a string of the form ##.##.#### (major, minor, release).",
       "readOnly": false
     },
     {
@@ -387,7 +387,7 @@
     },
     {
       "name": "PROP:Dragid",
-      "description": "DRAGID( signature [, signature ] )",
+      "description": "The DRAGID attribute: the signatures that let a LIST or REGION act as the source of a drag-and-drop. It is an array of strings, one element per signature; a drop is accepted by a control whose DROPID holds a matching signature.",
       "readOnly": false
     },
     {
@@ -412,7 +412,7 @@
     },
     {
       "name": "PROP:Dropid",
-      "description": "DROPID( signature [, signature ] )",
+      "description": "The DROPID attribute: the signatures a control accepts as a drag-and-drop target. It is an array of strings, one element per signature; a drag from a control whose DRAGID holds a matching signature can be dropped on it, and DROPID() then returns what was dropped.",
       "readOnly": false
     },
     {
@@ -512,7 +512,7 @@
     },
     {
       "name": "PROP:FlushLog",
-      "description": "filelabel {PROP:FlushLog} = 0|1",
+      "description": "FILE property that controls caching of the driver's logging. By default the driver writes each log line in one piece, which keeps the log readable with several threads but can lose the last lines in a crash; set it to TRUE to write to the log at once, FALSE to go back to caching. Flush=1 in the driver's section of DRIVERS.INI does the same.",
       "readOnly": false
     },
     {
@@ -557,12 +557,12 @@
     },
     {
       "name": "PROP:Getinfo",
-      "description": "Result = filelabel{PROP:GETINFO, property}",
+      "description": "FILE property of the ODBC-based SQL drivers (not Oracle) that returns information about the connection, as SQLGetInfo would: file{PROP:GetInfo, n} where n is one of the SQL_ equates in ODBCATTR.INC. Depending on the request the result is a string or a number, which may be a bit mask.",
       "readOnly": true
     },
     {
       "name": "PROP:GlobalHelp",
-      "description": "SYSTEM{ PROP:GlobalHelp } = TRUE !Disable automatic HLP file close",
+      "description": "SYSTEM property that, when TRUE, keeps an open .HLP help file open after the window that opened it closes, until the user closes it.",
       "readOnly": false
     },
     {
@@ -657,7 +657,7 @@
     },
     {
       "name": "PROP:Ignoretruncation",
-      "description": "DRIVER('SQLDriver', '/IGNORETRUNCATION = TRUE | FALSE ' )",
+      "description": "FILE property of the SQL drivers (not Oracle). Set it to TRUE to ignore the server's warning when a column holds more data than the Clarion field declared for it (for example a long CHAR read into a short CSTRING); by default that is reported as an error. Also available as the IGNORETRUNCATION driver string.",
       "readOnly": false
     },
     {
@@ -702,7 +702,7 @@
     },
     {
       "name": "PROP:Interface",
-      "description": "A property of a TEXT control used to get an interface to the RTF control�s host interface.",
+      "description": "A property of a TEXT control used to get an interface to the RTF control's host interface.",
       "readOnly": false
     },
     {
@@ -727,7 +727,7 @@
     },
     {
       "name": "PROP:Join",
-      "description": "JOIN( | secondary key ,linking fields | ) [ , INNER ]",
+      "description": "The JOIN attribute of a SHEET: when set, the TABs stay on one row however many there are, with the scroll buttons together at one end of the tab row.",
       "readOnly": false
     },
     {
@@ -802,7 +802,7 @@
     },
     {
       "name": "PROP:Locale",
-      "description": "Setting PROP:Codepage and PROP:Locale properties respectively for the internal SYSTEM variable, for example: SYSTEM {PROP:Codepage} = 1253 !Greek",
+      "description": "Integer property of SYSTEM or of a FILE that sets or returns the locale (Windows LCID) used for text, alongside PROP:Codepage.",
       "readOnly": false
     },
     {
@@ -822,7 +822,7 @@
     },
     {
       "name": "PROP:LogonScreen",
-      "description": "AFile FILE,DRIVER('SQLAnywhere')",
+      "description": "FILE property of the SQL drivers that sets or returns whether the driver prompts for logon details when OPEN has no connect string. TRUE (the default) shows the database's own connect dialog; with FALSE the OPEN fails and FILEERRORCODE() returns the driver's error.",
       "readOnly": false
     },
     {
@@ -882,7 +882,7 @@
     },
     {
       "name": "PROP:MenuBar",
-      "description": "A WINDOW property used to return the Field Equate Label of a window�s menubar.",
+      "description": "A WINDOW property used to return the Field Equate Label of a window's menubar.",
       "readOnly": true
     },
     {
@@ -982,7 +982,7 @@
     },
     {
       "name": "PROP:NumTabs",
-      "description": "MDIChild WINDOW('Child One'),AT(0,0,320,200),MDI,MAX,HVSCROLL",
+      "description": "Read-only property of a SHEET that returns how many TABs it holds.",
       "readOnly": true
     },
     {
@@ -1097,7 +1097,7 @@
     },
     {
       "name": "PROP:PrintDocument",
-      "description": "reportlabel {PROP:PrintDocument}",
+      "description": "Clarion# (.NET) only: returns the contents of an open REPORT as a .NET document object, for example to show the report in a .NET print preview dialog.",
       "readOnly": false
     },
     {
@@ -1162,7 +1162,7 @@
     },
     {
       "name": "PROP:RejectCode",
-      "description": "MDIChild WINDOW('Child One'),AT(0,0,320,200),MDI,MAX,HVSCROLL",
+      "description": "Property of an ENTRY, TEXT, COMBO or SPIN control that returns the REJECTCODE value from its last EVENT:Rejected. Unlike REJECTCODE(), which is only valid during that event, the property keeps its value; 0 means the entry was accepted.",
       "readOnly": false
     },
     {
@@ -1207,7 +1207,7 @@
     },
     {
       "name": "PROP:Select",
-      "description": "SELECT( [ control ] [, position ] [, endposition ] )",
+      "description": "Not declared in PROPERTY.CLW. SELECT is a procedure that moves focus to a control (and can set its selected text); at runtime PROP:SelStart and PROP:SelEnd set and return the selected text, and PROP:Selected the selected item.",
       "readOnly": false
     },
     {
@@ -1252,7 +1252,7 @@
     },
     {
       "name": "PROP:Slider",
-      "description": "SLIDER , AT( ) , [, USE( ) ] [,CURSOR ( ) ] ,[, LAYOUT( ) ] [, DISABLE ] [, FULL ] [, SCROLL ] [, HIDE ]",
+      "description": "Not declared in PROPERTY.CLW. SLIDER is a control (CREATE:Slider for CREATE); its position is set and returned through PROP:SliderPos, and its range, steps and ticks through PROP:Range, PROP:Step and PROP:NoTicks.",
       "readOnly": false
     },
     {
@@ -1327,7 +1327,7 @@
     },
     {
       "name": "PROP:Step",
-      "description": "SLIDER (declare a Slider control)",
+      "description": "The STEP attribute. On a SLIDER, the value between one tick mark and the next; on a SPIN, the amount each click of the up or down button adds or subtracts.",
       "readOnly": false
     },
     {
@@ -1372,7 +1372,7 @@
     },
     {
       "name": "PROP:TabBarColor",
-      "description": "FrameWindow{PROP:TabBarColor, index} = color",
+      "description": "Array property of an MDI frame (APPLICATION) that sets or returns the colors of its MDI tab bar: element 1 is the bar's background, 2 to 8 the colors used for the tabs of successive child windows. It only applies while PROP:TabBarVisible is TRUE and the tab style is TabStyle:Colored; hiding the bar clears the colors.",
       "readOnly": false
     },
     {
@@ -1452,12 +1452,12 @@
     },
     {
       "name": "PROP:TextLeftMargin",
-      "description": "?control{PROP:TextLeftMargin} = n",
+      "description": "Read/write property of an ENTRY, SPIN, COMBO, TEXT or RTF control, or a drop-down list, that sets or returns the blank margin left of the text, in the units of the owning window or report. -1 uses the Windows default for the control's font; other negative values use the runtime's own default.",
       "readOnly": false
     },
     {
       "name": "PROP:TextRightMargin",
-      "description": "?control{PROP:TextRightMargin} = n",
+      "description": "Read/write property of an ENTRY, SPIN, COMBO, TEXT or RTF control, or a drop-down list, that sets or returns the blank margin right of the text, in the units of the owning window or report. -1 uses the Windows default for the control's font; other negative values use the runtime's own default.",
       "readOnly": false
     },
     {
@@ -1482,7 +1482,7 @@
     },
     {
       "name": "PROP:Ticks",
-      "description": "SLIDER (declare a Slider control)",
+      "description": "Not declared in PROPERTY.CLW. The tick marks of a SLIDER are set by its NOTICKS attribute (PROP:NoTicks) and by ABOVE, BELOW, LEFT, RIGHT or BOTH for where they are drawn; STEP (PROP:Step) sets their spacing.",
       "readOnly": false
     },
     {
@@ -1527,7 +1527,7 @@
     },
     {
       "name": "PROP:ToolBar",
-      "description": "A WINDOW property used to return the Field Equate Label of a window�s toolbar.",
+      "description": "A WINDOW property used to return the Field Equate Label of a window's toolbar.",
       "readOnly": true
     },
     {
@@ -1542,12 +1542,12 @@
     },
     {
       "name": "PROP:TraceFile",
-      "description": "SYSTEM { PROP:TraceFile } = INIFilename",
+      "description": "SYSTEM property that names the INI file the file drivers read their tracing settings from, in the [CW<driver>] sections. Set it before any file I/O. When PROP:TraceKey is also set it wins; with neither, DRIVERS.INI is used.",
       "readOnly": false
     },
     {
       "name": "PROP:TraceKey",
-      "description": "SYSTEM { PROP:TraceKey } = keyName",
+      "description": "SYSTEM property that names the Registry key the file drivers read their tracing settings from, one subkey per driver (Profile, Details and Trace as 0 or 1, TraceFile as a path). Set it before any file I/O. It takes precedence over PROP:TraceFile; with neither, DRIVERS.INI is used.",
       "readOnly": false
     },
     {
@@ -1572,7 +1572,7 @@
     },
     {
       "name": "PROP:Use",
-      "description": "USE( | label | [, number ] [, equate ] )",
+      "description": "The USE attribute of a control or structure. Reading it returns the value of the USE variable; assigning a variable to it makes the control update that variable instead. Further elements reach the control's numbers: {PROP:Use,2} is the field equate (PROP:Feq), 3 the list part of a COMBO or drop list (PROP:ListFeq), 4 its button (PROP:ButtonFeq).",
       "readOnly": false
     },
     {
@@ -1582,11 +1582,11 @@
     },
     {
       "name": "PROP:Value",
-      "description": "On a control: the VALUE attribute. On a RADIO, the value the OPTION's USE variable gets when the radio is chosen; on a CHECK, the values its USE variable gets when checked ({PROP:Value,1}) and unchecked ({PROP:Value,2}). On a FILE: an array property that sets or returns the contents of a MEMO or BLOB, numbered -1, -2, ... in declaration order.",
+      "description": "On a control: the VALUE attribute. On a RADIO, the value the OPTION's USE variable gets when the radio is chosen; on a CHECK, the values its USE variable gets when checked ({PROP:Value,1}) and unchecked ({PROP:Value,2}). On a FILE: an array property that sets or returns the contents of a MEMO or BLOB, -1 for the first one declared, -2 for the next, and so on.",
       "readOnly": false,
       "targets": {
         "control": "The VALUE attribute (PROP:VALUE). On a RADIO it is the value assigned to the OPTION structure's USE variable when the user chooses that radio, in place of the radio's text. On a CHECK it holds the values assigned to the CHECK's USE variable when the box is checked ({PROP:Value,1}, same as PROP:TrueValue) and unchecked ({PROP:Value,2}, same as PROP:FalseValue), in place of the default 1 and 0. Normal type conversion applies to the assignment. Read from an ENTRY, SPIN or COMBO, it returns the value UPDATE would put in the USE variable, without updating it (this can generate EVENT:Rejected).",
-        "file": "An array property of a FILE that sets or returns the data contained in a specified MEMO or BLOB column (use the WHAT procedure for any other type of column). The array element for PROP:Value is a simple negative number which indicates the MEMO or BLOB. MEMO and BLOB fields are numbered negatively. MEMO and BLOB declarations begin with -1 and decrement by 1 for each subsequent MEMO and BLOB, in the order in which they appear within the FILE structure."
+        "file": "Array property of a FILE that sets or returns the contents of one of its MEMO or BLOB fields; use WHAT for any other kind of field. The element number picks the field by its place among the file's MEMOs and BLOBs: -1 is the first one declared, -2 the second, and so on, so Customer{PROP:Value,-1} reads the first."
       }
     },
     {
@@ -1596,7 +1596,7 @@
     },
     {
       "name": "PROP:Vertical",
-      "description": "SLIDER (declare a Slider control)",
+      "description": "The VERTICAL attribute of a SLIDER or PROGRESS control: when set, the control runs up and down instead of across.",
       "readOnly": false
     },
     {
@@ -1641,7 +1641,7 @@
     },
     {
       "name": "PROP:Where",
-      "description": "[ Where\" = ] SEND (file, '/WHERE [ where-clause ]' )",
+      "description": "Write-only FILE property of the SQL drivers that supplies the WHERE clause the driver uses for the next NEXT or PREVIOUS, in place of the one it would build. Set it after SET and before the read, as SET clears it. Also available as the WHERE driver string through SEND.",
       "readOnly": false
     },
     {
@@ -1671,12 +1671,12 @@
     },
     {
       "name": "PROP:Xorigin",
-      "description": "(how much a window or control has been scrolled)",
+      "description": "How far a SHEET, IMAGE or LIST control, or a WINDOW, has been scrolled horizontally. Reading it returns the offset; assigning it scrolls the control.",
       "readOnly": false
     },
     {
       "name": "PROP:YOrigin",
-      "description": "(how much a window or control has been scrolled)",
+      "description": "How far a SHEET, IMAGE or LIST control, or a WINDOW, has been scrolled vertically. On a LIST it is the number of the first visible row, so CHOICE(?List) - ?List{PROP:YOrigin} + 1 is the highlighted row's place on screen; assigning it scrolls the list so that row is at the top, as far as the list allows.",
       "readOnly": false
     },
     {
