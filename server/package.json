@@ -20,7 +20,7 @@
     "resolutions": {
         "mocha": "^11.1.0",
         "mkdirp": "^3.0.1",
-        "minimatch": "^10.0.1",
+        "minimatch": "^11.0.1",
         "minimist": "^1.2.6"
     },
     "scripts": {},
