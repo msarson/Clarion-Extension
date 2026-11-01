@@ -3686,6 +3686,9 @@ export class ReferencesProvider {
                         !(fileUri === declarationUri && token.line === declarationLine)) {
                         continue;
                     }
+                    // #827 — the tail of a colon type in a declaration (`*HTTP:Answer answer`
+                    // arrives as `*HTTP` ':' `Answer` `answer`) is the type, not a reference.
+                    if (this.isColonTypeTail(tokens, i)) continue;
                 } else if (token.type === TokenType.ReferenceVariable &&
                            token.value.toLowerCase() === '&' + searchWordLower) {
                     // &TypeName reference-variable declaration: e.g. "Behavior &StandardBehavior,PRIVATE"
@@ -3814,6 +3817,41 @@ export class ReferencesProvider {
         }
 
         return locations;
+    }
+
+    /**
+     * #827 — whether `tokens[index]` is the last part of a colon-qualified TYPE name in a
+     * declaration, so it can never be a reference to a variable of the same name.
+     *
+     * A colon type the tokenizer does not keep whole arrives as `<link> ':' <tail>`:
+     * `*HTTP:Answer answer` is PointerParameter(`*HTTP`) ':' Variable(`Answer`)
+     * Variable(`answer`). The tail is a type when the chain opens with a `*` or `&`
+     * type marker, or when a name follows it directly (`TYPE:Name param`) — a
+     * qualified name used as a value (`PRE:Field = 1`) is followed by an operator,
+     * a delimiter or nothing, and keeps matching as before.
+     */
+    private isColonTypeTail(tokens: Token[], index: number): boolean {
+        const token = tokens[index];
+        const colon = tokens[index - 1];
+        if (!colon || colon.value !== ':' || colon.line !== token.line || colon.start + 1 !== token.start) return false;
+
+        // Walk back over `<link> ':'` pairs welded together on this line to the chain's first link.
+        let j = index - 1;
+        let first: Token | undefined;
+        while (j >= 1) {
+            const sep = tokens[j];
+            const link = tokens[j - 1];
+            if (sep.value !== ':' || sep.line !== token.line || link.line !== token.line ||
+                link.start + link.value.length !== sep.start) break;
+            first = link;
+            j -= 2;
+        }
+        if (!first) return false;
+        if (first.type === TokenType.PointerParameter || first.type === TokenType.ReferenceVariable) return true;
+
+        const next = tokens[index + 1];
+        return !!next && next.line === token.line && next.start > token.start + token.value.length &&
+            (next.type === TokenType.Variable || next.type === TokenType.Label);
     }
 
     /**

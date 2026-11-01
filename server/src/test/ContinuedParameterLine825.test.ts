@@ -185,11 +185,7 @@ suite('A parameter on a | continuation line is a parameter (#825)', () => {
             test(`${where}: references of ${c.name} are its declaration and its use`, async () => {
                 const refs = await new ReferencesProvider().provideReferences(
                     makeDoc(), pos(c.useLine, c.name), { includeDeclaration: true });
-                // `*HTTP:Answer answer` also lists the type's tail `Answer`: the same on a header
-                // that fits on one line (the tokens are identical), so not this issue's - left out.
-                const typeTail = (l: Location) => l.range.start.line === c.declLine &&
-                    l.range.start.character === SOURCE[c.declLine].indexOf(':' + c.name.charAt(0).toUpperCase() + c.name.slice(1)) + 1;
-                const got = (refs ?? []).filter(l => !typeTail(l))
+                const got = (refs ?? [])
                     .map(l => `${l.range.start.line}:${l.range.start.character}`).sort();
                 const want = [
                     `${c.declLine}:${SOURCE[c.declLine].lastIndexOf(c.name)}`,
