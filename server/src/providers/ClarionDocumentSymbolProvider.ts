@@ -738,7 +738,8 @@ export class ClarionDocumentSymbolProvider {
             const isColonType = type === TokenType.StructurePrefix && i > 0 && tokens[i - 1].line === line &&
                 resolvePrefixedName(tokens, i - 1).start === 0 &&
                 !RESERVED_LABEL_WORDS.has(tokens[i - 1].value.toUpperCase());
-            if (!pastCodeStatement && (type === TokenType.Type || type === TokenType.TypeAnnotation || type === TokenType.ReferenceVariable || type === TokenType.Variable || isColonType) && i > 0) {
+            // #826: so is LIKE, `QTDAmount  LIKE(Amount)` - its own token type (TypeReference).
+            if (!pastCodeStatement && (type === TokenType.Type || type === TokenType.TypeAnnotation || type === TokenType.ReferenceVariable || type === TokenType.Variable || type === TokenType.TypeReference || isColonType) && i > 0) {
                 logger.info(`✅ SymbolProvider: Calling handleVariableToken for token index=${i}, type=${type}, value="${token.value}", line=${token.line}`);
                 this.handleVariableToken(tokens, i, symbols, currentStructure, currentProcedure, lastMethodImplementation, parentStack);
 
@@ -2023,6 +2024,26 @@ export class ClarionDocumentSymbolProvider {
                         j += 2;
                         continue;
                     }
+                }
+
+                // #826: `LIKE(name)` is the type, with the name as written - `Amount`,
+                // `Grp.Field`, `Pre:Field` - which the identifier rules below would skip.
+                if (!foundType && fullType === '' && t.type === TokenType.TypeReference) {
+                    let k = j;
+                    let depth = 0;
+                    let likeType = '';
+                    while (k < tokens.length && tokens[k].line === line && tokens[k].type !== TokenType.Comment) {
+                        const v = tokens[k].value;
+                        likeType += v;
+                        if (tokens[k].type === TokenType.Delimiter && v === '(') depth++;
+                        else if (tokens[k].type === TokenType.Delimiter && v === ')' && --depth === 0) break;
+                        k++;
+                    }
+                    fullType += likeType;
+                    fullDeclaration += likeType;
+                    foundType = true;
+                    j = k + 1;
+                    continue;
                 }
 
                 // Skip label tokens (don't include the variable name in the type)
