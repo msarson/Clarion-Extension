@@ -12,11 +12,23 @@ import { getLocalMapScope } from '../../utils/LocalMapScopeHelper';
 import { pathToCanonicalUri } from '../../utils/UriUtils';
 import { moduleTargetMatchesFile } from '../../utils/ClarionSourceNaming';
 import { makeTimeSlicer } from '../../utils/cooperativeScan';
+import { withContinuations } from '../../utils/ClassMemberScan';
 import * as fs from 'fs';
 import * as nodePath from 'path';
 
 const logger = LoggerManager.getLogger('MapDeclarationDiagnostics');
 logger.setLevel('error');
+
+/**
+ * A prototype or PROCEDURE line with its `|` continuation lines joined in. The signature
+ * checks below read a declaration and an implementation from their first line; for one
+ * continued with `|` the parameter list never closes on that line, so it read as no
+ * parameters at all: a mismatch when only one side was continued, and a vacuous match
+ * when both were.
+ */
+function logicalLine(lines: string[], k: number): string {
+    return lines[k] === undefined ? '' : withContinuations(lines, k);
+}
 
 /** Resolve a bare CLW filename (as stored in MODULE token.referencedFile) to an
  *  absolute path using the solution's redirection parser.  Returns null if it
@@ -214,8 +226,8 @@ export async function validateMissingMapDeclarations(
         // Case 1: self-declared via MODULE('thisfile.clw') — compare signatures locally
         const selfModuleDecl = selfModuleDeclaredTokens.get(procName.toUpperCase());
         if (selfModuleDecl) {
-            const declLine = docLines[selfModuleDecl.line] ?? '';
-            const implLine = docLines[proc.line] ?? '';
+            const declLine = logicalLine(docLines, selfModuleDecl.line);
+            const implLine = logicalLine(docLines, proc.line);
             const declParams = ProcedureSignatureUtils.extractParameterTypes(declLine);
             const implParams = ProcedureSignatureUtils.extractImplementationParameterTypes(implLine);
             if (!ProcedureSignatureUtils.parametersMatch(implParams, declParams)) {
@@ -240,8 +252,8 @@ export async function validateMissingMapDeclarations(
         // Case 2: procedure-level MAP declaration — compare signatures locally
         const procLevelDecl = procLevelDeclaredTokens.get(procName.toUpperCase());
         if (procLevelDecl) {
-            const declLine = docLines[procLevelDecl.line] ?? '';
-            const implLine = docLines[proc.line] ?? '';
+            const declLine = logicalLine(docLines, procLevelDecl.line);
+            const implLine = logicalLine(docLines, proc.line);
             const declParams = ProcedureSignatureUtils.extractParameterTypes(declLine);
             const implParams = ProcedureSignatureUtils.extractImplementationParameterTypes(implLine);
             if (!ProcedureSignatureUtils.parametersMatch(implParams, declParams)) {
@@ -268,8 +280,8 @@ export async function validateMissingMapDeclarations(
         // signatures locally like Cases 1/2.
         const bareModuleDecl = bareModuleMapDeclaredTokens.get(procName.toUpperCase());
         if (bareModuleDecl) {
-            const declLine = docLines[bareModuleDecl.line] ?? '';
-            const implLine = docLines[proc.line] ?? '';
+            const declLine = logicalLine(docLines, bareModuleDecl.line);
+            const implLine = logicalLine(docLines, proc.line);
             const declParams = ProcedureSignatureUtils.extractParameterTypes(declLine);
             const implParams = ProcedureSignatureUtils.extractImplementationParameterTypes(implLine);
             if (!ProcedureSignatureUtils.parametersMatch(implParams, declParams)) {
@@ -332,7 +344,7 @@ export async function validateMissingMapDeclarations(
             } else {
                 // Declaration found — compare signatures to catch parameter mismatches
                 try {
-                    const implLine = docLines[proc.line] ?? '';
+                    const implLine = logicalLine(docLines, proc.line);
                     const implParams = ProcedureSignatureUtils.extractImplementationParameterTypes(implLine);
 
                     const normalizedResultPath = result.file.toLowerCase().replace(/\\/g, '/');
@@ -346,7 +358,7 @@ export async function validateMissingMapDeclarations(
                     const parentText = CrossFileResolver.loadExternalFileContent(tokenCache, resultLiveUri, result.file, getOpenDocumentContent);
                     if (parentText === undefined) continue;
                     const parentLines = parentText.split('\n');
-                    const declLine = parentLines[result.line] ?? '';
+                    const declLine = logicalLine(parentLines, result.line);
                     const declParams = ProcedureSignatureUtils.extractParameterTypes(declLine);
 
                     if (!ProcedureSignatureUtils.parametersMatch(implParams, declParams)) {
@@ -500,7 +512,7 @@ export async function validateMissingImplementations(
             // Belt-and-braces alongside the module-extension gate above: catches a DLL-attributed
             // prototype even inside a source-named MODULE. Note the docs allow the flag to be an
             // undefined label (still active), so any DLL(...) or bare DLL counts.
-            const declLineText = docLines[decl.line] ?? '';
+            const declLineText = logicalLine(docLines, decl.line);
             if (/,\s*DLL\b/i.test(declLineText.replace(/!.*$/, ''))) {
                 continue;
             }
@@ -536,11 +548,11 @@ export async function validateMissingImplementations(
 
                     if (implLine !== undefined) {
                         const implFileLines = implFileContent.split('\n');
-                        const implSig = implFileLines[implLine.line] ?? '';
+                        const implSig = logicalLine(implFileLines, implLine.line);
                         // #793: an overloaded procedure's definition must carry its types.
                         const overloaded = moduleDecls.filter(d => d.label?.toUpperCase() === procName.toUpperCase()).length > 1;
                         const implParams = ProcedureSignatureUtils.extractImplementationParameterTypes(implSig, overloaded);
-                        const declSig = docLines[decl.line] ?? '';
+                        const declSig = logicalLine(docLines, decl.line);
                         const declParams = ProcedureSignatureUtils.extractParameterTypes(declSig);
                         const matched = ProcedureSignatureUtils.parametersMatch(implParams, declParams);
                         if (!matched) {
