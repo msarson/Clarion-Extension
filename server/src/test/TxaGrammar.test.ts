@@ -27,6 +27,8 @@ function repoRoot(): string {
 }
 
 // #490: lift Oniguruma's `(?i:` to `(?:` + the `i` flag so the regex compiles on Node 20.
+// The flag covers the whole regex, though this grammar mixes `(?i:` with case-sensitive parts (`(\[)(?i:SOURCE)(\])`):
+// the lifted regex is broader than the real one, so test with the case AppGen writes, never to prove case-sensitivity.
 const js = (oniguruma: string): RegExp => {
     const lifted = oniguruma.replace(/\(\?i:/g, '(?:');
     return new RegExp(lifted, lifted === oniguruma ? '' : 'i');
