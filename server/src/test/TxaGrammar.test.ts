@@ -13,7 +13,7 @@ import * as path from 'path';
 
 interface Rule {
     match?: string; begin?: string; end?: string; name?: string; include?: string;
-    patterns?: Rule[]; captures?: Record<string, { name?: string }>;
+    patterns?: Rule[]; captures?: Record<string, Rule>;
 }
 interface Grammar { scopeName: string; fileTypes: string[]; patterns: Rule[]; repository: Record<string, Rule>; }
 
@@ -106,20 +106,36 @@ suite('Clarion TXA grammar', () => {
         assert.deepStrictEqual(scopes('sectionHeader', '  x = a[1]'), []);   // an array index in code is no header
     });
 
-    test('a prompt line: its symbol, modifiers, DEPEND, type and TIMES', () => {
-        const prompts = grammar.repository.promptSection.patterns!;
-        const rule = prompts[0];
-        const m = js(rule.match!).exec('%ButtonAction MULTI UNIQUE DEPEND %Control DEFAULT TIMES 2')!;
-        assert.ok(m);
-        const got = Object.entries(rule.captures!).filter(([g]) => m[Number(g)]?.trim())
-            .map(([g, c]) => `${m[Number(g)].trim()}=${c.name}`);
-        assert.deepStrictEqual(got, [
-            '%ButtonAction=variable.other.prompt.txa', 'MULTI UNIQUE=storage.modifier.prompt.txa', 'DEPEND=keyword.other.depend.txa',
-            '%Control=variable.other.prompt.txa', 'DEFAULT=storage.type.prompt.txa', 'TIMES=keyword.other.times.txa', '2=constant.numeric.txa',
+    test('a prompt line: its symbol, modifiers and DEPEND in any order, type and TIMES', () => {
+        const rule = grammar.repository.promptSection.patterns![0];
+        const re = js(rule.match!);
+        /** "text=scope" for each captured group, the modifier group split by its own patterns. */
+        const parts = (line: string): string[] => {
+            const m = re.exec(line);
+            assert.ok(m, line);
+            const found: string[] = [];
+            for (const [group, capture] of Object.entries(rule.captures as Record<string, Rule>)) {
+                const text = m![Number(group)];
+                if (!text?.trim()) continue;
+                if (capture.name) { found.push(`${text.trim()}=${capture.name}`); continue; }
+                for (const word of text.trim().split(/\s+/)) {
+                    const sub = capture.patterns!.find(p => new RegExp(`^(?:${js(p.match!).source})$`).test(word));
+                    found.push(`${word}=${sub?.name ?? '(none)'}`);
+                }
+            }
+            return found;
+        };
+        // the order AppGen writes: DEPEND %Parent, then MULTI
+        assert.deepStrictEqual(parts('%ClassLines DEPEND %ClassItem MULTI DEFAULT TIMES 2'), [
+            '%ClassLines=variable.other.prompt.txa', 'DEPEND=keyword.other.depend.txa', '%ClassItem=variable.other.prompt.txa',
+            'MULTI=storage.modifier.prompt.txa', 'DEFAULT=storage.type.prompt.txa', 'TIMES=keyword.other.times.txa', '2=constant.numeric.txa',
         ]);
-        const plain = js(rule.match!).exec('%UpdateProcedure PROCEDURE  (UpdateContact)')!;
-        assert.strictEqual(plain[1], '%UpdateProcedure');
-        assert.strictEqual(plain[5], 'PROCEDURE');
+        assert.deepStrictEqual(parts('%Things MULTI UNIQUE LONG  ()'), [
+            '%Things=variable.other.prompt.txa', 'MULTI=storage.modifier.prompt.txa', 'UNIQUE=storage.modifier.prompt.txa',
+            'LONG=storage.type.prompt.txa',
+        ]);
+        assert.deepStrictEqual(parts('%UpdateProcedure PROCEDURE  (UpdateContact)'),
+            ['%UpdateProcedure=variable.other.prompt.txa', 'PROCEDURE=storage.type.prompt.txa']);
     });
 
     test('embed lines: EMBED %Point, WHEN, PRIORITY n, PROPERTY:BEGIN', () => {
@@ -142,12 +158,17 @@ suite('Clarion TXA grammar', () => {
         for (const name of ['SOURCE', 'DATA', 'SCREENCONTROLS', 'REPORTCONTROLS', 'LONGDESC', 'QUICKCODE', 'WINDOW', 'REPORT']) {
             const s = sections.find(x => js(x.begin!).test(`[${name}]`));
             assert.ok(s, `[${name}] opens no code section`);
-            assert.ok(s!.patterns!.some(p => p.include === 'source.clarion'), `[${name}] does not include source.clarion`);
+            const includes = s!.patterns!.map(p => p.include);
+            assert.ok(includes.includes('source.clarion'), `[${name}] does not include source.clarion`);
+            // a stray quote ends with its line: the section's own string rule comes before Clarion's, which runs on
+            assert.ok(includes.indexOf('#codeStrings') >= 0 && includes.indexOf('#codeStrings') < includes.indexOf('source.clarion'), `[${name}] strings`);
             assert.ok(js(s!.end!).test('[EMBED]') && !js(s!.end!).test("  MESSAGE('[x]')"), `[${name}] ends wrongly`);
         }
         // the embed's properties come before its code, and end at PROPERTY:END
         const props = grammar.repository.embedProperties;
         assert.ok(js(props.begin!).test('PROPERTY:BEGIN') && js(props.end!).test('PROPERTY:END'));
+        const strings = grammar.repository.codeStrings;
+        assert.ok(js(strings.end!).test('') && js(strings.begin!).test("It's") && js(strings.begin!).test("u'x'"));
         // control attributes AppGen keeps in a window
         assert.ok(js(grammar.repository.templateAttributes.match!).test('#ORIG(?OK)'));
     });

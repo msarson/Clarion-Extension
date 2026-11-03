@@ -54,7 +54,7 @@ All notable changes to the Clarion Extension are documented here.
 
 #### Syntax
 
-- **TXA files are highlighted.** A new Clarion TXA language colours an exported application's section headers, prompt lines, embed points with their `WHEN` keys and priorities, the header keywords and the string escapes; embedded code, local data and window and report structures keep the Clarion colours.
+- **TXA files are highlighted.** A new Clarion TXA language colours an exported application's section headers, prompt lines, embed points with their `WHEN` keys and priorities, the header keywords and the string escapes; embedded code, local data and window and report structures keep the Clarion colours. A `files.associations` setting that maps `*.txa` to `clarion` still applies, and keeps the Clarion colours.
 - **The file-handling built-ins are coloured alike.** STREAM, EMPTY, PACK, BUFFER, SKIP, APPEND, RELEASE, WATCH, LOGOUT, COMMIT and ROLLBACK took the function colour while FLUSH, OPEN, CLOSE and SET took the keyword colour; they now all share the keyword colour. [#799](https://github.com/msarson/Clarion-Extension/issues/799)
 
 #### Configuration and build

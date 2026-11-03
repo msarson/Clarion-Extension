@@ -47,6 +47,7 @@
           "name": "meta.section.source.txa",
           "patterns": [
             { "include": "#embedProperties" },
+            { "include": "#codeStrings" },
             { "include": "source.clarion" }
           ]
         },
@@ -60,6 +61,7 @@
           "end": "(?=^\\s*\\[[A-Za-z][A-Za-z0-9_]*\\]\\s*$)",
           "name": "meta.section.data.txa",
           "patterns": [
+            { "include": "#codeStrings" },
             { "include": "source.clarion" }
           ]
         },
@@ -74,8 +76,22 @@
           "name": "meta.section.structure.txa",
           "patterns": [
             { "include": "#templateAttributes" },
+            { "include": "#codeStrings" },
             { "include": "source.clarion" }
           ]
+        }
+      ]
+    },
+    "codeStrings": {
+      "comment": "A string in a code section ends with its line, as Clarion's does: a stray quote (an unfinished string, an apostrophe in a description) must not run on past the next section header. Listed before source.clarion, so it wins at the quote; Clarion's string scope.",
+      "name": "string.quoted.single.clarion",
+      "begin": "(?<![A-Za-z0-9_])[uU]'|'",
+      "end": "'|$",
+      "applyEndPatternLast": true,
+      "patterns": [
+        {
+          "match": "''|<<|<[0-9A-Fa-f]+[hH]?(?:,[0-9A-Fa-f]+[hH]?)*>|\\{[0-9]+\\}|\\{\\{",
+          "name": "constant.character.escape.clarion"
         }
       ]
     },
@@ -98,7 +114,7 @@
       "name": "entity.other.attribute-name.template.txa"
     },
     "promptSection": {
-      "comment": "[PROMPTS]: one line per prompt (%Symbol [MULTI] [UNIQUE] [DEPEND %Parent] TYPE [TIMES n] (value)), then WHEN lines for a dependent prompt's values.",
+      "comment": "[PROMPTS]: one line per prompt (%Symbol, then MULTI, UNIQUE and DEPEND %Parent in any order (AppGen writes DEPEND %Parent MULTI), then TYPE [TIMES n] (value)), and WHEN lines for a dependent prompt's values.",
       "begin": "^\\s*(\\[)(?i:PROMPTS)(\\])\\s*$",
       "beginCaptures": {
         "0": { "name": "entity.name.section.txa" },
@@ -109,15 +125,19 @@
       "name": "meta.section.prompts.txa",
       "patterns": [
         {
-          "match": "^\\s*(%[A-Za-z_][A-Za-z0-9_]*)((?:\\s+(?:MULTI|UNIQUE)\\b)*)(?:\\s+(DEPEND)\\s+(%[A-Za-z_][A-Za-z0-9_]*))?\\s+([A-Za-z]+)\\b(?:\\s+(TIMES)\\s+([0-9]+))?",
+          "match": "^\\s*(%[A-Za-z_][A-Za-z0-9_]*)((?:\\s+(?:(?:MULTI|UNIQUE)\\b|DEPEND\\s+%[A-Za-z_][A-Za-z0-9_]*))*)\\s+(?!(?:MULTI|UNIQUE|DEPEND)\\b)([A-Za-z]+)\\b(?:\\s+(TIMES)\\s+([0-9]+))?",
           "captures": {
             "1": { "name": "variable.other.prompt.txa" },
-            "2": { "name": "storage.modifier.prompt.txa" },
-            "3": { "name": "keyword.other.depend.txa" },
-            "4": { "name": "variable.other.prompt.txa" },
-            "5": { "name": "storage.type.prompt.txa" },
-            "6": { "name": "keyword.other.times.txa" },
-            "7": { "name": "constant.numeric.txa" }
+            "2": {
+              "patterns": [
+                { "match": "\\b(?:MULTI|UNIQUE)\\b", "name": "storage.modifier.prompt.txa" },
+                { "match": "\\bDEPEND\\b", "name": "keyword.other.depend.txa" },
+                { "match": "%[A-Za-z_][A-Za-z0-9_]*", "name": "variable.other.prompt.txa" }
+              ]
+            },
+            "3": { "name": "storage.type.prompt.txa" },
+            "4": { "name": "keyword.other.times.txa" },
+            "5": { "name": "constant.numeric.txa" }
           }
         },
         {
@@ -172,7 +192,7 @@
           "captures": { "1": { "name": "keyword.other.property.txa" } }
         },
         {
-          "match": "^\\s*(NAME|FROM|CATEGORY|DESCRIPTION|PROTOTYPE|MODULE|TEMPLATE|PROCTEMPLATE|DICTIONARY|PROCEDURE|TODO|MODIFIED|CREATED|LANGUAGE|HLP|WHERE|COMPONENT|LONG)\\b",
+          "match": "^\\s*(NAME|FROM|CATEGORY|DESCRIPTION|PROTOTYPE|MODULE|TEMPLATE|PROCTEMPLATE|DICTIONARY|PROCEDURE|TODO|MODIFIED|CREATED|LANGUAGE|HLP|WHERE|COMPONENT)\\b",
           "captures": { "1": { "name": "keyword.other.header.txa" } }
         }
       ]
