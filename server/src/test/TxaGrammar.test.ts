@@ -167,9 +167,15 @@ suite('Clarion TXA grammar', () => {
         // the embed's properties come before its code, and end at PROPERTY:END
         const props = grammar.repository.embedProperties;
         assert.ok(js(props.begin!).test('PROPERTY:BEGIN') && js(props.end!).test('PROPERTY:END'));
-        const strings = grammar.repository.codeStrings;
-        assert.ok(js(strings.end!).test('') && js(strings.begin!).test("It's") && js(strings.begin!).test("u'x'"));
         // control attributes AppGen keeps in a window
         assert.ok(js(grammar.repository.templateAttributes.match!).test('#ORIG(?OK)'));
+    });
+
+    test('a code section colours its strings as a .clw does: Clarion\'s string rules, ending at the line', () => {
+        const clarion = JSON.parse(fs.readFileSync(path.join(root, 'syntaxes', 'clarion.tmLanguage.json'), 'utf8')) as Grammar;
+        const shape = (r: Rule) => ({ name: r.name, begin: r.begin, escapes: (r.patterns ?? []).map(p => `${p.match}=${p.name}`) });
+        const code = grammar.repository.codeStrings.patterns ?? [];
+        assert.deepStrictEqual(code.map(shape), clarion.repository.strings.patterns!.map(shape));
+        for (const r of code) assert.ok(js(r.end!).test('') && js(r.end!).test("'"), `${r.name} does not end at its line`);
     });
 });

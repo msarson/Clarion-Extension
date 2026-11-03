@@ -83,15 +83,35 @@
       ]
     },
     "codeStrings": {
-      "comment": "A string in a code section ends with its line, as Clarion's does: a stray quote (an unfinished string, an apostrophe in a description) must not run on past the next section header. Listed before source.clarion, so it wins at the quote; Clarion's string scope.",
-      "name": "string.quoted.single.clarion",
-      "begin": "(?<![A-Za-z0-9_])[uU]'|'",
-      "end": "'|$",
-      "applyEndPatternLast": true,
+      "comment": "A string in a code section ends with its line, as Clarion's does: a stray quote (an unfinished string, an apostrophe in a description) must not run on past the next section header. Listed before source.clarion, so it wins at the quote. Otherwise these are clarion.tmLanguage.json's string rules, scopes and escapes alike, so code colours as it does in a .clw.",
       "patterns": [
         {
-          "match": "''|<<|<[0-9A-Fa-f]+[hH]?(?:,[0-9A-Fa-f]+[hH]?)*>|\\{[0-9]+\\}|\\{\\{",
-          "name": "constant.character.escape.clarion"
+          "name": "string.quoted.single.unicode.clarion",
+          "begin": "(?<![A-Za-z0-9_])[uU]'",
+          "end": "'|$",
+          "applyEndPatternLast": true,
+          "patterns": [
+            {
+              "match": "''",
+              "name": "constant.character.escape.clarion"
+            },
+            {
+              "match": "<[0-9A-Fa-f]+[hH]?>",
+              "name": "constant.character.escape.unicode.clarion"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.clarion",
+          "begin": "\\'",
+          "end": "'|$",
+          "applyEndPatternLast": true,
+          "patterns": [
+            {
+              "match": "''",
+              "name": "constant.character.escape.clarion"
+            }
+          ]
         }
       ]
     },
