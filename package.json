@@ -70,8 +70,7 @@
         ],
         "extensions": [
           ".txa"
-        ],
-        "configuration": "./syntaxes/clarion-txa.configuration.json"
+        ]
       }
     ],
     "grammars": [
@@ -88,12 +87,7 @@
       {
         "language": "clarion-txa",
         "scopeName": "source.clarion.txa",
-        "path": "./syntaxes/clarion-txa.tmLanguage.json",
-        "embeddedLanguages": {
-          "meta.section.source.txa": "clarion",
-          "meta.section.data.txa": "clarion",
-          "meta.section.structure.txa": "clarion"
-        }
+        "path": "./syntaxes/clarion-txa.tmLanguage.json"
       }
     ],
     "semanticTokenTypes": [

@@ -82,11 +82,14 @@ suite('Clarion TXA grammar', () => {
         const lang = pkg.contributes.languages.find((l: { id: string }) => l.id === 'clarion-txa');
         assert.ok(lang, 'no clarion-txa language');
         assert.deepStrictEqual(lang.extensions, ['.txa']);
-        assert.ok(fs.existsSync(path.join(root, lang.configuration)), 'its configuration file is missing');
         const g = pkg.contributes.grammars.find((x: { language: string }) => x.language === 'clarion-txa');
         assert.strictEqual(g.scopeName, grammar.scopeName);
         assert.strictEqual(path.normalize(g.path), path.normalize('./syntaxes/clarion-txa.tmLanguage.json'));
         assert.deepStrictEqual(grammar.fileTypes, ['txa']);
+        // highlighting only: .txa is no Clarion language document, so the language server is not started for it
+        assert.ok(!pkg.activationEvents.some((e: string) => /txa/i.test(e)), 'an activation event names .txa');
+        const clarion = pkg.contributes.languages.find((l: { id: string }) => l.id === 'clarion');
+        assert.ok(!clarion.extensions.includes('.txa'));
     });
 
     test('every regex compiles', () => {
