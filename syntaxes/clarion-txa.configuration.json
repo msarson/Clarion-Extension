@@ -1,0 +1,41 @@
+{
+  "comments": {
+    "lineComment": "!"
+  },
+  "brackets": [
+    [
+      "(",
+      ")"
+    ]
+  ],
+  "autoClosingPairs": [
+    [
+      "(",
+      ")"
+    ],
+    {
+      "open": "'",
+      "close": "'",
+      "notIn": [
+        "string",
+        "comment"
+      ]
+    }
+  ],
+  "surroundingPairs": [
+    [
+      "(",
+      ")"
+    ],
+    [
+      "'",
+      "'"
+    ]
+  ],
+  "folding": {
+    "markers": {
+      "start": "^\\s*\\[(?:PROGRAM|MODULE|EMBED|INSTANCES|DEFINITION)\\]\\s*$",
+      "end": "^\\s*\\[END\\]\\s*$"
+    }
+  }
+}
