@@ -199,6 +199,10 @@ export class ChainedPropertyResolver {
                 return null;
             }
             currentClassName = typeInfo.typeName;
+            // A root that is not a class receiver (a GROUP / QUEUE is its own label, which each
+            // procedure of a module may declare): the first lookup reads the declaration this line
+            // sees, as a single-level access does.
+            rootLine = position.line;
         }
 
         if (!currentClassName) {

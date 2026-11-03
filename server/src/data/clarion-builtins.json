@@ -2033,10 +2033,23 @@
       "name": "DATE",
       "signatures": [
         {
-          "params": [],
+          "params": [
+            {
+              "name": "month",
+              "optional": false
+            },
+            {
+              "name": "day",
+              "optional": false
+            },
+            {
+              "name": "year",
+              "optional": false
+            }
+          ],
           "returnType": "LONG",
-          "description": "Four-byte date data type. Stores year (1-9999), month (1-12), and day (1-31) in packed format. Used for date calculations and comparisons. See also TODAY() for current date.",
-          "syntax": "DATE"
+          "description": "Returns the standard date for a month, day and year. Out-of-range month and day values roll over (month 13 is January of the next year, day 32 of January is 1 February). A two-digit year is resolved with Intellidate logic, within the next 20 or previous 80 years.",
+          "syntax": "DATE(month, day, year)"
         }
       ]
     },

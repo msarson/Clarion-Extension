@@ -90,7 +90,7 @@ const HEADERS = {
 };
 // #746: a FILE header and the declarations inside a FILE, each as it is declared on its own. A
 // FILE needs DRIVER, so the header case has it and DRIVER itself is settled by FILE_RULES.
-const FILE_CANDIDATES = ('DRIVER NAME PRE CREATE RECLAIM OWNER ENCRYPT BINDABLE TYPE THREAD EXTERNAL DLL OEM ' +
+const FILE_CANDIDATES = ('DRIVER NAME PRE CREATE RECLAIM OWNER ENCRYPT BINDABLE TYPE THREAD EXTERNAL DLL EXPORT OEM ' +
     'DUP NOCASE OPT PRIMARY BINARY STATIC PRIVATE PROTECTED AUTO DIM OVER').split(' ');
 const FILE_SAMPLES = {
     DRIVER: ["('TOPSPEED')"], NAME: ["('x.tps')"], PRE: ['(P$i)'], OWNER: ["('pw')"], EXTERNAL: ["('x')"], DLL: ['(1)'],

@@ -210,30 +210,6 @@
       "syntax": "expr1 XOR expr2",
       "description": "Boolean logical exclusive-OR operator. Returns TRUE when exactly one operand is TRUE.",
       "category": "Operator"
-    },
-    {
-      "name": "BAND",
-      "syntax": "expr1 BAND expr2",
-      "description": "Bitwise AND operator. Returns an integer where each bit is set only when both operand bits are set.",
-      "category": "Operator"
-    },
-    {
-      "name": "BOR",
-      "syntax": "expr1 BOR expr2",
-      "description": "Bitwise OR operator. Returns an integer where each bit is set when either operand bit is set.",
-      "category": "Operator"
-    },
-    {
-      "name": "BXOR",
-      "syntax": "expr1 BXOR expr2",
-      "description": "Bitwise exclusive-OR operator. Returns an integer where each bit is set when exactly one operand bit is set.",
-      "category": "Operator"
-    },
-    {
-      "name": "BSHIFT",
-      "syntax": "BSHIFT(value, count)",
-      "description": "Bitwise shift operator. Positive count shifts left; negative count shifts right. Result is an integer of the same width as value.",
-      "category": "Operator"
     }
   ]
 }

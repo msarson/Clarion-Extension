@@ -73,6 +73,30 @@ interface AlternateSignatureShape {
 }
 
 /**
+ * #784 — whether a signature label brackets the parameter as optional: every mention of its name
+ * sits inside `[...]`. A name repeated outside the brackets is required where it first appears —
+ * `INLIST( searchstring, liststring, liststring [, liststring... ] )`.
+ */
+export function isBracketedInLabel(label: string, paramName: string): boolean {
+    const name = paramName.toLowerCase();
+    const text = label.toLowerCase();
+    let found = false;
+    let depth = 0;
+    for (let i = 0; i < text.length; i++) {
+        const ch = text[i];
+        if (ch === '[') { depth++; continue; }
+        if (ch === ']') { depth = Math.max(0, depth - 1); continue; }
+        const atWord = text.startsWith(name, i)
+            && !/\w/.test(text[i - 1] ?? '') && !/\w/.test(text[i + name.length] ?? '');
+        if (!atWord) continue;
+        if (depth === 0) return false;
+        found = true;
+        i += name.length - 1;
+    }
+    return found;
+}
+
+/**
  * Coerces a function entry from either authored shape into `BuiltinFunction`.
  * Entries already in the documented `params`/`description` shape pass through
  * untouched.
@@ -89,7 +113,12 @@ function normalizeBuiltin(func: BuiltinFunction): BuiltinFunction {
         const alt = sig as unknown as AlternateSignatureShape;
         return {
             ...sig,
-            params: sig.params ?? (alt.parameters ?? []).map(p => ({ name: p.label })),
+            // #784 — this shape marks an optional parameter in its documentation ("Optional. …")
+            // or by bracketing it in the label (`HALT( [ errorlevel ] [, message ] )`).
+            params: sig.params ?? (alt.parameters ?? []).map(p => ({
+                name: p.label,
+                optional: /^\s*optional\b/i.test(p.documentation ?? '') || isBracketedInLabel(alt.label ?? '', p.label)
+            })),
             returnType: sig.returnType ?? fallbackReturnType ?? '',
             description: sig.description ?? alt.documentation ?? fallbackDescription ?? '',
             syntax: sig.syntax ?? alt.label
@@ -155,6 +184,26 @@ export class BuiltinFunctionService {
      */
     public isBuiltin(functionName: string): boolean {
         return this.builtins.has(functionName.toUpperCase());
+    }
+
+    /**
+     * #784 — whether the built-in can be called with no arguments, and so be written without
+     * parentheses as Clarion allows (`YIELD`, `TODAY`, `HALT`): some signature has no parameters,
+     * or only optional ones. False for an unknown name.
+     */
+    public canCallWithoutArguments(functionName: string): boolean {
+        const builtin = this.builtins.get(functionName.toUpperCase());
+        return !!builtin?.signatures.some(sig =>
+            (sig.params ?? []).every(p => typeof p !== 'string' && p.optional === true));
+    }
+
+    /**
+     * #784 — whether any signature of the built-in returns a value (TODAY), as opposed to none
+     * (YIELD; the data also writes that as `VOID` or `none`, as COMMIT and SETPENCOLOR do).
+     */
+    public returnsValue(functionName: string): boolean {
+        const builtin = this.builtins.get(functionName.toUpperCase());
+        return !!builtin?.signatures.some(sig => !!sig.returnType && !/^(void|none)$/i.test(sig.returnType.trim()));
     }
 
     /**

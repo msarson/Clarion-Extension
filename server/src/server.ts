@@ -68,6 +68,7 @@ import { ResponseError } from 'vscode-languageserver/node';
 import { SolutionManager } from './solution/solutionManager';
 import { RedirectionFileParserServer } from './solution/redirectionFileParserServer';
 import { resolveFileInNoSolutionMode } from './solution/findFileNoSolution';
+import { resolveSourceFiles, ResolveSourceFilesParams } from './solution/resolveSourceFiles';
 import { DefinitionProvider } from './providers/DefinitionProvider';
 import { HoverProvider } from './providers/HoverProvider';
 import { ClassConstantsCodeActionProvider } from './providers/ClassConstantsCodeActionProvider';
@@ -2839,6 +2840,17 @@ connection.onNotification('clarion/setLogLevel', (params: { level?: string }) =>
 // external tool can parse it and feature-gate against the running server.
 connection.onRequest('clarion/getServerVersion', (): string => {
     return JSON.stringify(getServerVersionInfo());
+});
+
+// #763 — New Solution: where redirection finds the library sources a folder names, for the
+// installation the user picked (no solution is loaded yet).
+connection.onRequest('clarion/resolveSourceFiles', (params: ResolveSourceFilesParams): Record<string, string> => {
+    try {
+        return resolveSourceFiles(params);
+    } catch (error) {
+        logger.error(`clarion/resolveSourceFiles failed: ${error instanceof Error ? error.message : String(error)}`);
+        return {};
+    }
 });
 
 connection.onRequest('clarion/getSolutionTree', async (): Promise<ClarionSolutionInfo> => {

@@ -377,28 +377,18 @@ export class ImplementationProvider {
     /**
      * #313 — find the implementation of a procedure whose MAP declaration lives in
      * an INC included inside a MAP: walk INCLUDE targets of the current file AND
-     * its MEMBER parent, find the declaration inside a MODULE block, then run the
-     * proven declaration-side resolution from the INC's own document/position.
+     * its MEMBER parent, find the declaration, then run the proven declaration-side
+     * resolution — from the INC's MODULE block, or for a bare prototype (#649) from
+     * the MAP of the module that includes it.
      */
     private async findImplementationViaMapIncludes(
         procName: string,
         document: TextDocument,
         tokens: Token[]
     ): Promise<Location | null> {
-        const hit = await this.mapResolver.findDeclarationInMapIncludes(procName, document, tokens);
+        const hit = await this.mapResolver.findDeclarationInMapIncludes(procName, document, tokens, true);
         if (!hit) return null;
-        const declLineText = hit.doc.getText({
-            start: { line: hit.declLine, character: 0 },
-            end: { line: hit.declLine, character: Number.MAX_SAFE_INTEGER }
-        });
-        return this.mapResolver.findProcedureImplementation(
-            procName,
-            hit.tokens,
-            hit.doc,
-            { line: hit.declLine, character: 0 },
-            declLineText,
-            this.tokenCache.getStructure(hit.doc)
-        );
+        return this.mapResolver.findImplementationForMapInclude(procName, hit);
     }
 
     /**

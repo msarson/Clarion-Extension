@@ -17,88 +17,6 @@ logger.setLevel("error");
 export class ClarionExtensionCommands {
 
 
-  /**
-   * Asynchronously prompts the user to locate and select a ClarionProperties.xml file and parses
-   * available Clarion versions from the file. Then prompts the user to choose a Clarion version
-   * and updates global and workspace settings with the chosen version. Displays relevant error
-   * or informational messages to the user as needed.
-   *
-   * @returns A Promise that resolves once the ClarionProperties.xml selection and version choice have been
-   *          recorded in global and workspace settings. Returns early if any part of the process fails.
-   *
-   * @throws Will throw an error if any step in selecting or updating the ClarionProperties.xml or version fails.
-   */
-  static async configureClarionPropertiesFile() {
-
-    try {
-      const appDataPath = process.env.APPDATA;
-      if (!appDataPath) {
-        window.showErrorMessage("Unable to access AppData path.");
-        return;
-      }
-
-      const defaultDirectory = Uri.file(path.join(appDataPath, "SoftVelocity", "Clarion"));
-
-      const selectedFileUri = await window.showOpenDialog({
-        defaultUri: defaultDirectory,
-        canSelectFiles: true,
-        canSelectFolders: false,
-        openLabel: "Select ClarionProperties.xml",
-        filters: { XML: ["xml"] },
-      });
-
-      if (!selectedFileUri || selectedFileUri.length === 0) {
-        window.showWarningMessage("No ClarionProperties.xml file selected.");
-        return;
-      }
-
-      const selectedFilePath = selectedFileUri[0].fsPath;
-
-
-      // ✅ Save the properties file path
-      await setGlobalClarionSelection(globalSolutionFile, selectedFilePath, globalClarionVersion, globalSettings.configuration);
-
-      // ✅ Parse available versions from the selected file (single XML-parse
-      // pathway — ClarionInstallationDetector; #136)
-      const installation = await ClarionInstallationDetector.parseInstallationFromPropertiesPath(selectedFilePath);
-      const versionProperties = installation?.compilerVersions ?? [];
-
-      if (versionProperties.length === 0) {
-        window.showErrorMessage("No Clarion versions found in the selected ClarionProperties.xml file.");
-        return;
-      }
-
-      // ✅ Prompt user to select a version
-      const versionSelection = await window.showQuickPick(versionProperties.map((v) => v.name), {
-        placeHolder: "Select a Clarion version",
-      });
-
-      if (!versionSelection) {
-        window.showWarningMessage("No Clarion version selected. Keeping previous version.");
-        return;
-      }
-
-      // ✅ Find the selected version's properties
-      const selectedVersionProps = versionProperties.find((v) => v.name === versionSelection);
-      if (!selectedVersionProps) {
-        window.showErrorMessage(`Clarion version '${versionSelection}' not found in ClarionProperties.xml.`);
-        return;
-      }
-
-      // ✅ Save the selected version
-      await setGlobalClarionSelection(globalSolutionFile, selectedFilePath, versionSelection, globalSettings.configuration);
-
-      // ✅ Update global runtime settings (NOT stored in workspace.json)
-      ClarionExtensionCommands.updateGlobalSettings(selectedVersionProps);
-
-      window.showInformationMessage(`Clarion version '${versionSelection}' selected and settings updated.`);
-
-    } catch (error) {
-
-      window.showErrorMessage(`Error configuring Clarion properties: ${error instanceof Error ? error.message : String(error)}`);
-    }
-  }
-
 
   /**
    * #132 / dd87633f B1 — public, composed entry point that parses a
@@ -121,50 +39,6 @@ export class ClarionExtensionCommands {
     } catch (error) {
       return false;
     }
-  }
-
-  /**
-   * #479 — offer to change the active Clarion configuration while adopting a
-   * solution.
-   *
-   * A ClarionProperties.xml need not live under %APPDATA%: clarion.exe and
-   * ClarionCL.exe both take /ConfigDir=, and the build passes a matching ConfigDir
-   * property since #471, so a checked-out tree can carry its own IDE settings. The
-   * open-solution flow previously reused whatever was already configured without
-   * asking, which is the one moment the choice is obviously relevant.
-   *
-   * Deliberately cheap to dismiss: the current configuration is the first item, so
-   * Enter keeps it, and Esc does too. Only the second item costs anything.
-   */
-  public static async offerDifferentConfiguration(): Promise<void> {
-    const globals = await import('./globals');
-    const { globalClarionPropertiesFile, globalClarionVersion } = globals;
-    if (!globalClarionPropertiesFile) return;
-
-    const KEEP = 'keep';
-    const CHANGE = 'change';
-    const configDir = path.dirname(globalClarionPropertiesFile);
-    const picked = await window.showQuickPick(
-      [
-        {
-          label: globalClarionVersion || '(no compile target selected)',
-          description: '$(check) (current)',
-          detail: configDir,
-          action: KEEP,
-        },
-        {
-          label: '$(folder-opened) Select Different Configuration…',
-          description: 'Pick another Clarion installation, or browse for a ClarionProperties.xml',
-          action: CHANGE,
-        },
-      ],
-      { placeHolder: 'Clarion configuration for this solution' }
-    );
-
-    // Esc, or keeping the current one, changes nothing.
-    if (!picked || picked.action === KEEP) return;
-
-    await ClarionExtensionCommands.setActiveVersionCommand();
   }
 
   /**
@@ -370,10 +244,10 @@ export class ClarionExtensionCommands {
   }
 
   /**
-   * #573 — apply a compile target picked through Set Version (either picker). What else the pick
-   * changes is decided by `versionPickEffect`.
+   * #573 — apply a compile target picked through Set Version (either picker) or on the Solution page
+   * (#792). What else the pick changes is decided by `versionPickEffect`.
    */
-  private static async applyPickedVersion(targetName: string, propertiesFile: string, ideVersion: string): Promise<void> {
+  static async applyPickedVersion(targetName: string, propertiesFile: string, ideVersion: string): Promise<void> {
     const globals = await import('./globals');
     const { versionPickEffect } = await import('./utils/VersionPickPolicy');
     const pick = {
@@ -544,63 +418,6 @@ export class ClarionExtensionCommands {
     }
   }
 
-
-  /**
-   * Asynchronously selects a Clarion version from the workspace configuration.
-   * 
-   * Retrieves a list of available Clarion versions from the extension settings.
-   * If no versions are configured, displays an error message. Otherwise, presents
-   * a quick pick menu allowing the user to choose a version, then updates the
-   * workspace settings with the chosen version and displays a confirmation message.
-   *
-   * @returns A promise that resolves when the chosen version is stored or if none is chosen.
-   */
-  static async selectClarionVersion() {
-    const config = workspace.getConfiguration();
-    let versions = config.get<string[]>('clarion.versions', []);
-
-    const choices = versions.length > 0
-      ? [...versions, "🔹 Add new version..."]
-      : ["🔹 Add new version..."];
-
-    const selectedVersion = await window.showQuickPick(choices, { placeHolder: "Select a Clarion version" });
-
-    // ✅ If user cancels, exit
-    if (!selectedVersion) return;
-
-    // ✅ Handle manual version entry
-    if (selectedVersion === "🔹 Add new version...") {
-      const manualVersion = await window.showInputBox({
-        prompt: "Enter a Clarion version (e.g., Clarion 11.1.13855):",
-        placeHolder: "Clarion 11.1.XXXXX"
-      });
-
-      if (!manualVersion) {
-        window.showWarningMessage("Clarion version selection was canceled.");
-        return;
-      }
-
-      // ✅ Ensure the new version is added to the list
-      versions.push(manualVersion);
-      const target = getClarionConfigTarget();
-      if (target && workspace.workspaceFolders) {
-        const folderConfig = workspace.getConfiguration('clarion', workspace.workspaceFolders[0].uri);
-        await folderConfig.update('versions', versions, target);
-        await folderConfig.update('version', manualVersion, target);
-      }
-
-      window.showInformationMessage(`Added and selected Clarion version: ${manualVersion}`);
-      return; // ✅ Ensure we EXIT after setting the version
-    }
-
-    // ✅ If user selects an existing version, just set it and exit
-    const target = getClarionConfigTarget();
-    if (target && workspace.workspaceFolders) {
-      const folderConfig = workspace.getConfiguration('clarion', workspace.workspaceFolders[0].uri);
-      await folderConfig.update('version', selectedVersion, target);
-    }
-    window.showInformationMessage(`Selected Clarion version: ${selectedVersion}`);
-  }
 
 
 

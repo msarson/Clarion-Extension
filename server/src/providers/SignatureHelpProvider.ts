@@ -1,8 +1,9 @@
+import { compiledIncludeTest } from '../utils/ConditionalIncludes'; // #807
 import { SignatureHelp, SignatureInformation, ParameterInformation, Position } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import LoggerManager from '../logger';
 import { Token, TokenType } from '../ClarionTokenizer';
-import { ProcedureParameter } from '../tokenizer/ProcedureParameterParser';
+import { ProcedureParameter, ProcedureParameterParser } from '../tokenizer/ProcedureParameterParser';
 import { TokenCache } from '../TokenCache';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
@@ -14,6 +15,7 @@ import { SolutionManager } from '../solution/solutionManager';
 import { resolveViaProjectRedirection } from '../utils/RedirectionResolution';
 import { DocumentStructure } from '../DocumentStructure';
 import { MemberLocatorService } from '../services/MemberLocatorService';
+import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
 import { BuiltinFunctionService } from '../utils/BuiltinFunctionService';
 import { AttributeService } from '../utils/AttributeService';
 import { ControlService, ControlDefinition } from '../utils/ControlService';
@@ -33,6 +35,7 @@ export class SignatureHelpProvider {
     private argClassifier = new CallSiteArgumentClassifier();
     private argTypeResolver = new ArgumentTypeResolver();
     private memberLocator = new MemberLocatorService();
+    private chains = new ChainedPropertyResolver();
     private builtinService = BuiltinFunctionService.getInstance();
     private attributeService = AttributeService.getInstance();
     private controlService = ControlService.getInstance();
@@ -200,9 +203,9 @@ export class SignatureHelpProvider {
         const beforeParen = line.substring(0, lastOpenParen).trim();
         
         // Match pattern: [prefix.]methodName — [\w:] so a colon-containing prefix
-        // (SELF is fine, but a chained "SELF.Order.") or method name (My:My:Method)
-        // doesn't get truncated at the colon.
-        const match = beforeParen.match(/([\w:]+\.)?([\w:]+)\s*$/);
+        // or method name (My:My:Method) doesn't get truncated at the colon. The prefix is the
+        // whole receiver chain (`SELF.Order` in `SELF.Order.Add(`), not just its last segment.
+        const match = beforeParen.match(/((?:[\w:]+\.)+)?([\w:]+)\s*$/);
         if (!match) {
             return null;
         }
@@ -298,10 +301,23 @@ export class SignatureHelpProvider {
         // Determine the class name
         let className: string | null = null;
 
+        // A chained receiver (`Request.Payload.KeepOnly(`, `SELF.Order.Add(`) is walked as hover
+        // and Go to Definition walk it, to the class of its last segment.
+        const isChain = prefix.includes('.');
+        const chainOwner = isChain
+            ? await this.chains.resolveFinalOwner(prefix, document, { line: currentLine, character: 0 })
+            : null;
+
         // #654: the receiver as hover and Go to Definition read it (#651) - SELF the method's class,
         // PARENT its parent, a local `ThisWindow CLASS(Base)` itself rather than Base (#642).
-        const receiver = await this.memberLocator.resolveReceiverAt(prefix, document, currentLine);
-        if (receiver) {
+        const receiver = isChain ? null : await this.memberLocator.resolveReceiverAt(prefix, document, currentLine);
+        if (isChain) {
+            if (chainOwner?.kind !== 'class') {
+                if (!chainOwner) logger.info(`Could not resolve the receiver chain ${prefix}`);
+                return [];
+            }
+            className = chainOwner.name;
+        } else if (receiver) {
             className = receiver.className;
         } else if (prefix.toLowerCase() === 'self') {
             // #622: shared walk. Note this copy did NOT bail when a routine had no parent scope —
@@ -566,12 +582,13 @@ export class SignatureHelpProvider {
         const declarations: { signature: string; paramCount: number }[] = [];
         const content = document.getText();
         const lines = content.split('\n');
-        
+        const compiled = compiledIncludeTest(decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\'), content); // #807
+
         // Find INCLUDE statements
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             const includeMatch = line.match(/INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/i);
-            if (!includeMatch) continue;
+            if (!includeMatch || !compiled.atLine(i)) continue;
             
             const includeFileName = includeMatch[1];
             logger.info(`Found INCLUDE: ${includeFileName}`);
@@ -770,6 +787,14 @@ export class SignatureHelpProvider {
     ): SignatureInformation {
         const parameters: ParameterInformation[] = [];
 
+        // A raw signature line (class members, cross-file declarations) goes through the same
+        // parser as tokenized ones, so `<...>` and `= default` survive into the popup: the regex
+        // below dropped both, and an omittable parameter was shown as a required one.
+        if (!structured) {
+            const parsed = ProcedureParameterParser.parse(signature);
+            if (parsed.length > 0) structured = parsed;
+        }
+
         if (structured) {
             for (const p of structured) {
                 parameters.push({
@@ -825,7 +850,8 @@ export class SignatureHelpProvider {
     private formatStructuredParameterLabel(p: ProcedureParameter): string {
         const typePart = p.typeArg !== undefined ? `${p.type}(${p.typeArg})` : p.type;
         const byRef = p.byRef ? '*' : '';
-        const core = p.name ? `${byRef}${typePart} ${p.name}` : `${byRef}${typePart}`;
+        const decl = p.name ? `${byRef}${typePart} ${p.name}` : `${byRef}${typePart}`;
+        const core = p.default !== undefined ? `${decl}=${p.default}` : decl;
         return p.optional ? `<${core}>` : core;
     }
 

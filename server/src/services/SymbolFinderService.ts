@@ -13,6 +13,7 @@
  *     → DefinitionProvider (format as Location)
  */
 
+import { compiledIncludeTest } from '../utils/ConditionalIncludes'; // #807
 import { tokensOnLine, findInLineRange } from '../utils/TokenLineIndex';
 import { topLevelLabels } from '../utils/TokenIndexes';
 import { globalScopeIndex } from '../utils/GlobalScopeIndex';
@@ -23,6 +24,7 @@ import { TokenCache } from '../TokenCache';
 import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { TokenHelper } from '../utils/TokenHelper';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
+import { ProcedureSignatureUtils } from '../utils/ProcedureSignatureUtils'; // #825
 import { ScopeResolver } from '../scope/ScopeResolver';
 import { SolutionManager } from '../solution/solutionManager';
 import { FileRelationshipGraph } from '../FileRelationshipGraph';
@@ -304,85 +306,66 @@ export class SymbolFinderService {
         scopeToken: Token
     ): SymbolInfo | null {
         logger.info(`Finding parameter: "${word}" in scope: ${scopeToken.value}`);
-        
-        // #711 — the one line, not a split of the whole document on every hover.
-        const procedureLine = document.getText({
-            start: { line: scopeToken.line, character: 0 },
-            end: { line: scopeToken.line + 1, character: 0 },
+
+        // #757 — a ROUTINE has no parameters of its own; it sees its procedure's, so the
+        // procedure is the scope (and the one the card names, #755).
+        if (scopeToken.subType === TokenType.Routine) {
+            const procedure = this.procedureOfRoutine(document, scopeToken);
+            if (!procedure) return null;
+            scopeToken = procedure;
+        }
+
+        // #711 — line by line, not a split of the whole document on every hover.
+        // #825 — the header's `|` continuation lines declare parameters too.
+        const lineCount = document.lineCount;
+        const getLine = (n: number): string | undefined => n >= lineCount ? undefined : document.getText({
+            start: { line: n, character: 0 },
+            end: { line: n + 1, character: 0 },
         }).replace(/\n$/, '');
-
-        if (!procedureLine) {
-            return null;
-        }
-        
-        // Match PROCEDURE(...)/FUNCTION(...) signature (#247)
-        const match = procedureLine.match(/(?:PROCEDURE|FUNCTION)\s*\((.*?)\)/i);
-        if (!match || !match[1]) {
-            return null;
-        }
-        
-        const paramString = match[1];
-        const params = paramString.split(',');
-        // Column tracking so indexOf() below resolves each parameter's OWN position,
-        // not the first line-wide substring match — without this, searching for a
-        // parameter whose name is a prefix of an earlier-declared parameter's name
-        // (e.g. "pPar" vs an earlier "pParName") incorrectly resolves to that earlier
-        // parameter's position instead of its own.
-        let currentColumn = procedureLine.indexOf('(') + 1;
-
-        for (const param of params) {
-            const trimmedParam = param.trim();
-            // Strip optional-parameter angle brackets: <Key K> → Key K
-            const stripped = trimmedParam.replace(/^<(.*)>$/, '$1').trim();
-            // Match: [*&]? TYPE NAME [= default]
-            // NAME may be a prefixed identifier: PREFIX:Name (e.g. LOC:test)
-            const paramMatch = stripped.match(/([*&]?\s*\w+)\s+([A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*)?)(?:\s*=.*)?$/i);
-            
-            if (paramMatch) {
-                const type = paramMatch[1].trim();
-                const paramName = paramMatch[2];
-                
-                // Match exact name (LOC:test === LOC:test) or bare suffix (test matches LOC:test)
-                const paramLower = paramName.toLowerCase();
-                const wordLower = word.toLowerCase();
-                const isMatch = paramLower === wordLower ||
-                    paramLower.endsWith(':' + wordLower);
-                
-                if (isMatch) {
-                    logger.info(`✅ Found parameter: ${paramName} of type ${type}`);
-                    
-                    // Create a synthetic token for the parameter
-                    const paramToken: Token = {
-                        type: TokenType.Variable,
-                        value: paramName,
-                        line: scopeToken.line,
-                        start: procedureLine.indexOf(paramName, currentColumn),
-                        maxLabelLength: 0
-                    };
-                    
-                    return {
-                        token: paramToken,
-                        type: type,
-                        scope: {
-                            token: scopeToken,
-                            type: 'parameter'
-                        },
-                        location: {
-                            uri: document.uri,
-                            line: scopeToken.line,
-                            character: paramToken.start
-                        },
-                        declaration: stripped,
-                        originalWord: word,
-                        searchWord: word
-                    };
-                }
-            }
-            currentColumn += param.length + 1; // +1 for comma
+        const found = ProcedureSignatureUtils.findHeaderParameter(getLine, scopeToken.line, word);
+        if (found) {
+            logger.info(`✅ Found parameter: ${found.name} of type ${found.type}`);
+            // A synthetic token for the parameter, at its name (#825: maybe on a continuation line)
+            const paramToken: Token = {
+                type: TokenType.Variable,
+                value: found.name,
+                line: found.line,
+                start: found.character,
+                maxLabelLength: 0
+            };
+            return {
+                token: paramToken,
+                type: found.type,
+                scope: {
+                    token: scopeToken,
+                    type: 'parameter'
+                },
+                location: {
+                    uri: document.uri,
+                    line: found.line,
+                    character: found.character
+                },
+                declaration: found.declaration,
+                originalWord: word,
+                searchWord: word
+            };
         }
 
         logger.info(`❌ Parameter "${word}" not found`);
         return null;
+    }
+
+    /** #757 — the procedure or method implementation a ROUTINE belongs to: the last one before it. */
+    private procedureOfRoutine(document: TextDocument, routine: Token): Token | undefined {
+        let procedure: Token | undefined;
+        for (const t of this.tokenCache.getTokens(document)) {
+            if (t.line >= routine.line) break;
+            if (TokenHelper.isProcedureOrFunction(t)
+                && (t.subType === TokenType.GlobalProcedure || t.subType === TokenType.MethodImplementation)) {
+                procedure = t;
+            }
+        }
+        return procedure;
     }
     
     /**
@@ -1771,6 +1754,7 @@ export class SymbolFinderService {
 
         for (const t of hostTokens) {
             if (t.type !== TokenType.Directive || t.value.toUpperCase() !== 'INCLUDE') continue;
+            if (t.inactiveByCondition) continue; // #807: in a COMPILE/OMIT block that does not compile
             if (t.line >= boundary) continue;
             await timeSlice();
 
@@ -2469,9 +2453,11 @@ export class SymbolFinderService {
         const sm = SolutionManager.getInstance();
         const fromDir = path.dirname(fromPath);
         const includeRe = /^\s*INCLUDE\s*\(\s*'([^']+)'/gim;
+        const compiled = compiledIncludeTest(fromPath, source); // #807
         let m: RegExpExecArray | null;
         let scanned = 0; // #187 — yield between INCLUDE files so the walk doesn't block hover/F12
         while ((m = includeRe.exec(source)) !== null) {
+            if (!compiled.atOffset(m.index)) continue;
             await cooperativeCheckpoint(scanned++);
             const includeFile = m[1];
             // #328: owner-project-first redirection

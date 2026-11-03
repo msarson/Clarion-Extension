@@ -12,6 +12,10 @@ import LoggerManager from '../logger';
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
+import { inactiveIncludeLines, recordedDependencies } from './ConditionalIncludes';
+
+/** iv-includes.json format: 2 since #807 (an INCLUDE in a block that does not compile is not listed); 3 since #812 (project defines decide blocks). */
+const IV_LIST_VERSION = 3;
 
 const logger = LoggerManager.getLogger('IncludeVerifier');
 logger.setLevel('error');
@@ -551,7 +555,9 @@ export class IncludeVerifier {
             IncludeVerifier.fileParseCount++;
             const contents = await fs.promises.readFile(filePath, 'utf-8');
             const lines = contents.split('\n');
+            const inactive = inactiveIncludeLines(filePath, contents); // #807
             for (let i = 0; i < lines.length; i++) {
+                if (inactive.has(i)) continue;
                 const commentIdx = lines[i].indexOf('!');
                 const effectiveLine = commentIdx >= 0 ? lines[i].substring(0, commentIdx) : lines[i];
                 const m = effectiveLine.match(/INCLUDE\s*\(\s*['"]([^'"]+)['"]\s*\)(\s*,\s*ONCE)?/i);
@@ -564,7 +570,9 @@ export class IncludeVerifier {
         }
 
         this.includeCache.set(cacheKey, { includes, timestamp: now });
-        if (mtime !== null) {
+        // #807: a list whose COMPILE/OMIT decisions were read from another file (a version file) is
+        // not kept on disk: its own time alone would not say when it is stale.
+        if (mtime !== null && recordedDependencies(filePath).size === 0) {
             const diskLists = await this.loadDiskIncludeLists();
             diskLists.set(pathKey, { mtime, includes });
             this.scheduleDiskListsSave();
@@ -579,7 +587,7 @@ export class IncludeVerifier {
         try {
             const raw = await fs.promises.readFile(IncludeVerifier.diskListsPath(), 'utf8');
             const parsed = JSON.parse(raw) as { version: number; entries: Record<string, { mtime: number; includes: IncludeStatement[] }> };
-            if (parsed?.version === 1 && parsed.entries) {
+            if (parsed?.version === IV_LIST_VERSION && parsed.entries) {
                 for (const [k, v] of Object.entries(parsed.entries)) {
                     this.diskIncludeLists.set(k, v);
                 }
@@ -599,7 +607,7 @@ export class IncludeVerifier {
             this.diskListsDirty = false;
             const entries: Record<string, { mtime: number; includes: IncludeStatement[] }> = {};
             for (const [k, v] of this.diskIncludeLists) entries[k] = v;
-            const payload = JSON.stringify({ version: 1, entries });
+            const payload = JSON.stringify({ version: IV_LIST_VERSION, entries });
             const target = IncludeVerifier.diskListsPath();
             fs.promises.mkdir(path.dirname(target), { recursive: true })
                 .then(() => fs.promises.writeFile(target, payload, 'utf8'))
@@ -628,7 +636,7 @@ export class IncludeVerifier {
         for (const [k, v] of this.diskIncludeLists) entries[k] = v;
         const target = IncludeVerifier.diskListsPath();
         await fs.promises.mkdir(path.dirname(target), { recursive: true });
-        await fs.promises.writeFile(target, JSON.stringify({ version: 1, entries }), 'utf8');
+        await fs.promises.writeFile(target, JSON.stringify({ version: IV_LIST_VERSION, entries }), 'utf8');
     }
 
     /**
@@ -712,10 +720,13 @@ export class IncludeVerifier {
 
         // Scan for INCLUDE statements in module scope
         const lines = document.getText().split('\n');
-        
+        // #807: an INCLUDE in a COMPILE/OMIT block decided not to compile is not one the module has
+        const inactive = inactiveIncludeLines(decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\'), document.getText());
+
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
-            
+            if (inactive.has(i)) continue;
+
             // Stop at first PROCEDURE
             if (i >= firstProcedureLine) {
                 logger.info(`Stopped at first PROCEDURE at line ${i}`);

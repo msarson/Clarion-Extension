@@ -7,6 +7,7 @@ import { serverSettings } from '../serverSettings';
 import { ClarionSourcerFileServer } from './clarionSourceFileServer';
 import { DirectoryFileIndex } from './DirectoryFileIndex';
 import { TextDocument } from 'vscode-languageserver-textdocument';
+import { parseLegacyProject } from '../../../common/LegacyProject';
 
 
 const logger = LoggerManager.getLogger("ClarionProjectServer");
@@ -17,12 +18,56 @@ logger.setLevel("error");// Production: Only log errors
 const perfLogger = LoggerManager.getLogger("SolutionLoadPerf", "perf");
 const redOutcomeLogged = new Set<string>();
 
+/**
+ * #802 — an item's path. The .cwproj is parsed with tag names folded to lower case but attribute
+ * names as written, so it is `Include`; the FileDriver, Library and None branches read only
+ * `include`, and those lists were always empty. An element with text and no attributes is a string.
+ */
+function includeOf(item: unknown): string | null {
+    if (typeof item === 'string') return item;
+    if (!item || typeof item !== 'object') return null;
+    const it = item as { Include?: unknown; include?: unknown; $?: { Include?: unknown; include?: unknown } };
+    const value = it.Include ?? it.include ?? it.$?.Include ?? it.$?.include;
+    return typeof value === 'string' && value.length > 0 ? value : null;
+}
+
+/**
+ * #802 — a project reference with no <Name> is named from its path, as the .sln names the project:
+ * either slash, `.cwproj` in any case, and MSBuild's %XX escapes decoded (as Compile items are).
+ */
+function referenceNameFromPath(include: string): string {
+    let decoded = include;
+    try { decoded = decodeURIComponent(include); } catch { /* not an escape: keep it as written */ }
+    return path.win32.basename(decoded).replace(/\.cwproj$/i, '');
+}
+
+/** #758 — a legacy project file a .cwproj includes, and what it says. */
+export interface LegacyProjectRead {
+    /** As the Include item names it. */
+    file: string;
+    /** Its full path, when found. */
+    path?: string;
+    found: boolean;
+    /** Project-wide `#pragma define`s, names in lower case. */
+    defines: Record<string, string>;
+    /** The files it #includes, and whether each was read. */
+    includes: { file: string; found: boolean }[];
+    /** A condition could not be decided, so every branch it might take was read. */
+    uncertain: boolean;
+    /** Every file whose change would change what it says: itself (where it would be, when missing) and what it #includes. */
+    watch: string[];
+    /** #812: each source's own `/define(...)` on its #compile line, by file name in lower case. */
+    fileDefines: Record<string, Record<string, string>>;
+}
+
 export class ClarionProjectServer {
     sourceFiles: ClarionSourcerFileServer[] = [];
     fileDrivers: string[] = [];
     libraries: string[] = [];
     projectReferences: { name: string, project: string }[] = [];
     noneFiles: string[] = [];
+    /** #758: the legacy .prj/.pr files under Projects to include, as read. */
+    legacyProjects: LegacyProjectRead[] = [];
     redirectionEntries: RedirectionEntry[] = [];
     private searchPathsCache: Map<string, string[]> = new Map();
     private redirectionParser: RedirectionFileParserServer | null = null;
@@ -59,6 +104,7 @@ export class ClarionProjectServer {
         this.libraries = fresh.libraries;
         this.projectReferences = fresh.projectReferences;
         this.noneFiles = fresh.noneFiles;
+        this.legacyProjects = fresh.legacyProjects;
         this.lastLoadReadParseMs = fresh.lastLoadReadParseMs;
         this.lastLoadResolveMs = fresh.lastLoadResolveMs;
         this.lastLoadUnresolved = fresh.lastLoadUnresolved;
@@ -79,7 +125,8 @@ export class ClarionProjectServer {
         this.libraries = [];
         this.projectReferences = [];
         this.noneFiles = [];
-        
+        this.legacyProjects = [];
+
         try {
             const projectFile = path.join(this.path, `${this.name}.cwproj`);
             logger.info(`📂 Project file path: ${projectFile}`);
@@ -120,6 +167,7 @@ export class ClarionProjectServer {
                     const libraryItems = [];
                     const projectReferenceItems = [];
                     const noneItems = [];
+                    const legacyIncludeItems = [];
                     
                     // Process each ItemGroup
                     for (const group of itemGroups) {
@@ -152,18 +200,17 @@ export class ClarionProjectServer {
                             const nones = Array.isArray(group.none) ? group.none : [group.none];
                             noneItems.push(...nones);
                         }
+
+                        // #758: Projects to include, legacy .prj/.pr files (<Include Include="x.prj" />)
+                        if (group.include) {
+                            const includes = Array.isArray(group.include) ? group.include : [group.include];
+                            legacyIncludeItems.push(...includes);
+                        }
                     }
                     
                     // Process file drivers (faster to process these simpler items first)
                     for (const driver of fileDriverItems) {
-                        // Handle different possible formats
-                        let driverPath = null;
-                        if (typeof driver === 'string') {
-                            driverPath = driver;
-                        } else if (driver && typeof driver === 'object' && driver.include) {
-                            driverPath = driver.include;
-                        }
-                        
+                        const driverPath = includeOf(driver);
                         if (driverPath) {
                             this.fileDrivers.push(driverPath);
                         }
@@ -172,14 +219,7 @@ export class ClarionProjectServer {
                     
                     // Process libraries
                     for (const lib of libraryItems) {
-                        // Handle different possible formats
-                        let libPath = null;
-                        if (typeof lib === 'string') {
-                            libPath = lib;
-                        } else if (lib && typeof lib === 'object' && lib.include) {
-                            libPath = lib.include;
-                        }
-                        
+                        const libPath = includeOf(lib);
                         if (libPath) {
                             this.libraries.push(libPath);
                         }
@@ -195,12 +235,12 @@ export class ClarionProjectServer {
                         if (typeof ref === 'object') {
                             projectGuid = ref.project;
                             projectName = ref.name;
-                            includePath = ref.include;
+                            includePath = includeOf(ref);
                         }
                         
                         if (projectGuid && (projectName || includePath)) {
                             this.projectReferences.push({
-                                name: projectName || (includePath ? path.basename(includePath, '.cwproj') : "Unknown"),
+                                name: projectName || (includePath ? referenceNameFromPath(includePath) : "Unknown"),
                                 project: projectGuid
                             });
                         }
@@ -209,14 +249,7 @@ export class ClarionProjectServer {
                     
                     // Process none files
                     for (const none of noneItems) {
-                        // Handle different possible formats
-                        let nonePath = null;
-                        if (typeof none === 'string') {
-                            nonePath = none;
-                        } else if (none && typeof none === 'object' && none.include) {
-                            nonePath = none.include;
-                        }
-                        
+                        const nonePath = includeOf(none);
                         if (nonePath) {
                             this.noneFiles.push(nonePath);
                         }
@@ -359,6 +392,7 @@ export class ClarionProjectServer {
 
                     // No need to filter out null values since we always return a ClarionSourcerFileServer
                     this.sourceFiles = resolvedFiles as ClarionSourcerFileServer[];
+                    await this.addLegacyProjectSources(legacyIncludeItems);
                     
                     // Log the file extensions to help with debugging
                     const extensions = new Map<string, number>();
@@ -393,6 +427,74 @@ export class ClarionProjectServer {
             logger.error(`❌ Unexpected error in loadSourceFilesFromProjectFile: ${error instanceof Error ? error.message : String(error)}`);
         }
     }
+    /**
+     * #758 — the legacy .prj/.pr files under Projects to include. The MSBuild CW task builds each
+     * as if #included into this project, so the Clarion sources its #compile lines name are this
+     * project's: they are added beside the Compile items (once each) and found through the
+     * project's redirection. A file the .prj #includes is looked for beside the .prj, then in the
+     * project folder, then through redirection.
+     */
+    private async addLegacyProjectSources(items: unknown[]): Promise<void> {
+        const listed = new Set(this.sourceFiles.map(f => path.win32.basename(f.name).toLowerCase()));
+        for (const item of items) {
+            const include = includeOf(item);
+            let written = include ?? '';
+            try { written = decodeURIComponent(written); } catch { /* not an escape: keep it as written */ }
+            // Legacy Clarion Project Files, as the IDE's Add Project to Include offers them (and the Solution View reads).
+            if (!/\.prj?$/i.test(written)) continue;
+            const prjPath = this.findLegacyFile(written, this.path);
+            // A .prj not there yet is watched where it would be, so it is read once it appears.
+            const read: LegacyProjectRead = {
+                file: written, path: prjPath ?? undefined, found: false, defines: {}, includes: [], uncertain: false,
+                watch: [prjPath ?? path.resolve(this.path, written)], fileDefines: {},
+            };
+            this.legacyProjects.push(read);
+            if (!prjPath) {
+                logger.warn(`⚠️ Projects to include: ${written} not found for project ${this.name}`);
+                continue;
+            }
+            let text: string;
+            try { text = await fs.promises.readFile(prjPath, 'latin1'); } catch { continue; }
+            read.found = true;
+            const prjDir = path.dirname(prjPath);
+            const locate = (file: string) => this.findLegacyFile(file, prjDir);
+            const parsed = parseLegacyProject(text, {
+                read: file => {
+                    const at = locate(file);
+                    if (!at) return undefined;
+                    read.watch.push(at);
+                    try { return fs.readFileSync(at, 'latin1'); } catch { return undefined; }
+                },
+                exists: file => locate(file) ? true : undefined,
+            });
+            read.defines = parsed.defines;
+            read.includes = parsed.includes;
+            read.uncertain = parsed.uncertain;
+            for (const compile of parsed.compiles) {
+                if (Object.keys(compile.defines).length) read.fileDefines[path.win32.basename(compile.file).toLowerCase()] = compile.defines;
+            }
+
+            for (const compile of parsed.compiles) {
+                if (!/\.clw$/i.test(compile.file)) continue;
+                const key = path.win32.basename(compile.file).toLowerCase();
+                if (listed.has(key)) continue;
+                listed.add(key);
+                const resolved = await this.findFileInProjectPathsAsync(compile.file, DirectoryFileIndex.getInstance());
+                this.sourceFiles.push(new ClarionSourcerFileServer(compile.file, resolved ? path.relative(this.path, resolved) : compile.file, this));
+                if (!resolved) this.lastLoadUnresolved++;
+            }
+        }
+    }
+
+    /** #758: a file a legacy project names: as written (from `dir`), in the project folder, then through redirection. */
+    private findLegacyFile(file: string, dir: string): string | null {
+        const candidates = path.isAbsolute(file) ? [file] : [path.resolve(dir, file), path.resolve(this.path, file)];
+        for (const candidate of candidates) {
+            try { if (fs.statSync(candidate).isFile()) return candidate; } catch { /* not there */ }
+        }
+        return path.isAbsolute(file) ? null : this.findFileInProjectPaths(file);
+    }
+
     public findSourceFileByName(name: string): ClarionSourcerFileServer | undefined {
         const lowerName = name.toLowerCase();
         return this.sourceFiles.find(f => f.name.toLowerCase() === lowerName);

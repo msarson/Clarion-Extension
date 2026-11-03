@@ -5,7 +5,7 @@ import { SolutionTreeDataProvider } from '../SolutionTreeDataProvider';
 import { updateConfigurationStatusBar } from '../statusbar/StatusBarManager';
 import { readActiveConfigFromSlnCache, patchSlnCacheConfig, buildFullConfig } from '../utils/SlnCacheUtils';
 import { pushConfigurationToIde } from '../solution/ClarionIdePreferences';
-import { updateSolutionToolbar, refreshSolutionTreeView } from '../views/ViewManager';
+import { refreshSolutionPage, refreshSolutionTreeView } from '../views/ViewManager';
 import LoggerManager from '../utils/LoggerManager';
 import { getLanguageClient, isClientReady } from '../LanguageClientManager'; // #564
 import { configurationToStore } from '../utils/ConfigurationPrecedence'; // #674
@@ -50,6 +50,20 @@ export async function setConfiguration(solutionTreeDataProvider?: SolutionTreeDa
     const picked = await vscodeWindow.showQuickPick(availableConfigs, {
         placeHolder: "Select a configuration",
     });
+    if (picked) {
+        await chooseConfiguration(picked);
+    } else {
+        logger.info("❌ User cancelled configuration selection");
+    }
+}
+
+/**
+ * Makes `picked` (a configuration name, or the .sln's `Debug|Win32` form) the solution's
+ * configuration: stored, told to the Clarion IDE, and shown everywhere. The picker above and the
+ * Solution page (#792) both end here.
+ */
+export async function chooseConfiguration(picked: string): Promise<void> {
+    if (!globalSolutionFile) return;
     // #674: store the .sln's own entry for the name picked (`Release` -> `Release|Win32`), the form a
     // solution load stores (#530), so the setting keeps one format whichever action wrote it.
     const selectedConfig = picked
@@ -60,7 +74,7 @@ export async function setConfiguration(solutionTreeDataProvider?: SolutionTreeDa
         logger.info(`✅ User selected configuration: ${picked} (stored as ${selectedConfig})`);
         logger.info(`📊 Current globalSettings.configuration BEFORE update: ${globalSettings.configuration}`);
 
-        vscodeWindow.showInformationMessage(`Configuration set to: ${picked}`);
+        vscodeWindow.showInformationMessage(`Configuration set to: ${selectedConfig.split('|')[0]}`);
         
         // Update global settings and save to workspace
         globalSettings.configuration = selectedConfig;
@@ -88,8 +102,6 @@ export async function setConfiguration(solutionTreeDataProvider?: SolutionTreeDa
         // #563 — status bar, Tools pane and Solution View from the one stored value.
         await applyActiveConfiguration(selectedConfig);
         logger.info(`🔄 Updated status bar, Tools pane and Solution View to: ${selectedConfig}`);
-    } else {
-        logger.info("❌ User cancelled configuration selection");
     }
 }
 
@@ -102,7 +114,7 @@ export async function setConfiguration(solutionTreeDataProvider?: SolutionTreeDa
 export async function applyActiveConfiguration(configuration: string): Promise<void> {
     globalSettings.configuration = configuration;
     await updateConfigurationStatusBar(configuration);
-    updateSolutionToolbar();
+    refreshSolutionPage();
     await refreshSolutionTreeView();
     // #564 — the language server resolves files through the redirection file's sections for
     // this configuration; it only heard the configuration at solution load until now.

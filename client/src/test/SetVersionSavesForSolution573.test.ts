@@ -50,7 +50,7 @@ suite('Set Version with a solution loaded (#573)', () => {
             path.resolve(__dirname, '..', '..', '..', '..', 'client', 'src', 'ClarionExtensionCommands.ts'), 'utf8');
         const direct = source.match(/\bsetActiveClarionVersion\(/g) ?? [];
         assert.strictEqual(direct.length, 1, 'only applyPickedVersion may call setActiveClarionVersion');
-        const helper = source.slice(source.indexOf('private static async applyPickedVersion('));
+        const helper = source.slice(source.indexOf('static async applyPickedVersion('));
         const body = helper.slice(0, helper.indexOf('\n  }\n') > 0 ? helper.indexOf('\n  }\n') : helper.indexOf('\r\n  }\r\n'));
         assert.ok(body.includes('setGlobalClarionSelection('), 'the pick must be saved for the loaded solution');
         assert.ok(body.includes("'clarion.reinitializeSolution'"), 'the loaded solution must be reinitialized');

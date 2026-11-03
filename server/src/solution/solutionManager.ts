@@ -18,6 +18,10 @@ const perfLogger = LoggerManager.getLogger("SolutionLoadPerf", "perf");
 export class SolutionManager {
     public solution: ClarionSolutionServer;
     public solutionFilePath: string;
+    /** #795 — the .sln's modification time when it was parsed; a later one means parse it again. */
+    private parsedMtimeMs = 0;
+    /** #801 — each project file's modification time when parsed (-1: missing); any change means parse again. */
+    private parsedProjectMtimes = new Map<string, number>();
     private static instance: SolutionManager | null = null;
     private fileCache: Map<string, string> = new Map();
     private static readonly CACHE_VERSION = 1; // Increment when cache format changes
@@ -96,20 +100,50 @@ export class SolutionManager {
                 throw new Error(`❌ Expected a file path but received a directory: ${filePath}`);
             }
 
-            if (!SolutionManager.instance) {
-                SolutionManager.instance = new SolutionManager(filePath);
-                await SolutionManager.instance.initialize();
-            } else if (SolutionManager.instance.solutionFilePath !== filePath) {
-                // If the solution file has changed, create a new instance
-                SolutionManager.instance = new SolutionManager(filePath);
-                await SolutionManager.instance.initialize();
+            // #795 — the same .sln is parsed again when it changed since it was parsed (a project
+            // added from Solution Properties, by the Clarion IDE or by hand); reused, its projects
+            // never changed until the window was reloaded.
+            // #801: a project's own file changed (a source added in the Clarion IDE or by hand) counts too.
+            let instance = SolutionManager.instance;
+            if (!instance || instance.solutionFilePath !== filePath || instance.parsedMtimeMs !== stat.mtimeMs || instance.projectFilesChanged()) {
+                // A file changed under the loaded solution: the in-memory cache only counts a LATER
+                // time as a change, so a file copied in with its own older time got the old parse back.
+                if (instance && instance.solutionFilePath === filePath) SolutionManager.clearCache(filePath);
+                const parseStart = Date.now();
+                instance = new SolutionManager(filePath);
+                instance.parsedMtimeMs = stat.mtimeMs;
+                SolutionManager.instance = instance;
+                await instance.initialize();
+                // A project file written while this parse ran may have been read before the write:
+                // record no time for it (-2), so the next load reads it again.
+                // #758: so does a legacy .prj/.pr a project includes, a file it #includes, and one
+                // not there yet (-1 until it appears).
+                instance.parsedProjectMtimes = new Map((instance.solution?.projects ?? [])
+                    .flatMap(p => [path.join(p.path, p.filename), ...(p.legacyProjects ?? []).flatMap(l => l.watch)])
+                    .map(file => {
+                        const mtime = SolutionManager.mtimeOf(file);
+                        // Whole milliseconds, strictly later: a file time has sub-millisecond precision,
+                        // so one written in the parse's first millisecond would otherwise count as during it.
+                        return [file, Math.floor(mtime) > parseStart ? -2 : mtime] as [string, number];
+                    }));
             }
 
-            return SolutionManager.instance;
+            return instance;
         } finally {
             // Reset the solution operation flag when done
             (global as any).solutionOperationInProgress = false;
         }
+    }
+
+    private static mtimeOf(file: string): number {
+        try { return fs.statSync(file).mtimeMs; } catch { return -1; }
+    }
+
+    private projectFilesChanged(): boolean {
+        for (const [file, mtime] of this.parsedProjectMtimes) {
+            if (SolutionManager.mtimeOf(file) !== mtime) return true;
+        }
+        return false;
     }
 
     /** #568 — forget the instance, so the next `create()` for the same .sln loads it afresh. */

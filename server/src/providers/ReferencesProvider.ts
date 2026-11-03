@@ -1,3 +1,4 @@
+import { compiledIncludeTest } from '../utils/ConditionalIncludes'; // #807
 import { Location, Range, Position } from 'vscode-languageserver-protocol';
 import { CancellationToken } from 'vscode-languageserver';
 import { TextDocument } from 'vscode-languageserver-textdocument';
@@ -120,6 +121,15 @@ type OverloadFilter = {
      *  them. Populated only when there is more than one overload. */
     candidates?: Array<{ signature: string; declarationLine: number }>;
 };
+
+/**
+ * A `SELF.Field.Member` / `PARENT.Field.Member` hit found with no receiver prefix to compare
+ * against (the search started from `SELF.Member` or from the member's declaration). Which class
+ * `SELF.Field` is can only be told by resolving it, so findMemberReferencesInFile hands these
+ * back and the scan keeps those whose receiver is of the target class family
+ * (keepChainHitsOfClassFamily).
+ */
+type PendingChainHit = { location: Location; receiver: string; line: number };
 
 /**
  * Provides "Find All References" for Clarion symbols.
@@ -1339,8 +1349,14 @@ export class ReferencesProvider {
                 scanScope = this.scopeTypeIndex.loadGlobalScopeForFileUri(fileUri) ?? globalScope;
                 scopeByFile.set(scopeKey, scanScope);
             }
-            const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined, overloadFilter, context.includeDeclaration, document, candidateOverloads, scanScope);
+            const pendingChains: PendingChainHit[] = [];
+            const hits = this.findMemberReferencesInFile(fileUri, memberName, className ?? undefined, classFamily, beforeDot ?? undefined, overloadFilter, context.includeDeclaration, document, candidateOverloads, scanScope, pendingChains);
             locations.push(...hits);
+            if (pendingChains.length > 0) {
+                const kept = await this.keepChainHitsOfClassFamily(pendingChains, fileUri, document, memberName, className ?? undefined, classFamily, token);
+                if (kept === null) return null;
+                locations.push(...kept);
+            }
         }
         this.trace({ scan_files: scanCount, scan_pruned: prunedCount, scan_ms: Date.now() - scanStart, index_built: String(refIdx.isBuilt) });
 
@@ -1900,9 +1916,10 @@ export class ReferencesProvider {
         const solutionManager = SolutionManager.getInstance();
         const fromDir = fromPath.substring(0, fromPath.lastIndexOf('\\'));
 
-        for (const line of lines) {
+        const compiled = compiledIncludeTest(fromPath, content); // #807
+        for (const [lineIndex, line] of lines.entries()) {
             const includeMatch = line.match(/INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/i);
-            if (!includeMatch) continue;
+            if (!includeMatch || !compiled.atLine(lineIndex)) continue;
 
             const includeFileName = includeMatch[1];
 
@@ -2254,6 +2271,59 @@ export class ReferencesProvider {
     }
 
     /**
+     * The `SELF.Field.Member` hits of one scanned file (findMemberReferencesInFile's
+     * pendingChains) whose receiver is of the target class family. The receiver is named the
+     * way hover and F12 name it (DottedAccessResolver), so `SELF.Field` is the type `Field` is
+     * declared with in SELF's class, wherever that class is declared. One resolve per receiver
+     * per method: SELF is the same class throughout a method. A receiver that does not resolve
+     * is kept, the bias of the other receiver checks here (rename must not miss a use), and so
+     * is one whose resolve fails. Null when the search is cancelled.
+     */
+    private async keepChainHitsOfClassFamily(
+        pending: PendingChainHit[],
+        fileUri: string,
+        cursorDocument: TextDocument,
+        memberName: string,
+        className: string | undefined,
+        classFamily: Set<string> | undefined,
+        token?: CancellationToken
+    ): Promise<Location[] | null> {
+        const classLower = className?.toLowerCase();
+        if (!classLower) return pending.map(p => p.location);
+        let doc: TextDocument | null = cursorDocument;
+        if (cursorDocument.uri.toLowerCase() !== fileUri.toLowerCase()) {
+            const text = this.tokenCache.getDocumentText(fileUri) ?? this.readFileTextForUri(fileUri);
+            doc = text === null ? null : TextDocument.create(fileUri, 'clarion', 1, text);
+        }
+        if (!doc) return pending.map(p => p.location);
+
+        const inFamily = (name: string | undefined): boolean => !!name &&
+            (classFamily ? classFamily.has(name.toLowerCase()) : name.toLowerCase() === classLower);
+        const methods = this.getTokensForUri(fileUri).filter(t =>
+            t.subType === TokenType.MethodImplementation && t.finishesAt !== undefined);
+        const verdicts = new Map<string, boolean>();
+        const kept: Location[] = [];
+        let resolves = 0;
+        for (const p of pending) {
+            const method = methods.find(t => p.line >= t.line && p.line <= t.finishesAt!);
+            const key = p.receiver.toLowerCase() + '@' + (method ? method.line : -1);
+            let keep = verdicts.get(key);
+            if (keep === undefined) {
+                if (await this.yieldIfNeeded(resolves++, token)) return null;
+                try {
+                    const r = await this.dottedAccess.resolve(p.receiver, memberName, doc, p.line, undefined);
+                    keep = !r || inFamily(r.receiverClass) || inFamily(r.member.className);
+                } catch {
+                    keep = true;
+                }
+                verdicts.set(key, keep);
+            }
+            if (keep) kept.push(p.location);
+        }
+        return kept;
+    }
+
+    /**
      * Find every occurrence of `memberName` used in dot-notation in a single file.
      * When `className` is provided, SELF.Member matches are restricted to method
      * implementations belonging to that class or any of its subclasses (`classFamily`).
@@ -2279,7 +2349,8 @@ export class ReferencesProvider {
         includeDeclaration: boolean = true,
         currentDocument?: TextDocument,
         candidateOverloads?: Array<{ signature: string; declarationLine: number }>,
-        globalScope?: Map<string, string>
+        globalScope?: Map<string, string>,
+        pendingChains?: PendingChainHit[]
     ): Location[] {
         const tokens = this.getTokensForUri(fileUri);
         if (!tokens || tokens.length === 0) return [];
@@ -2400,6 +2471,14 @@ export class ReferencesProvider {
                 .map(t => t.line))
             : new Set<number>();
 
+        // A SELF/PARENT-rooted chain ending in the member (`SELF.Field.Member`). With a receiver
+        // prefix from the cursor it is compared with that; without one, any class's `Field` matched
+        // here, so the hit goes to pendingChains for the receiver's class check.
+        const addChainHit = (location: Location, receiver: string): void => {
+            if (!chainPrefixLower && pendingChains) pendingChains.push({ location, receiver, line: location.range.start.line });
+            else locations.push(location);
+        };
+
         for (let i = 0; i < tokens.length; i++) {
             const token = tokens[i];
             if (token.type === TokenType.Comment || token.type === TokenType.String) continue;
@@ -2435,9 +2514,10 @@ export class ReferencesProvider {
                         const prefixOfToken = token.value.substring(0, token.value.lastIndexOf('.')).toLowerCase();
                         if (!chainPrefixLower || prefixOfToken === chainPrefixLower) {
                             if (isCompatibleCallSite(i)) {
-                                locations.push(Location.create(fileUri,
+                                addChainHit(Location.create(fileUri,
                                     Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
-                                                 token.line, token.start + token.value.length)));
+                                                 token.line, token.start + token.value.length)),
+                                    token.value.substring(0, token.value.lastIndexOf('.')));
                             }
                         }
 
@@ -2458,9 +2538,11 @@ export class ReferencesProvider {
                                 : null;
                             if (!expectedChain || fullChain === expectedChain) {
                                 if (isCompatibleCallSite(i)) {
-                                    locations.push(Location.create(fileUri,
+                                    const receiver = prev.value + '.' + token.value;
+                                    addChainHit(Location.create(fileUri,
                                         Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
-                                                     token.line, token.start + token.value.length)));
+                                                     token.line, token.start + token.value.length)),
+                                        receiver.substring(0, receiver.lastIndexOf('.')));
                                 }
                             }
                         } else if (parts.length === 2 && classLower) {
@@ -2627,8 +2709,9 @@ export class ReferencesProvider {
                         // If we know the exact chain prefix, verify the StructureField value matches it.
                         if (!chainPrefixLower || prev.value.toLowerCase() === chainPrefixLower) {
                             if (isCompatibleCallSite(i)) {
-                                locations.push(Location.create(fileUri,
-                                    Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                                addChainHit(Location.create(fileUri,
+                                    Range.create(token.line, token.start, token.line, token.start + token.value.length)),
+                                    prev.value);
                             }
                         }
                     }
@@ -3613,6 +3696,9 @@ export class ReferencesProvider {
                         !(fileUri === declarationUri && token.line === declarationLine)) {
                         continue;
                     }
+                    // #827 — the tail of a colon type in a declaration (`*HTTP:Answer answer`
+                    // arrives as `*HTTP` ':' `Answer` `answer`) is the type, not a reference.
+                    if (this.isColonTypeTail(tokens, i)) continue;
                 } else if (token.type === TokenType.ReferenceVariable &&
                            token.value.toLowerCase() === '&' + searchWordLower) {
                     // &TypeName reference-variable declaration: e.g. "Behavior &StandardBehavior,PRIVATE"
@@ -3744,6 +3830,41 @@ export class ReferencesProvider {
     }
 
     /**
+     * #827 — whether `tokens[index]` is the last part of a colon-qualified TYPE name in a
+     * declaration, so it can never be a reference to a variable of the same name.
+     *
+     * A colon type the tokenizer does not keep whole arrives as `<link> ':' <tail>`:
+     * `*HTTP:Answer answer` is PointerParameter(`*HTTP`) ':' Variable(`Answer`)
+     * Variable(`answer`). The tail is a type when the chain opens with a `*` or `&`
+     * type marker, or when a name follows it directly (`TYPE:Name param`) — a
+     * qualified name used as a value (`PRE:Field = 1`) is followed by an operator,
+     * a delimiter or nothing, and keeps matching as before.
+     */
+    private isColonTypeTail(tokens: Token[], index: number): boolean {
+        const token = tokens[index];
+        const colon = tokens[index - 1];
+        if (!colon || colon.value !== ':' || colon.line !== token.line || colon.start + 1 !== token.start) return false;
+
+        // Walk back over `<link> ':'` pairs welded together on this line to the chain's first link.
+        let j = index - 1;
+        let first: Token | undefined;
+        while (j >= 1) {
+            const sep = tokens[j];
+            const link = tokens[j - 1];
+            if (sep.value !== ':' || sep.line !== token.line || link.line !== token.line ||
+                link.start + link.value.length !== sep.start) break;
+            first = link;
+            j -= 2;
+        }
+        if (!first) return false;
+        if (first.type === TokenType.PointerParameter || first.type === TokenType.ReferenceVariable) return true;
+
+        const next = tokens[index + 1];
+        return !!next && next.line === token.line && next.start > token.start + token.value.length &&
+            (next.type === TokenType.Variable || next.type === TokenType.Label);
+    }
+
+    /**
      * Collect all PRE prefixes that reference fields of the same structure as the given field.
      *
      * Strategy:
@@ -3826,8 +3947,10 @@ export class ReferencesProvider {
 
         const fromDir = fromPath.substring(0, fromPath.lastIndexOf('\\'));
         const includePattern = /INCLUDE\s*\(\s*['"]([^'"]+)['"]\s*(?:,\s*ONCE)?\s*\)/gi;
+        const compiled = compiledIncludeTest(fromPath, content); // #807
         let match: RegExpExecArray | null;
         while ((match = includePattern.exec(content)) !== null) {
+            if (!compiled.atOffset(match.index)) continue;
             const incFileName = match[1];
             let incPath: string | null = null;
             const sameDirCandidate = `${fromDir}\\${incFileName}`;
@@ -4205,9 +4328,11 @@ export class ReferencesProvider {
 
         const fromDir = fromPath.substring(0, fromPath.lastIndexOf('\\'));
         const includePattern = /INCLUDE\s*\(\s*['"]([^'"]+)['"]\s*(?:,\s*ONCE)?\s*\)/gi;
+        const compiled = compiledIncludeTest(fromPath, content); // #807
         let match: RegExpExecArray | null;
 
         while ((match = includePattern.exec(content)) !== null) {
+            if (!compiled.atOffset(match.index)) continue;
             const incFileName = match[1];
 
             // Resolve via same-dir first, then project redirection

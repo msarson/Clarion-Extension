@@ -1,6 +1,6 @@
 import { describe, it } from 'mocha';
 import * as assert from 'assert';
-import { rememberedSelectionForSwitch, folderSwitchConfigurationSources } from '../solution/FolderSwitchSelection';
+import { selectionAtStartup, rememberedSelectionForSwitch, folderSwitchConfigurationSources } from '../solution/FolderSwitchSelection';
 import { chooseConfiguration } from '../utils/ConfigurationPrecedence';
 
 /**
@@ -74,5 +74,31 @@ describe('Configuration chosen for a folder switch (#780)', () => {
     it('the remembered configuration is used when nothing else names one', () => {
         assert.strictEqual(choose({ solutionPath: SLN, folderOpen: true, settingValue: 'Debug', solutions: [],
             slnCache: null, remembered: 'Release', available }), 'Release');
+    });
+});
+
+suite('After a folder switch, the selection chosen for it is the one loaded (#792)', () => {
+    const sln = 'C:/Apps/Sales/Sales.sln';
+    const works = (_s: string, propertiesFile: string) => !propertiesFile.includes('Gone');
+    const folder = { propertiesFile: 'C:/Gone/ClarionProperties.xml', version: 'Clarion 11.1', configuration: 'Debug|Win32' };
+    const history = [{ solutionFile: sln.toLowerCase(), propertiesFile: 'C:/C12/ClarionProperties.xml', version: 'Clarion 12.0', configuration: 'Release|Win32' }];
+
+    test('bug-pin: the folder remembers a selection that no longer works, the history one that does: the history\'s is loaded', () => {
+        assert.deepStrictEqual(selectionAtStartup(sln, folder, history, works),
+            { propertiesFile: 'C:/C12/ClarionProperties.xml', version: 'Clarion 12.0', configuration: 'Release|Win32' });
+    });
+
+    test('a folder selection that works is kept', () => {
+        const good = { ...folder, propertiesFile: 'C:/C10/ClarionProperties.xml' };
+        assert.strictEqual(selectionAtStartup(sln, good, history, works), undefined);
+    });
+
+    test('with nothing better in the history, the folder\'s stays (and its prompt follows)', () => {
+        assert.strictEqual(selectionAtStartup(sln, folder, [], works), undefined);
+        assert.strictEqual(selectionAtStartup(sln, folder, [{ ...history[0], propertiesFile: 'C:/Gone/Other.xml' }], works), undefined);
+    });
+
+    test('an incomplete folder selection takes the history\'s, as it did before', () => {
+        assert.strictEqual(selectionAtStartup(sln, { propertiesFile: '', version: '', configuration: '' }, history, works)?.version, 'Clarion 12.0');
     });
 });

@@ -13,6 +13,12 @@ import { SolutionScanner, DetectedSolution } from './utils/SolutionScanner';
 import { ClarionInstallationDetector } from './utils/ClarionInstallationDetector';
 import { GlobalSolutionHistory } from './utils/GlobalSolutionHistory';
 import { ProjectDependencyResolver } from './utils/ProjectDependencyResolver';
+import { isProjectNodeData, legacyProjectIncludes, legacyProjectSources, projectFolders, projectSourceFiles, ProjectSourceStamps } from './views/ProjectFolders';
+
+/** #803: each IDE folder's icon, for the folder and its entries. */
+const FOLDER_ICONS: Record<string, string> = {
+    fileDrivers: 'database', libraries: 'library', includes: 'file-submodule', projectReferences: 'references',
+};
 
 const logger = LoggerManager.getLogger("SolutionTreeDataProvider");
 logger.setLevel("error");
@@ -72,6 +78,8 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     // validator pass — see #295), the local cwproj fallback below takes over, so a long wait
     // buys nothing.
     private static readonly PROJECT_FILES_TIMEOUT_MS = 5_000;
+    /** #810: the .cwproj text each project's source nodes were built from. */
+    private readonly _sourceStamps = new ProjectSourceStamps();
 
     /**
      * #297: last-resort expansion path that makes the tree independent of server load — parse
@@ -79,22 +87,88 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
      * the file list locally. File nodes only need name+relativePath; clicking resolves the full
      * path lazily (fix 13), so no redirection logic is needed here.
      */
+    /** #803: draw the tree again without rebuilding it; a project's folders are read afresh. */
+    public redraw(): void {
+        this._onDidChangeTreeData.fire();
+    }
+
+    /**
+     * #803 — the Clarion IDE's folders for a project, read from its .cwproj: File Drivers,
+     * Libraries, Objects and Resource Files, Projects to include and Referenced Projects, always,
+     * empty or not. An empty one cannot be expanded.
+     */
+    private projectFolderNodes(project: TreeNode): TreeNode[] {
+        const data = project.data as any;
+        const projectPath = data?.path ?? data?.projectPath;
+        const filename = data?.filename;
+        if (!projectPath || !filename) return [];
+        const cwproj = path.join(String(projectPath), String(filename));
+        let text = '';
+        try { text = fs.readFileSync(cwproj, 'utf-8'); } catch { return []; }
+        const owner = { cwproj, projectPath: String(projectPath), projectGuid: data.projectId ?? data.guid, projectName: String(project.label) };
+        return projectFolders(text).map(folder => {
+            const node = new TreeNode(folder.label,
+                folder.entries.length ? TreeItemCollapsibleState.Collapsed : TreeItemCollapsibleState.None,
+                { type: 'projectFolder', section: folder.section, kind: folder.kind, ...owner }, project);
+            node.children = folder.entries.map(entry => new TreeNode(entry.label, TreeItemCollapsibleState.None,
+                { type: 'projectFolderItem', section: folder.section, kind: folder.kind, include: entry.include, ...owner }, node, entry.description));
+            return node;
+        });
+    }
+
+    /** #810: the project's .cwproj (or a .prj it includes, #758) holds other text than its source nodes were built from. */
+    private sourcesStale(projectData: any): boolean {
+        const projectPath = projectData?.path ?? projectData?.projectPath;
+        const filename = projectData?.filename;
+        if (!projectPath || !filename) return false;
+        const cwprojPath = path.join(String(projectPath), String(filename));
+        return this._sourceStamps.stale(cwprojPath, this.readProjectSources(cwprojPath)?.stamp ?? null);
+    }
+
+    /**
+     * #758 — a project's .cwproj, the sources of the legacy .prj files it includes, and a stamp of
+     * all their text. A .prj and the files it #includes are looked for beside it, then in the
+     * project folder; the server finds the sources through redirection when one is opened.
+     */
+    private readProjectSources(cwprojPath: string): { content: string; legacySources: string[]; stamp: string } | null {
+        let content: string;
+        try { content = fs.readFileSync(cwprojPath, 'utf-8'); } catch { return null; }
+        const projectDir = path.dirname(cwprojPath);
+        const readNear = (file: string, dir: string): string | undefined => {
+            for (const candidate of path.isAbsolute(file) ? [file] : [path.resolve(dir, file), path.resolve(projectDir, file)]) {
+                try { return fs.readFileSync(candidate, 'latin1'); } catch { /* not there */ }
+            }
+            return undefined;
+        };
+        const legacySources: string[] = [];
+        let stamp = content;
+        for (const include of legacyProjectIncludes(content)) {
+            const prjDir = path.dirname(path.resolve(projectDir, include));
+            const read = (file: string) => {
+                const text = readNear(file, prjDir);
+                stamp += '\0' + file + '\0' + (text ?? '');
+                return text;
+            };
+            const prjText = read(include);
+            if (prjText !== undefined) legacySources.push(...legacyProjectSources(prjText, read));
+        }
+        return { content, legacySources, stamp };
+    }
+
     private parseProjectFilesLocally(projectData: any, label: string): { files: any[] } | null {
         try {
             const projectPath = projectData?.path ?? projectData?.projectPath;
             const filename = projectData?.filename;
             if (!projectPath || !filename) return null;
             const cwprojPath = path.join(String(projectPath), String(filename));
-            if (!fs.existsSync(cwprojPath)) return null;
-            const content = fs.readFileSync(cwprojPath, 'utf-8');
-            const files: { name: string; relativePath: string }[] = [];
-            const compileRe = /<Compile\s+Include\s*=\s*"([^"]+)"/gi;
-            let m: RegExpExecArray | null;
-            while ((m = compileRe.exec(content)) !== null) {
-                files.push({ name: path.basename(m[1]), relativePath: m[1] });
-            }
+            const project = this.readProjectSources(cwprojPath);
+            if (!project) return null;
+            // #810: a project with no sources has none; the server's list is the one from load.
+            // #758: an included .prj's sources are the project's too.
+            const files = projectSourceFiles(project.content, project.legacySources);
+            this._sourceStamps.record(cwprojPath, project.stamp);
             treePerf.perf("Tree expand: local cwproj fallback", { project: label, files: files.length });
-            return files.length > 0 ? { files } : null;
+            return { files };
         } catch (error) {
             logger.error(`❌ Local cwproj parse failed for ${label}: ${error instanceof Error ? error.message : String(error)}`);
             return null;
@@ -554,7 +628,16 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
         // expanded node on every fire.
         const gcStart = Date.now();
         try {
-            return await this.getChildrenInner(element);
+            const children = await this.getChildrenInner(element);
+            // #803: a project shows the IDE's folders before its sources, read from its .cwproj on
+            // every query: the sources are cached across refreshes (#296, #297), the folders must not
+            // be, or an Add or Remove would never show.
+            if (element && isProjectNodeData(element.data) && !(this._filterText && this._filterText.trim() !== '')
+                && !children.some(c => c.data?.type === 'retryProjectLoad')) {
+                element.children = [...this.projectFolderNodes(element), ...children.filter(c => c.data?.type !== 'projectFolder')];
+                return element.children;
+            }
+            return children;
         } finally {
             const ms = Date.now() - gcStart;
             if (ms > 50) {
@@ -575,11 +658,12 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
                 // getProjectFiles for every expanded project and rebuilt all its nodes.
                 // Solution reloads rebuild the root with fresh TreeNode objects (empty
                 // children), so invalidation comes free via node replacement.
-                if (element.children && element.children.length > 0) {
+                // #810: but a refresh carries them across (#297 fix 1), so they are read again
+                // when the .cwproj no longer holds what they were built from.
+                const projectData = element.data as any;
+                if (element.children && element.children.length > 0 && !this.sourcesStale(projectData)) {
                     return element.children;
                 }
-                // This is a project node that needs to load its details from the server
-                const projectData = element.data as any;
 
                 // Get project information from the data payload
                 const { projectId } = projectData;
@@ -981,26 +1065,29 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             return treeItem;
         }
         
-        // Handle section nodes
-        if ((data as any)?.type === 'section') {
-            const sectionType = (data as any).sectionType;
-            switch (sectionType) {
-                case 'fileDrivers':
-                    treeItem.iconPath = new ThemeIcon('database');
-                    break;
-                case 'libraries':
-                    treeItem.iconPath = new ThemeIcon('library');
-                    break;
-                case 'projectReferences':
-                    treeItem.iconPath = new ThemeIcon('references');
-                    break;
-                case 'noneFiles':
-                    treeItem.iconPath = new ThemeIcon('files');
-                    break;
-                default:
-                    treeItem.iconPath = new ThemeIcon('folder');
+        // #803: a project's IDE folders and their entries.
+        if ((data as any)?.type === 'projectFolder') {
+            const folder = data as any;
+            treeItem.id = `folder:${folder.projectGuid}:${folder.section}`;
+            treeItem.iconPath = new ThemeIcon(FOLDER_ICONS[folder.section] ?? 'folder');
+            treeItem.contextValue = 'clarionProjectFolder';
+            treeItem.tooltip = `${folder.label ?? label} of ${folder.projectName}. Right-click to add; click to open the project's Sources.`;
+            treeItem.command = { title: 'Project Properties', command: 'clarion.openProjectProperties', arguments: [Uri.file(folder.cwproj), 'sources'] };
+            return treeItem;
+        }
+        if ((data as any)?.type === 'projectFolderItem') {
+            const item = data as any;
+            treeItem.id = `folderItem:${item.projectGuid}:${item.section}:${String(item.include).toLowerCase()}`;
+            treeItem.iconPath = new ThemeIcon(FOLDER_ICONS[item.section] ?? 'file');
+            treeItem.contextValue = 'clarionProjectFolderItem';
+            treeItem.tooltip = item.include;
+            const target = path.resolve(item.projectPath, item.include);
+            // A referenced project opens its own page, an included TopSpeed project its text.
+            if (item.kind === 'ProjectReference') {
+                treeItem.command = { title: 'Project Properties', command: 'clarion.openProjectProperties', arguments: [Uri.file(target)] };
+            } else if (item.kind === 'Include' && fs.existsSync(target)) {
+                treeItem.command = { title: 'Open', command: 'vscode.open', arguments: [Uri.file(target)] };
             }
-            treeItem.contextValue = `clarion${sectionType.charAt(0).toUpperCase() + sectionType.slice(1)}Section`;
             return treeItem;
         }
         
@@ -1120,10 +1207,11 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             treeItem.contextValue = 'clarionProject';
             const projectFile = path.join(project.path, project.filename);
             logger.info(`🔍 Project file path: ${projectFile}`);
+            // #792 — the project's options, as the Clarion IDE's pages; the page opens its XML.
             treeItem.command = {
-                title: 'Open Project File',
-                command: 'clarion.openFile',
-                arguments: [projectFile]
+                title: 'Project Properties',
+                command: 'clarion.openProjectProperties',
+                arguments: [Uri.file(projectFile)]
             };
             logger.info(`📂 getTreeItem(): Project – ${project.name}`);
             return treeItem;
@@ -1210,11 +1298,8 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
             treeItem.description = startupName ? `${startupName} (${config})` : `(${config})`;
         }
         
-        treeItem.command = {
-            title: 'Open Solution File',
-            command: 'clarion.openFile',
-            arguments: [solution.path]
-        };
+        // #792 — the solution's settings and projects on one page; the page opens the .sln as text.
+        treeItem.command = { title: 'Solution Properties', command: 'clarion.openSolutionProperties' };
         logger.info(`🧩 getTreeItem(): Solution – ${solution.name}`);
 
         return treeItem;
@@ -1507,6 +1592,9 @@ export class SolutionTreeDataProvider implements TreeDataProvider<TreeNode> {
     
     // Helper method to check if a node matches the filter directly
     private nodeMatches(node: TreeNode, normalizedFilter: string): boolean {
+        // #803: a project folder never matches by its own label ("File Drivers" would keep every
+        // project for "file"); its entries still do.
+        if (node.data?.type === 'projectFolder') return false;
         return this.substringMatch(node.label, normalizedFilter);
     }
     

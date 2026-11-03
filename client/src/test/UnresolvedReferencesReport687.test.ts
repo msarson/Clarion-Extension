@@ -82,12 +82,12 @@ suite('Unresolved file references report page (#687)', () => {
     test('no longer labelled experimental: page, command title, Graph row', () => {
         assert.doesNotMatch(renderUnresolvedReport(data(), 'N', 'csp'), /experimental/i);
         let dir = __dirname;
-        while (!fs.existsSync(path.join(dir, 'client', 'src', 'views', 'SolutionToolbarProvider.ts'))) dir = path.dirname(dir);
+        while (!fs.existsSync(path.join(dir, 'client', 'src', 'solution', 'SolutionPanel.ts'))) dir = path.dirname(dir);
         const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
         const cmd = pkg.contributes.commands.find((c: { command: string }) => c.command === 'clarion.unresolvedReferencesReport');
         assert.strictEqual(cmd.title, 'Unresolved File References');
-        const toolbar = fs.readFileSync(path.join(dir, 'client', 'src', 'views', 'SolutionToolbarProvider.ts'), 'utf8');
-        assert.doesNotMatch(toolbar, /title: '[^']*\(experimental\)'/);
+        const page = fs.readFileSync(path.join(dir, 'client', 'src', 'solution', 'SolutionPanel.ts'), 'utf8');
+        assert.doesNotMatch(page, /experimental/i);
     });
 
     test('the MEMBER section says a missing program fails the build (compiler-verified, #695)', () => {
@@ -99,13 +99,13 @@ suite('Unresolved file references report page (#687)', () => {
         assert.match(renderUnresolvedReport(data({ built: false }), 'N', 'csp'), /has not been built yet/);
     });
 
-    test('the command is contributed and the Graph row opens it', () => {
+    test('the command is contributed and the Solution page\'s File graph row opens it (#794)', () => {
         let dir = __dirname;
-        while (!fs.existsSync(path.join(dir, 'client', 'src', 'views', 'SolutionToolbarProvider.ts'))) dir = path.dirname(dir);
+        while (!fs.existsSync(path.join(dir, 'client', 'src', 'solution', 'SolutionPanel.ts'))) dir = path.dirname(dir);
         const pkg = JSON.parse(fs.readFileSync(path.join(dir, 'package.json'), 'utf8'));
         assert.ok(pkg.contributes.commands.some((c: { command: string }) => c.command === 'clarion.unresolvedReferencesReport'));
-        const toolbar = fs.readFileSync(path.join(dir, 'client', 'src', 'views', 'SolutionToolbarProvider.ts'), 'utf8');
-        assert.match(toolbar, /label: 'Graph'[^\n]*command: 'unresolvedReport'/);
-        assert.match(toolbar, /case 'unresolvedReport':/);
+        const page = fs.readFileSync(path.join(dir, 'client', 'src', 'solution', 'SolutionPanel.ts'), 'utf8');
+        assert.match(page, /row\('File graph'[\s\S]{0,300}post\('unresolved'\)/);
+        assert.match(page, /case 'unresolved':/);
     });
 });

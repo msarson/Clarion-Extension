@@ -1,3 +1,4 @@
+import { compiledIncludeTest } from '../../utils/ConditionalIncludes'; // #807
 import { Hover, Position } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType, ClarionTokenizer } from '../../ClarionTokenizer';
@@ -269,7 +270,9 @@ export class StructureFieldResolver {
             if (!tokens.some(t => t.type === TokenType.Structure && t.label?.toLowerCase() === ownerLower)) return null;
         }
         const scope = TokenHelper.getInnermostScopeAtLine(this.tokenCache.getStructure(document), position.line);
-        if (scope) {
+        // #831: a structure this document declares only out of sight (another procedure's local)
+        // is not the one the line reads, even when it has a field of that name.
+        if (scope && !this.memberLocator.declaresOnlyOutOfSight(document, owner, position.line)) {
             const reference = `${owner}.${fieldName}`;
             const info = this.variableResolver.findLocalVariableInfo(fieldName, tokens, scope, document, reference)
                 // #657: the dotted name is not in the outline for every structure (a QUEUE's fields,
@@ -613,9 +616,11 @@ export class StructureFieldResolver {
         try { content = fs.readFileSync(fromPath, 'utf8'); } catch { return null; }
 
         const includePattern = /INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/gi;
+        const compiled = compiledIncludeTest(fromPath, content); // #807
         let match: RegExpExecArray | null;
 
         while ((match = includePattern.exec(content)) !== null) {
+            if (!compiled.atOffset(match.index)) continue;
             const includeFile = match[1];
             let resolvedPath: string | null = null;
 
@@ -690,9 +695,11 @@ export class StructureFieldResolver {
         try { content = fs.readFileSync(fromPath, 'utf8'); } catch { return null; }
 
         const includePattern = /INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/gi;
+        const compiled = compiledIncludeTest(fromPath, content); // #807
         let match: RegExpExecArray | null;
 
         while ((match = includePattern.exec(content)) !== null) {
+            if (!compiled.atOffset(match.index)) continue;
             const includeFile = match[1];
 
             let resolvedPath: string | null = null;

@@ -2,7 +2,7 @@
 
 [← Back to Documentation Home](../../README.md)
 
-Complete reference for all commands in the Clarion Extension, generated from the extension manifest for **v1.0.9**.
+Complete reference for all commands in the Clarion Extension, generated from the extension manifest for **v1.0.10**.
 
 Run commands from the Command Palette (`Ctrl+Shift+P`), context menus in the editor and Solution View, or the keyboard shortcuts listed below. In the palette every command is grouped under the **`Clarion:`** category, so typing `clarion` lists all of them — the tables below give the underlying command IDs rather than the palette labels. Settings are documented separately in **[Settings Reference](settings.md)**.
 
@@ -41,6 +41,7 @@ Run commands from the Command Palette (`Ctrl+Shift+P`), context menus in the edi
 | `clarion.closeSolution` | Close the current solution |
 | `clarion.forceRefreshSolutionCache` | Refresh Solution — re-parse `.sln`/projects |
 | `clarion.reinitializeSolution` | Full reinitialize of the solution environment |
+| `clarion.openSolutionProperties` | **Solution Properties** — the solution's Clarion installation, compiler version, configuration and startup project on one page, with its projects (type, references, export file) and the build settings; changes apply at once. A click on the solution in the Solution View, the gear on its title bar, or the solution node's menu. Open Solution shows the same page when something has to be chosen |
 | `clarion.setConfiguration` | Set the active build configuration (Debug/Release/custom) |
 | `clarion.setActiveVersion` | Pick the active Clarion version (drives redirection/libsrc paths) |
 | `clarion.quickOpen` | Quick Open including redirection paths (`Ctrl+P` when a solution is open; falls back to VS Code's native Quick Open without one) |
@@ -54,11 +55,13 @@ Run commands from the Command Palette (`Ctrl+Shift+P`), context menus in the edi
 | `clarion.buildSolutionDirect` | Build the whole solution in dependency order from the Solution View's solution node, without the "what do you want to build?" prompt |
 | `clarion.buildCurrentProject` | Build the project containing the active file |
 | `clarion.buildProject` | Build a specific project (Solution View context menu) |
+| `clarion.openProjectProperties` | **Project Properties** — a project's options as the Clarion IDE's pages (Application, Compiling, Debug, Build Events), per configuration; a click on a project in the Solution View, or its menu, a `.cwproj` in the Explorer, or the title bar of an open `.cwproj`. Also **Open With… › Clarion Project Properties** |
 | `clarion.buildAllProjects` | Build every project |
 | `clarion.startDebugging` | `F5` — launch the startup project under the Clarion debugger |
+| `clarion.buildAndRun` / `clarion.buildAndDebug` | **Build and Run**, **Build and Debug** — build, then run or debug the startup project (the Solution View's `…` menu) |
 | `clarion.runWithoutDebugging` | `Ctrl+F5` — run the startup project |
 | `clarion.setStartupProject` / `clarion.clearStartupProject` | Choose which project `F5`/`Ctrl+F5` targets |
-| `clarion.chooseStartupProject` | **Choose Startup Project** — pick the startup project from a list (also the Startup row in the Clarion Tools pane) |
+| `clarion.chooseStartupProject` | **Choose Startup Project** — pick the startup project from a list (also on the Solution Properties page) |
 | `clarion.clearBuildResults` | **Clear Build Results** — remove the errors and warnings of the extension's last build from Problems. They are also cleared when another build task starts, so they never look current for a build they do not describe |
 
 ## Application (APP) Commands
@@ -93,6 +96,7 @@ Available in the Solution View for solutions with `.app` files under version con
 | Command | Description |
 |---|---|
 | `clarion.addSourceFile` / `clarion.removeSourceFile` | Add/remove a source file in a project |
+| `clarion.projectFolder.add` / `clarion.projectFolder.remove` | **Add…** on a project's folder in the Solution View (File Drivers; Libraries, Objects and Resource Files; Projects to include; Referenced Projects) and **Remove** on an entry, as the Clarion IDE's Solution Explorer menus; the `.cwproj` is edited and saved |
 | `clarion.addMapModule` | Add a MODULE with a PROCEDURE to the MAP |
 | `clarion.addProcedureToModule` | Add a PROCEDURE to an existing MODULE |
 | `clarion.addProcedureFromMap` | Add a PROCEDURE from the MAP |
@@ -115,7 +119,7 @@ Available in the Solution View for solutions with `.app` files under version con
 |---|---|
 | `clarion.setLogLevel` | Pick how much the extension logs (`error` … `debug`) for the run of a problem, without editing settings |
 | `clarion.debugSolutionHistory` | Inspect the recent-solutions memory |
-| `clarion.unresolvedReferencesReport` | **Unresolved File References** — a report of every INCLUDE and MEMBER in the solution whose file cannot be found, with MODULE names that have no source file and references inside OMIT/COMPILE listed separately. Each row opens the reference. Also a click on the Graph row in the Clarion Tools pane |
+| `clarion.unresolvedReferencesReport` | **Unresolved File References** — a report of every INCLUDE and MEMBER in the solution whose file cannot be found, with MODULE names that have no source file and references inside OMIT/COMPILE listed separately. Each row opens the reference. Also on the Solution Properties page |
 | `clarion.debug.showFileRelationshipGraph` | Dump the MODULE/INCLUDE/MEMBER file graph (support/debug) |
 | `clarion.debug.showServerVersion` | Report the language server build actually running — the first thing to check when a fix appears not to have landed |
 

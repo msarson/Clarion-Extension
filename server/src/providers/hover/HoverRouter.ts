@@ -14,7 +14,7 @@ import { LogicalLine } from '../../DocumentStructure';
 import { clientFeatures } from '../../utils/ClientFeatures';
 import { isGeneratedFile } from '../../utils/GeneratedFile';
 import { isDotSuffix, isDotBase, isNestedInsideAttributeArgs, isDeclarationLabel, HANDLED_BY_SPECIAL_KEYWORDS } from '../../utils/AttributeContextGuards';
-import { PropertyService } from '../../utils/PropertyService';
+import { PropertyService, PropTarget } from '../../utils/PropertyService';
 import { EventService } from '../../utils/EventService';
 import { DirectiveService } from '../../utils/DirectiveService';
 import { KeywordService } from '../../utils/KeywordService';
@@ -25,6 +25,7 @@ import { HoverFormatter } from './HoverFormatter';
 import { TokenCache } from '../../TokenCache';
 import { Token, TokenType } from '../../ClarionTokenizer';
 import { tokensOnLine } from '../../utils/TokenLineIndex';
+import { continuesPreviousLine } from '../../utils/PrefixChain';
 import { BranchInfo } from '../../tokenizer/TokenTypes';
 import * as path from 'path';
 import LoggerManager from '../../logger';
@@ -86,6 +87,11 @@ export class HoverRouter {
         };
 
         try {
+            // 0. #820: the NAME of a prototype parameter (`STRING Password`, `&MyQ Key`) is a
+            // label, whatever word it is: no attribute, keyword or data-type card applies.
+            // Variable resolution (after the router) gives it its parameter card.
+            if (this.namesPrototypeParameter(context)) return null;
+
             // 1. Handle special keywords (MODULE, TO, ELSE, PROCEDURE)
             const keywordHover = this.handleSpecialKeywords(context);
             mark('keywords');
@@ -134,6 +140,14 @@ export class HoverRouter {
             mark('mapDecl');
             if (mapDeclHover) return mapDeclHover;
 
+            // 6.5 #791: an attribute of a MAP/MODULE prototype (PROC, DLL, RAW, NAME...). Step 9
+            // only runs inside a control or CLASS declaration, so these had no card, and NAME
+            // fell through to the NAME(file) built-in.
+            if (isInMapBlock) {
+                const prototypeAttributeHover = this.handlePrototypeAttribute(word, line, wordRange, document, position, tokens);
+                if (prototypeAttributeHover) return prototypeAttributeHover;
+            }
+
             // 7. Handle method declarations (BEFORE built-ins to avoid shadowing by keyword help)
             if (!isInMapBlock) { // Skip if in MAP/MODULE block to prevent misidentification
                 const methodDeclHover = await this.methodResolver.resolveMethodDeclaration(document, position, line);
@@ -142,8 +156,9 @@ export class HoverRouter {
             }
 
             // 8. Handle data types and controls
+            const isNameInCode = this.isNameInCode(context);
             const symbolHover = this.symbolResolver.resolve(word, {
-                hasLabelBefore, isInWindowContext, isFollowedByIdentifier, isNameInCode: this.isNameInCode(context),
+                hasLabelBefore, isInWindowContext, isFollowedByIdentifier, isNameInCode,
                 opensParameter: this.opensParameter(context),
             });
             mark('symbol');
@@ -154,13 +169,14 @@ export class HoverRouter {
             const headerAttributeHover = this.handleHeaderAttribute(word, position, documentStructure);
             if (headerAttributeHover) return headerAttributeHover;
 
-            // 9. Handle attributes
-            const attributeHover = this.handleAttribute(word, line, wordRange, document, position, documentStructure, isInClassBlock, tokens);
+            // 9. Handle attributes — never in a CODE section (#820): attributes belong to
+            // declarations, so a word there that names one (`Check = 1`) is a variable.
+            const attributeHover = isNameInCode ? null : this.handleAttribute(word, line, wordRange, document, position, documentStructure, isInClassBlock, tokens);
             mark('attribute');
             if (attributeHover) return attributeHover;
 
             // 9.5 Handle PROP: runtime property equates
-            const propHover = this.handlePropEquate(word);
+            const propHover = this.handlePropEquate(word, line, wordRange.start.character, tokens);
             if (propHover) return propHover;
 
             // 9.6 Handle EVENT: equates
@@ -206,6 +222,11 @@ export class HoverRouter {
         if (CODE_BLOCK_OPENERS.has(upperWord)) {
             const openerHover = this.handleBlockOpener(position, tokens, document);
             if (openerHover) return openerHover;
+        }
+
+        if (upperWord === 'BREAK' || upperWord === 'CYCLE') {
+            const loopHover = this.handleLoopExitKeyword(upperWord, position, tokens, document);
+            if (loopHover) return loopHover;
         }
 
         if (upperWord === 'ELSE' || upperWord === 'ELSIF' || upperWord === 'OF' || upperWord === 'OROF') {
@@ -270,6 +291,10 @@ export class HoverRouter {
             // (`HIDE(?List)`) — a bare, uncalled, non-declaration word is a
             // plain variable, not either of these.
             if (this.isDottedOrNestedKeywordReference(context)) {
+                return null;
+            }
+            // #820: a field declared with this name (`Hide BYTE` in a CLASS) is a label.
+            if (isDeclarationLabel(tokens, position.line, position.character)) {
                 return null;
             }
             const controlContext = documentStructure.getControlContextAt(position.line, position.character);
@@ -570,6 +595,83 @@ export class HoverRouter {
     }
 
     /**
+     * Handle hover over BREAK / CYCLE — shows the LOOP or ACCEPT it acts on, as the END hover
+     * shows the structure it closes: the opening line and a link to it, and for BREAK the line
+     * of the END (or UNTIL / WHILE) that execution continues after.
+     *
+     * `BREAK Label` / `CYCLE Label` acts on the innermost enclosing LOOP or ACCEPT with that
+     * label (read as the BREAK/CYCLE diagnostic reads it, though matched by position rather
+     * than by line range); a bare BREAK / CYCLE on the
+     * innermost enclosing LOOP or ACCEPT. Returns null (falling through to the generic keyword
+     * card) when there is none, which the diagnostic already reports, and for a REPORT's BREAK
+     * structure, which is not a keyword token.
+     */
+    private handleLoopExitKeyword(
+        word: string,
+        position: { line: number; character: number },
+        tokens: Token[],
+        document: any
+    ): Hover | null {
+        const onLine = tokensOnLine(tokens, position.line);
+        const index = onLine.findIndex(t =>
+            t.type === TokenType.Keyword &&
+            t.value.toUpperCase() === word &&
+            position.character >= t.start &&
+            position.character <= t.start + t.value.length
+        );
+        if (index === -1) return null;
+        const keyword = onLine[index];
+        const next = onLine[index + 1];
+        const target = next && (next.type === TokenType.Variable || next.type === TokenType.Label)
+            ? next.value.toUpperCase() : undefined;
+
+        // A LOOP or ACCEPT contains the keyword when it opens before it and its terminator
+        // (or the end of the file, when it has none) comes after it.
+        const before = (a: Token, b: Token) => a.line < b.line || (a.line === b.line && a.start < b.start);
+        const contains = (loop: Token) => {
+            if (!before(loop, keyword)) return false;
+            if (loop.finishesAt === undefined || loop.finishesAt > keyword.line) return true;
+            const terminator = this.findTerminator(tokens, loop);
+            return loop.finishesAt === keyword.line && terminator !== undefined && before(keyword, terminator);
+        };
+        let loop: Token | undefined;
+        for (const t of tokens) {
+            if (t.type !== TokenType.Structure) continue;
+            const kind = t.value.toUpperCase();
+            if (kind !== 'LOOP' && kind !== 'ACCEPT') continue;
+            if (target !== undefined && t.label?.toUpperCase() !== target) continue;
+            if (contains(t) && (!loop || before(loop, t))) loop = t;
+        }
+        if (!loop) return null;
+
+        const kind = loop.value.toUpperCase();
+        const labelText = loop.label ? ` \`${loop.label}\`` : '';
+        const lines: string[] = [`**${word}** — ${word === 'BREAK' ? 'leaves' : 'returns to the top of'} ${kind}${labelText}`];
+
+        const openerLine: string = document.getText({ start: { line: loop.line, character: 0 }, end: { line: loop.line + 1, character: 0 } }).replace(/\r?\n$/, '');
+        if (openerLine && openerLine.trim()) {
+            lines.push('', '```clarion', openerLine.trim(), '```');
+        }
+        lines.push(this.formatter.locationLink(document.uri, loop.line));
+
+        if (word === 'BREAK') {
+            if (loop.finishesAt === undefined) {
+                lines.push('', `This ${kind} is not terminated: no END or period closes it.`);
+            } else {
+                const terminator = this.findTerminator(tokens, loop);
+                const ends = terminator?.value === '.' ? 'period'
+                    : terminator?.type === TokenType.Keyword ? terminator.value.toUpperCase()
+                    : 'END';
+                lines.push('', `Continues after the ${ends} on line ${loop.finishesAt + 1}`, '', this.formatter.locationLink(document.uri, loop.finishesAt));
+            }
+        }
+
+        const description = this.keywordService.getKeyword(word)?.description;
+        if (description) lines.push('', '---', '', description);
+        return { contents: { kind: 'markdown', value: lines.join('\n') } };
+    }
+
+    /**
      * The END or period the parser paired with a structure, if any; for a LOOP ended by UNTIL or
      * WHILE (`DocumentStructure.handleLoopTerminator`, which links no parent), that keyword.
      */
@@ -780,6 +882,49 @@ export class HoverRouter {
     }
 
     /**
+     * #791 — the card for an attribute of a MAP/MODULE prototype: the word sits at the top level
+     * of the prototype's attribute list (after its parameter list, never inside it), on the
+     * prototype's own line or a line continued from it with `|`. Only attributes that apply to a
+     * PROCEDURE qualify, and the card takes the procedure meaning where one is recorded (NAME).
+     */
+    private handlePrototypeAttribute(
+        word: string,
+        line: string,
+        wordRange: any,
+        document: any,
+        position: { line: number; character: number },
+        tokens: Token[]
+    ): Hover | null {
+        const attribute = this.attributeService.getAttribute(word);
+        if (!attribute?.applicableTo?.includes('PROCEDURE')) return null;
+
+        const at = tokens.findIndex(t => t.line === position.line &&
+            position.character >= t.start && position.character <= t.start + t.value.length);
+        if (at < 0) return null;
+
+        // Back to the start of the statement, across `|` continuations (comments skipped).
+        let start = at;
+        for (;;) {
+            while (start > 0 && tokens[start - 1].line === tokens[start].line) start--;
+            if (!continuesPreviousLine(tokens, start)) break;
+            start--;
+        }
+
+        // The prototype's name (or PROCEDURE keyword), then a word at paren depth 0 after it.
+        const anchor = tokens.slice(start, at).findIndex(t => t.subType === TokenType.MapProcedure);
+        if (anchor < 0) return null;
+        let depth = 0;
+        for (let i = start + anchor + 1; i < at; i++) {
+            if (tokens[i].value === '(') depth++;
+            else if (tokens[i].value === ')') depth--;
+        }
+        if (depth !== 0) return null;
+
+        const paramCount = this.countFunctionParameters(line, word, wordRange, document);
+        return this.formatter.formatAttribute(word, attribute, paramCount, 'PROCEDURE');
+    }
+
+    /**
      * Handle Clarion attributes
      */
     private handleAttribute(
@@ -940,6 +1085,55 @@ export class HoverRouter {
     }
 
     /**
+     * #820 — whether the hovered word is the NAME of a parameter in a prototype's parameter list:
+     * `PROCEDURE(STRING pUser, <*STRING Password>, &MyQ Key, LONG Hide=1)`, on the PROCEDURE's
+     * line or a `|` continuation of it. The word follows exactly one type word at the start of its
+     * parameter (after `(`, `,` or `<`) and ends the parameter (`,` `)` `>` `=`), inside the
+     * brackets that follow PROCEDURE/FUNCTION or a MAP prototype's own label (`Name(LONG x)`).
+     */
+    private namesPrototypeParameter(context: HoverContext): boolean {
+        const { position, documentStructure } = context;
+        const logical: LogicalLine | undefined = documentStructure.getLogicalLine?.(position.line);
+        if (!logical) return false;
+        const toks = logical.tokens;
+        const i = toks.findIndex(t =>
+            t.line === position.line &&
+            position.character >= t.start &&
+            position.character <= t.start + t.value.length);
+        if (i < 2) return false;
+        const isWord = (t: Token) => /^[A-Za-z_][\w:]*$/.test(t.value);
+        if (!isWord(toks[i])) return false;
+        const next = toks[i + 1];
+        if (next && ![',', ')', '>', '='].includes(next.value)) return false;
+        // the type before it: a word, `*TYPE` or `&TYPE` (one token each), at the parameter's start;
+        // an array parameter's `[]` or `[,]` after the type is skipped
+        let t = i - 1;
+        if (toks[t].value === ']' || toks[t].value === '[]') {
+            while (t > 0 && !toks[t].value.startsWith('[')) t--;
+            t--;
+        }
+        if (t < 1) return false;
+        const type = toks[t];
+        if (!/^[*&]?\s*[A-Za-z_][\w:.]*$/.test(type.value)) return false;
+        const opener = toks[t - 1];
+        if (!['(', ',', '<'].includes(opener.value)) return false;
+        // the bracket that holds the list: PROCEDURE( / FUNCTION( or a MAP prototype's `Label(`
+        let depth = 0;
+        for (let j = i - 1; j >= 0; j--) {
+            const v = toks[j].value;
+            if (v === ')') depth++;
+            else if (v === '(') {
+                if (depth > 0) { depth--; continue; }
+                const before = toks[j - 1];
+                if (!before) return false;
+                if (/^(PROCEDURE|FUNCTION)$/i.test(before.value)) return true;
+                return j === 1 && before.start === 0 && before.type === TokenType.Label && context.isInMapBlock;
+            }
+        }
+        return false;
+    }
+
+    /**
      * Whether the hovered word opens a parameter of a prototype (#753): inside its brackets, right
      * after `(`, `,`, `*`, `<` or `&` (`PROCEDURE(LONG pX, *STRING pS, <BYTE pB>)`), or opening a
      * `|` continuation line of the list. A data type there is the parameter's type.
@@ -1006,8 +1200,8 @@ export class HoverRouter {
         const first = logical.tokens.find(t => t.type !== TokenType.Label);
         const keyword = first && findDeclarationKeyword(logical, first.line, first.start);
         if (!keyword) return null;
-        const def = this.controlService.getDeclarationStructure(/^\w+/.exec(keyword.value)?.[0] ?? keyword.value);
-        if (!def?.attributes) return null;
+        const keywordName = /^\w+/.exec(keyword.value)?.[0] ?? keyword.value;
+        const def = this.controlService.getDeclarationStructure(keywordName);
         const declared = readDeclaredAttributes(logical, keyword);
         const hit = declared.find(d =>
             d.name === word.toUpperCase() &&
@@ -1017,6 +1211,11 @@ export class HoverRouter {
         if (!hit) return null;
 
         const attribute = this.attributeService.getAttribute(hit.name);
+        // #843: a CLASS, a QUEUE or a variable of a data type has no list of its own to check
+        // against, so its attributes take the catalogue's card as they are.
+        if (!def?.attributes) {
+            return attribute ? this.formatter.formatAttribute(hit.name, attribute, null, keywordName.toUpperCase()) : null;
+        }
         let value = '';
         if (attribute) {
             const card = this.formatter.formatAttribute(hit.name, attribute, null, def.name ?? keyword.value).contents as MarkupContent;
@@ -1032,11 +1231,29 @@ export class HoverRouter {
     /**
      * Handle PROP: runtime property equates (e.g. PROP:Enabled, PROP:Handle)
      */
-    private handlePropEquate(word: string): Hover | null {
+    private handlePropEquate(word: string, line: string, wordStart: number, tokens: Token[]): Hover | null {
         const entry = this.propertyService.getPropEntry(word);
         if (!entry) return null;
         logger.info(`Found PROP: equate: ${word}`);
-        return this.formatter.formatPropEquate(entry);
+        const target = entry.targets ? this.propTarget(line, wordStart, tokens) : undefined;
+        return this.formatter.formatPropEquate(entry, target);
+    }
+
+    /**
+     * #823: what `target{PROP:x}` is applied to, for a property with a meaning per target.
+     * `?Name` (optionally `window $ ?Name`) is a control; a label declared as a FILE in this
+     * document is a FILE. Anything else - a variable holding a field equate, a FILE declared
+     * elsewhere, an expression - is not known, and the card shows every meaning.
+     */
+    private propTarget(line: string, wordStart: number, tokens: Token[]): PropTarget | undefined {
+        const brace = line.lastIndexOf('{', wordStart);
+        if (brace < 0 || line.slice(brace + 1, wordStart).trim() !== '') return undefined;
+        const before = /(\?)?([A-Za-z_][A-Za-z0-9_:]*)\s*$/.exec(line.slice(0, brace));
+        if (!before) return undefined;
+        if (before[1]) return 'control';
+        const name = before[2].toUpperCase();
+        const label = tokens.find(t => t.type === TokenType.Label && t.label?.toUpperCase() === name && t.structureType !== undefined);
+        return label?.structureType?.toUpperCase() === 'FILE' ? 'file' : undefined;
     }
 
     /**
@@ -1146,6 +1363,13 @@ export class HoverRouter {
         // whitespace); otherwise fall back to a plain constant-style card using the same
         // description text (clarion-builtins.json descriptions already cover both meanings).
         const isActualCall = /^\s*\(/.test(line.slice(wordRange.end.character));
+        // #784 — Clarion calls a built-in that needs no arguments without parentheses (YIELD,
+        // COMMIT, TODAY, ERRORCODE): bare, it is that call, not a constant, and gets its own card.
+        const callableBare = this.builtinService.canCallWithoutArguments(word);
+        const kind = callableBare && !this.builtinService.returnsValue(word) ? 'statement' as const : 'function' as const;
+        if (!isActualCall && callableBare) {
+            return this.formatter.formatBuiltin(word, signatures, 0, undefined, undefined, kind);
+        }
         if (!isActualCall) {
             logger.info(`Word ${word} matches a built-in but isn't called (no '(' follows) - showing constant hover`);
             const doc = signatures[0]?.documentation;
@@ -1167,12 +1391,12 @@ export class HoverRouter {
         // narrowing when the arguments actually carry a resolvable type.
         const resolvedIndices = await this.resolveBuiltinOverloadIndices(word, signatures, document, position, tokens);
         if (resolvedIndices) {
-            return this.formatter.formatBuiltin(word, signatures, paramCount, undefined, resolvedIndices);
+            return this.formatter.formatBuiltin(word, signatures, paramCount, undefined, resolvedIndices, kind);
         }
 
         // Legacy fallback: narrow by first argument's structureType (e.g. OPEN(Names) → 'FILE').
         const firstArgType = this.resolveFirstArgStructureType(line, word, tokens);
-        return this.formatter.formatBuiltin(word, signatures, paramCount, firstArgType ?? undefined);
+        return this.formatter.formatBuiltin(word, signatures, paramCount, firstArgType ?? undefined, undefined, kind);
     }
 
     /**

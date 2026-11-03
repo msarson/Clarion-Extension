@@ -10,6 +10,8 @@ import { SymbolFinder } from './utils/SymbolFinder';
 import { isAttributeKeyword, isDataType } from '../utils/AttributeKeywords';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { OmitCompileDetector, DirectiveBlock } from '../utils/OmitCompileDetector';
+import { resolvePrefixedName, prefixedNameStartsLine, continuesPreviousLine } from '../utils/PrefixChain';
+import { RESERVED_WORDS as RESERVED_LABEL_WORDS } from '../utils/ReservedWords';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 
 /**
@@ -204,7 +206,8 @@ export class ClarionDocumentSymbolProvider {
     }
 
     public extractStringContents(rawString: string): string {
-        const match = rawString.match(/'([^']+)'/);
+        // `*`, not `+`: an empty string `''` has empty contents, not itself (#818, MODULE('')).
+        const match = rawString.match(/'([^']*)'/);
         return match ? match[1] : rawString;
     }
 
@@ -483,21 +486,25 @@ export class ClarionDocumentSymbolProvider {
                         // BUT exclude attribute keywords: dll, name, raw, pascal, proc, etc.
                         // CRITICAL FIX: Only mark as procedure if it's on a NEW line (not the same line as last procedure)
                         // This prevents attribute keywords on the same line from being treated as procedures
-                        else if ((nextToken.type === TokenType.Label || 
+                        else if ((nextToken.type === TokenType.Label ||
                                  nextToken.type === TokenType.Function ||
                                  nextToken.type === TokenType.Variable) &&
                                 nextToken.line !== lastProcedureLine && // NEW: Must be on different line
+                                // #789: an indented `XL:Column:S` arrives as `XL:Column` `:` `S`;
+                                // the name is the whole chain, and it must start its line (#597),
+                                // which also keeps a type argument like GROUP(CFG:Type) out.
+                                prefixedNameStartsLine(tokens, j) &&
                                 j + 1 < tokens.length &&
                                 tokens[j + 1].value === "(" &&
                                 nextToken.value.toUpperCase() !== "MODULE" &&
                                 nextToken.value.toUpperCase() !== "MAP" &&
-                                !this.isAttributeKeyword(nextToken.value)) {
+                                !this.isAttributeKeyword(resolvePrefixedName(tokens, j).name)) {
                             // This looks like a procedure declaration in shorthand MAP syntax
                             nextToken.subType = TokenType.MapProcedure;
-                            // CRITICAL: Set token.label to just the procedure name (nextToken.value is already just the name)
-                            nextToken.label = nextToken.value;
+                            // CRITICAL: Set token.label to the procedure name, prefix chain included
+                            nextToken.label = resolvePrefixedName(tokens, j).name;
                             lastProcedureLine = nextToken.line; // Track this line as having a procedure
-                            logger.debug(`Marked shorthand procedure ${nextToken.value} at line ${nextToken.line} as MAP/MODULE procedure`);
+                            logger.debug(`Marked shorthand procedure ${nextToken.label} at line ${nextToken.line} as MAP/MODULE procedure`);
                         }
                         
                         j++;
@@ -724,7 +731,15 @@ export class ClarionDocumentSymbolProvider {
             // CRITICAL: Don't process variables after CODE statement
             // (#546: the FunctionArgumentParameter token type is no longer produced — a
             // parametrized type such as CSTRING(1024) is a Type token, spaced or not.)
-            if (!pastCodeStatement && (type === TokenType.Type || type === TokenType.TypeAnnotation || type === TokenType.ReferenceVariable || type === TokenType.Variable) && i > 0) {
+            // #819: a colon type such as `Q:Type` is one StructurePrefix token; it is a declaration's
+            // type when the name before it on the same line is a label - which starts in column 0
+            // (a colon name after `and` or `CASE` in code is not a type), and is not a reserved word
+            // (`OF STATE:Ohio` in column 1 starts a statement, #701).
+            const isColonType = type === TokenType.StructurePrefix && i > 0 && tokens[i - 1].line === line &&
+                resolvePrefixedName(tokens, i - 1).start === 0 &&
+                !RESERVED_LABEL_WORDS.has(tokens[i - 1].value.toUpperCase());
+            // #826: so is LIKE, `QTDAmount  LIKE(Amount)` - its own token type (TypeReference).
+            if (!pastCodeStatement && (type === TokenType.Type || type === TokenType.TypeAnnotation || type === TokenType.ReferenceVariable || type === TokenType.Variable || type === TokenType.TypeReference || isColonType) && i > 0) {
                 logger.info(`✅ SymbolProvider: Calling handleVariableToken for token index=${i}, type=${type}, value="${token.value}", line=${token.line}`);
                 this.handleVariableToken(tokens, i, symbols, currentStructure, currentProcedure, lastMethodImplementation, parentStack);
 
@@ -1885,6 +1900,16 @@ export class ClarionDocumentSymbolProvider {
             return; // Done processing this structure declaration
         }
 
+        // #818: a line continued from the one above with `|` does not start a statement, so
+        // nothing on it is declared (#790 says the same for a MAP prototype). A parameter typed
+        // with a colon name, `*HTTP:Query  request, |`, splits into `*HTTP` `:` `Query`, and
+        // `Query request` then reads like a label and its type.
+        let firstOnLine = index;
+        while (firstOnLine > 0 && tokens[firstOnLine - 1].line === line) firstOnLine--;
+        if (continuesPreviousLine(tokens, firstOnLine)) {
+            return;
+        }
+
         // CRITICAL FIX: Skip if we're inside a PROCEDURE declaration's parameter list
         // Check if there's a PROCEDURE keyword on the same line before this token
         let foundProcedureKeyword = false;
@@ -1907,6 +1932,19 @@ export class ClarionDocumentSymbolProvider {
         
         if (foundProcedureKeyword) {
             logger.info(`   ⚠️ Skipping - this token is part of a PROCEDURE/FUNCTION declaration`);
+            return;
+        }
+
+        // #840: nor is anything inside a parenthesis declared. A MAP prototype written without
+        // PROCEDURE, `Name (HINTERNET handle)`, has no keyword for the check above, and a
+        // parameter of a user-defined type reads like a label and its type.
+        let depth = 0;
+        for (let k = firstOnLine; k < index; k++) {
+            if (tokens[k].type !== TokenType.Delimiter) continue;
+            if (tokens[k].value === '(') depth++;
+            else if (tokens[k].value === ')' && depth > 0) depth--;
+        }
+        if (depth > 0) {
             return;
         }
         logger.info(`   ℹ️ No PROCEDURE/FUNCTION keyword found, proceeding with variable parsing`);
@@ -1969,6 +2007,43 @@ export class ClarionDocumentSymbolProvider {
                 if (t.line !== line || t.type === TokenType.Comment) {
                     logger.info(`     - Stopping: line mismatch or comment`);
                     break;
+                }
+
+                // #819: a colon type arrives split - `&HTTP:Session` is `&HTTP` `:` `Session`,
+                // `&HTTP:A:B` is `&HTTP` `:` `A:B` - so a `:` welded to the type collected so far
+                // and to the next token carries the type on through that token. The token before
+                // the colon must be the one the type ends with: inside `STRING(SIZE(A:B:C.D))` the
+                // name was skipped, not collected, and the colon after it is not the type's.
+                if (!foundType && fullType !== '' && t.type === TokenType.Delimiter && t.value === ':') {
+                    const before = tokens[j - 1];
+                    const after = tokens[j + 1];
+                    if (after && after.line === line && fullType.endsWith(before.value) &&
+                        before.start + before.value.length === t.start && t.start + 1 === after.start) {
+                        fullType += ':' + after.value;
+                        fullDeclaration += ':' + after.value;
+                        j += 2;
+                        continue;
+                    }
+                }
+
+                // #826: `LIKE(name)` is the type, with the name as written - `Amount`,
+                // `Grp.Field`, `Pre:Field` - which the identifier rules below would skip.
+                if (!foundType && fullType === '' && t.type === TokenType.TypeReference) {
+                    let k = j;
+                    let depth = 0;
+                    let likeType = '';
+                    while (k < tokens.length && tokens[k].line === line && tokens[k].type !== TokenType.Comment) {
+                        const v = tokens[k].value;
+                        likeType += v;
+                        if (tokens[k].type === TokenType.Delimiter && v === '(') depth++;
+                        else if (tokens[k].type === TokenType.Delimiter && v === ')' && --depth === 0) break;
+                        k++;
+                    }
+                    fullType += likeType;
+                    fullDeclaration += likeType;
+                    foundType = true;
+                    j = k + 1;
+                    continue;
                 }
 
                 // Skip label tokens (don't include the variable name in the type)

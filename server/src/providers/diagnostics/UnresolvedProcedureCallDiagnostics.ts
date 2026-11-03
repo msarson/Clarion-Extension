@@ -183,8 +183,9 @@ const getCrossFileResolver = () => (crossFileResolver ??= new CrossFileResolver(
 /**
  * The F12 chain for a procedure call, as DefinitionProvider walks it: this file's MAP
  * (which already reads its MAP INCLUDE files), then the MEMBER parent's MAP, then the
- * MODULE blocks of the INCs included by either MAP (`findDeclarationInMapIncludes`,
- * which consults the procedure index first and walks only on a miss — #362).
+ * MODULE blocks of the INCs included by either MAP, and their bare prototypes (#649)
+ * (`findDeclarationInMapIncludes`, which consults the procedure index first and walks
+ * only on a miss — #362).
  *
  * A MEMBER whose parent file cannot be found makes every answer 'unknown': the parent's
  * MAP is where most of this module's callable procedures are declared, and a check
@@ -204,7 +205,7 @@ export function createF12Resolver(tokens: Token[], document: TextDocument): Call
             if (inParent) return 'resolved';
         }
 
-        if (await getMapResolver().findDeclarationInMapIncludes(name, document, tokens)) return 'resolved';
+        if (await getMapResolver().findDeclarationInMapIncludes(name, document, tokens, true)) return 'resolved';
         return 'unresolved';
     };
 }

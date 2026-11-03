@@ -1,0 +1,259 @@
+{
+  "name": "Clarion TXA",
+  "scopeName": "source.clarion.txa",
+  "fileTypes": ["txa"],
+  "patterns": [
+    { "include": "#codeSections" },
+    { "include": "#promptSection" },
+    { "include": "#projectSection" },
+    { "include": "#sectionHeader" },
+    { "include": "#lineKeywords" },
+    { "include": "#strings" },
+    { "include": "#templateSymbols" },
+    { "include": "#numbers" }
+  ],
+  "repository": {
+    "sectionHeader": {
+      "patterns": [
+        {
+          "match": "^\\s*(\\[)(?i:END)(\\])\\s*$",
+          "name": "keyword.control.section.end.txa",
+          "captures": {
+            "1": { "name": "punctuation.definition.section.begin.txa" },
+            "2": { "name": "punctuation.definition.section.end.txa" }
+          }
+        },
+        {
+          "match": "^\\s*(\\[)[A-Za-z][A-Za-z0-9_]*(\\])\\s*$",
+          "name": "entity.name.section.txa",
+          "captures": {
+            "1": { "name": "punctuation.definition.section.begin.txa" },
+            "2": { "name": "punctuation.definition.section.end.txa" }
+          }
+        }
+      ]
+    },
+    "codeSections": {
+      "comment": "Sections whose lines are Clarion: embedded source, local data and its control hints, window and report structures. Each runs to the next section header.",
+      "patterns": [
+        {
+          "begin": "^\\s*(\\[)(?i:SOURCE)(\\])\\s*$",
+          "beginCaptures": {
+            "0": { "name": "entity.name.section.txa" },
+            "1": { "name": "punctuation.definition.section.begin.txa" },
+            "2": { "name": "punctuation.definition.section.end.txa" }
+          },
+          "end": "(?=^\\s*\\[[A-Za-z][A-Za-z0-9_]*\\]\\s*$)",
+          "name": "meta.section.source.txa",
+          "patterns": [
+            { "include": "#embedProperties" },
+            { "include": "#codeStrings" },
+            { "include": "source.clarion" }
+          ]
+        },
+        {
+          "begin": "^\\s*(\\[)(?i:DATA|SCREENCONTROLS|REPORTCONTROLS|LONGDESC|QUICKCODE)(\\])\\s*$",
+          "beginCaptures": {
+            "0": { "name": "entity.name.section.txa" },
+            "1": { "name": "punctuation.definition.section.begin.txa" },
+            "2": { "name": "punctuation.definition.section.end.txa" }
+          },
+          "end": "(?=^\\s*\\[[A-Za-z][A-Za-z0-9_]*\\]\\s*$)",
+          "name": "meta.section.data.txa",
+          "patterns": [
+            { "include": "#codeStrings" },
+            { "include": "source.clarion" }
+          ]
+        },
+        {
+          "begin": "^\\s*(\\[)(?i:WINDOW|REPORT)(\\])\\s*$",
+          "beginCaptures": {
+            "0": { "name": "entity.name.section.txa" },
+            "1": { "name": "punctuation.definition.section.begin.txa" },
+            "2": { "name": "punctuation.definition.section.end.txa" }
+          },
+          "end": "(?=^\\s*\\[[A-Za-z][A-Za-z0-9_]*\\]\\s*$)",
+          "name": "meta.section.structure.txa",
+          "patterns": [
+            { "include": "#templateAttributes" },
+            { "include": "#codeStrings" },
+            { "include": "source.clarion" }
+          ]
+        }
+      ]
+    },
+    "codeStrings": {
+      "comment": "A string in a code section ends with its line, as Clarion's does: a stray quote (an unfinished string, an apostrophe in a description) must not run on past the next section header. Listed before source.clarion, so it wins at the quote. Otherwise these are clarion.tmLanguage.json's string rules, scopes and escapes alike, so code colours as it does in a .clw.",
+      "patterns": [
+        {
+          "name": "string.quoted.single.unicode.clarion",
+          "begin": "(?<![A-Za-z0-9_])[uU]'",
+          "end": "'|$",
+          "applyEndPatternLast": true,
+          "patterns": [
+            {
+              "match": "''",
+              "name": "constant.character.escape.clarion"
+            },
+            {
+              "match": "<[0-9A-Fa-f]+[hH]?>",
+              "name": "constant.character.escape.unicode.clarion"
+            }
+          ]
+        },
+        {
+          "name": "string.quoted.single.clarion",
+          "begin": "\\'",
+          "end": "'|$",
+          "applyEndPatternLast": true,
+          "patterns": [
+            {
+              "match": "''",
+              "name": "constant.character.escape.clarion"
+            }
+          ]
+        }
+      ]
+    },
+    "embedProperties": {
+      "comment": "PROPERTY:BEGIN … PROPERTY:END opens an embed's [SOURCE]: its priority and other properties, not code.",
+      "begin": "^\\s*(PROPERTY:BEGIN)\\b",
+      "beginCaptures": { "1": { "name": "keyword.control.property.txa" } },
+      "end": "^\\s*(PROPERTY:END)\\b|(?=^\\s*\\[[A-Za-z][A-Za-z0-9_]*\\]\\s*$)",
+      "endCaptures": { "1": { "name": "keyword.control.property.txa" } },
+      "name": "meta.embed.properties.txa",
+      "patterns": [
+        { "include": "#lineKeywords" },
+        { "include": "#strings" },
+        { "include": "#numbers" }
+      ]
+    },
+    "templateAttributes": {
+      "comment": "Template attributes AppGen keeps on window and report controls: #ORIG(?OK), #SEQ(2), #FIELDS(...), #LINK(...).",
+      "match": "#[A-Za-z]+\\b",
+      "name": "entity.other.attribute-name.template.txa"
+    },
+    "promptSection": {
+      "comment": "[PROMPTS]: one line per prompt (%Symbol, then MULTI, UNIQUE and DEPEND %Parent in any order (AppGen writes DEPEND %Parent MULTI), then TYPE [TIMES n] (value)), and WHEN lines for a dependent prompt's values.",
+      "begin": "^\\s*(\\[)(?i:PROMPTS)(\\])\\s*$",
+      "beginCaptures": {
+        "0": { "name": "entity.name.section.txa" },
+        "1": { "name": "punctuation.definition.section.begin.txa" },
+        "2": { "name": "punctuation.definition.section.end.txa" }
+      },
+      "end": "(?=^\\s*\\[[A-Za-z][A-Za-z0-9_]*\\]\\s*$)",
+      "name": "meta.section.prompts.txa",
+      "patterns": [
+        {
+          "match": "^\\s*(%[A-Za-z_][A-Za-z0-9_]*)((?:\\s+(?:(?:MULTI|UNIQUE)\\b|DEPEND\\s+%[A-Za-z_][A-Za-z0-9_]*))*)\\s+(?!(?:MULTI|UNIQUE|DEPEND)\\b)([A-Za-z]+)\\b(?:\\s+(TIMES)\\s+([0-9]+))?",
+          "captures": {
+            "1": { "name": "variable.other.prompt.txa" },
+            "2": {
+              "patterns": [
+                { "match": "\\b(?:MULTI|UNIQUE)\\b", "name": "storage.modifier.prompt.txa" },
+                { "match": "\\bDEPEND\\b", "name": "keyword.other.depend.txa" },
+                { "match": "%[A-Za-z_][A-Za-z0-9_]*", "name": "variable.other.prompt.txa" }
+              ]
+            },
+            "3": { "name": "storage.type.prompt.txa" },
+            "4": { "name": "keyword.other.times.txa" },
+            "5": { "name": "constant.numeric.txa" }
+          }
+        },
+        {
+          "match": "^\\s*(WHEN)\\b",
+          "captures": { "1": { "name": "keyword.other.when.txa" } }
+        },
+        { "include": "#strings" },
+        { "include": "#templateSymbols" },
+        { "include": "#numbers" }
+      ]
+    },
+    "projectSection": {
+      "comment": "[PROJECT]: the application's project lines (#noedit, #system win, #compile \"x.clw\") and -- comments.",
+      "begin": "^\\s*(\\[)(?i:PROJECT)(\\])\\s*$",
+      "beginCaptures": {
+        "0": { "name": "entity.name.section.txa" },
+        "1": { "name": "punctuation.definition.section.begin.txa" },
+        "2": { "name": "punctuation.definition.section.end.txa" }
+      },
+      "end": "(?=^\\s*\\[[A-Za-z][A-Za-z0-9_]*\\]\\s*$)",
+      "name": "meta.section.project.txa",
+      "patterns": [
+        { "match": "--.*$", "name": "comment.line.double-dash.txa" },
+        { "match": "#[A-Za-z]+\\b", "name": "keyword.control.directive.project.txa" },
+        { "match": "\"[^\"]*\"", "name": "string.quoted.double.txa" },
+        { "include": "#strings" }
+      ]
+    },
+    "lineKeywords": {
+      "comment": "The words a TXA line starts with outside code: the header of an application, procedure, module or template addition, embed points and their instances.",
+      "patterns": [
+        {
+          "match": "^\\s*(EMBED)\\s+(%[A-Za-z_][A-Za-z0-9_]*)",
+          "captures": {
+            "1": { "name": "keyword.other.embed.txa" },
+            "2": { "name": "variable.other.embed.txa" }
+          }
+        },
+        {
+          "match": "^\\s*(WHEN)\\b",
+          "captures": { "1": { "name": "keyword.other.when.txa" } }
+        },
+        {
+          "match": "^\\s*(PRIORITY|INSTANCE|PARENT|VERSION|TIMES)\\s+([0-9]+)\\b",
+          "captures": {
+            "1": { "name": "keyword.other.property.txa" },
+            "2": { "name": "constant.numeric.txa" }
+          }
+        },
+        {
+          "match": "^\\s*(PROPERTY:BEGIN|PROPERTY:END|PROCPROP|GLOBAL|EXTERNAL)\\s*$",
+          "captures": { "1": { "name": "keyword.other.property.txa" } }
+        },
+        {
+          "match": "^\\s*(NAME|FROM|CATEGORY|DESCRIPTION|PROTOTYPE|MODULE|TEMPLATE|PROCTEMPLATE|DICTIONARY|PROCEDURE|TODO|MODIFIED|CREATED|LANGUAGE|HLP|WHERE|COMPONENT)\\b",
+          "captures": { "1": { "name": "keyword.other.header.txa" } }
+        }
+      ]
+    },
+    "templateSymbols": {
+      "comment": "As the template grammar names them; a symbol's name ends at ':' or '.'.",
+      "patterns": [
+        {
+          "match": "(?i:%(?:Application|AppName|File|FileName|Field|FieldName|Key|KeyName|Procedure|ProcedureName|Module|ModuleName|FileType|FieldType|KeyField|ProcedureType))\\b",
+          "name": "variable.language.builtin.template.clarion"
+        },
+        {
+          "match": "(?i:%(?:Null|True|False))\\b",
+          "name": "constant.language.template.clarion"
+        },
+        {
+          "match": "%[A-Za-z_][A-Za-z0-9_]*",
+          "name": "variable.other.template.clarion"
+        }
+      ]
+    },
+    "strings": {
+      "patterns": [
+        {
+          "name": "string.quoted.single.txa",
+          "begin": "'",
+          "end": "'|$",
+          "applyEndPatternLast": true,
+          "patterns": [
+            {
+              "match": "''|<<|<[0-9A-Fa-f]+[hH]?(?:,[0-9A-Fa-f]+[hH]?)*>|\\{[0-9]+\\}|\\{\\{",
+              "name": "constant.character.escape.clarion"
+            }
+          ]
+        }
+      ]
+    },
+    "numbers": {
+      "match": "\\b[0-9]+(?:\\.[0-9]+)?\\b",
+      "name": "constant.numeric.txa"
+    }
+  },
+  "uuid": "3c1a9e52-7d4b-4f0a-8e6c-2b5d9f1a7c34"
+}

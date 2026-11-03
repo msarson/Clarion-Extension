@@ -6,7 +6,7 @@ import { getLanguageClient } from '../LanguageClientManager';
 import { globalSettings, globalSolutionFile, globalClarionPropertiesFile } from '../globals';
 import { buildSolutionOrProject, sharedBuildCollection } from '../buildTasks';
 import { writeIdePreferences } from '../solution/ClarionIdePreferences';
-import { updateSolutionToolbar } from '../views/ViewManager';
+import { refreshSolutionPage } from '../views/ViewManager';
 import * as path from 'path';
 import * as fs from 'fs';
 import { spawn } from 'child_process';
@@ -419,7 +419,7 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
             if (solutionTreeDataProvider) {
                 await solutionTreeDataProvider.refresh();
             }
-            updateSolutionToolbar();
+            refreshSolutionPage();
         }),
         
         // #681 — the Clarion Tools pane's Startup row: pick from the projects Run can start.
@@ -462,9 +462,13 @@ export function registerRunCommands(solutionTreeDataProvider?: SolutionTreeDataP
             if (solutionTreeDataProvider) {
                 await solutionTreeDataProvider.refresh();
             }
-            updateSolutionToolbar();
+            refreshSolutionPage();
         }),
-        
+
+        // #794 — the Actions pane's Build & Run and Build & Debug buttons, as commands a menu can run.
+        commands.registerCommand('clarion.buildAndRun', () => commands.executeCommand('clarion.runWithoutDebugging', true)),
+        commands.registerCommand('clarion.buildAndDebug', () => commands.executeCommand('clarion.startDebugging', true)),
+
         commands.registerCommand('clarion.runWithoutDebugging', async (buildFirst?: boolean) => {
             logger.info("🚀 Running current project without debugging...");
             

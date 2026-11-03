@@ -375,48 +375,16 @@ export async function openClarionSolution(
             return; // VS Code is reloading with the new workspace
         }
 
-        // ✅ Step 2: Select or retrieve ClarionProperties.xml
+        // ✅ Steps 2-4 (#792): the installation, compiler version and configuration, on the
+        // Solution page when anything is to be chosen. The current selection fills it in; the
+        // configuration by precedence (#530 — the user's own setting for this solution wins; the
+        // IDE's .sln.cache is only a hint behind it).
         //
-        // #479 — when one IS already configured, offer the chance to change it as the
-        // solution is adopted. Previously the configured file was reused silently, so a
-        // solution belonging to a ConfigDir tree (#471) got no say at the one moment the
-        // choice is obviously relevant. Esc keeps the current configuration, so the
-        // common path is a single Enter.
-        if (globalClarionPropertiesFile && fs.existsSync(globalClarionPropertiesFile)) {
-            await ClarionExtensionCommands.offerDifferentConfiguration();
-        }
-
-        if (!globalClarionPropertiesFile || !fs.existsSync(globalClarionPropertiesFile)) {
-            logger.info("📂 No ClarionProperties.xml found. Prompting user for selection...");
-            await ClarionExtensionCommands.configureClarionPropertiesFile();
-
-            if (!globalClarionPropertiesFile || !fs.existsSync(globalClarionPropertiesFile)) {
-                vscodeWindow.showErrorMessage("ClarionProperties.xml is required. Operation cancelled.");
-                await setGlobalClarionSelection(previousSolutionFile, previousPropertiesFile, previousVersion, previousConfiguration);
-                return;
-            }
-        }
-
-        // ✅ Step 3: Select or retrieve the Clarion version
-        if (!globalClarionVersion) {
-            logger.info("🔍 No Clarion version selected. Prompting user...");
-            await ClarionExtensionCommands.selectClarionVersion();
-
-            if (!globalClarionVersion) {
-                vscodeWindow.showErrorMessage("Clarion version is required. Operation cancelled.");
-                await setGlobalClarionSelection(previousSolutionFile, previousPropertiesFile, previousVersion, previousConfiguration);
-                return;
-            }
-        }
-
-        // ✅ Step 4: Determine available configurations
+        // #479 — offered whenever there is another installation or compiler to choose: as the
+        // solution is adopted is the one moment the choice is obviously relevant, so a solution
+        // belonging to a ConfigDir tree (#471) gets its say. Its Browse… finds such a tree.
         const solutionFileContent = fs.readFileSync(solutionFilePath, 'utf-8');
         const availableConfigs = extractConfigurationsFromSolution(solutionFileContent);
-
-        // #530 — the user's own setting for this solution wins; the IDE's .sln.cache
-        // (the configuration the IDE last built with) is only a hint behind it. Both
-        // are matched on the configuration name, so a hand-written `Debug|Win32`
-        // lands on the `Debug` the picker produces.
         const clarionConfig = SettingsStorageManager.clarionSettings(); // #563 — read through the first folder
         const choice = chooseConfiguration({
             explicit: explicitConfigurationFor(
@@ -426,28 +394,18 @@ export async function openClarionSolution(
             slnCache: readActiveConfigFromSlnCache(solutionFilePath),
             available: availableConfigs,
         });
-
-        if (choice.configuration) {
-            globalSettings.configuration = choice.configuration;
-            logger.info(`⚙️ Configuration ${choice.configuration} (from ${choice.source})`);
-        } else if (availableConfigs.length > 1) {
-            // No cache hint — prompt the user
-            const selectedConfig = await vscodeWindow.showQuickPick(availableConfigs, {
-                placeHolder: "Select Clarion Configuration",
-            });
-
-            if (!selectedConfig) {
-                vscodeWindow.showWarningMessage("Configuration selection canceled. Using 'Debug' as fallback.");
-                globalSettings.configuration = "Debug";
-            } else {
-                globalSettings.configuration = selectedConfig;
-            }
-        } else {
-            globalSettings.configuration = availableConfigs[0] || "Debug";
+        const selection = await SmartSolutionOpener.chooseSelection(solutionFilePath,
+            { propertiesFile: globalClarionPropertiesFile || undefined, version: globalClarionVersion || undefined },
+            { configuration: choice.configuration, offer: true });
+        if (!selection) {
+            vscodeWindow.showWarningMessage("Solution selection canceled. Restoring previous settings.");
+            await setGlobalClarionSelection(previousSolutionFile, previousPropertiesFile, previousVersion, previousConfiguration);
+            return;
         }
+        globalSettings.configuration = selection.configuration;
 
         // ✅ Step 4: Save final selections to workspace settings
-        await setGlobalClarionSelection(solutionFilePath, globalClarionPropertiesFile, globalClarionVersion, globalSettings.configuration);
+        await setGlobalClarionSelection(solutionFilePath, selection.installation.propertiesPath, selection.compilerName, selection.configuration);
         logger.info(`⚙️ Selected configuration: ${globalSettings.configuration}`);
 
         // #664 — the Clarion IDE opens the solution on the configuration settled here.

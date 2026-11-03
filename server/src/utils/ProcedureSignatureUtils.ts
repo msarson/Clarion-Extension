@@ -5,6 +5,7 @@
 
 import LoggerManager from '../logger';
 import { DeclaredValueParser } from '../tokenizer/DeclaredValueParser';
+import { ClarionTokenizer } from '../ClarionTokenizer';
 
 const logger = LoggerManager.getLogger("ProcedureSignatureUtils");
 logger.setLevel("error");
@@ -16,6 +17,12 @@ export class ProcedureSignatureUtils {
      * Handles both traditional format (with PROCEDURE/FUNCTION keyword) and shorthand MAP format
      */
     public static extractParameterTypes(signature: string): string[] {
+        // Extract just the type from each parameter (remove variable names and defaults)
+        return this.splitParameters(signature).map(param => this.extractParameterType(param));
+    }
+
+    /** A signature's parameters as written, split at depth-0 commas. */
+    private static splitParameters(signature: string): string[] {
         // Try with PROCEDURE/FUNCTION keyword first
         let match = signature.match(/(?:PROCEDURE|FUNCTION)\s*\(([^)]*)\)/i);
         
@@ -61,9 +68,8 @@ export class ProcedureSignatureUtils {
         if (currentParam.trim()) {
             params.push(currentParam.trim());
         }
-        
-        // Extract just the type from each parameter (remove variable names and defaults)
-        return params.map(param => this.extractParameterType(param));
+
+        return params;
     }
     
     /**
@@ -124,8 +130,40 @@ export class ProcedureSignatureUtils {
     }
     
     /**
+     * #793 — the parameter types of an IMPLEMENTATION line (`Name PROCEDURE(...)` that defines
+     * the procedure). There a parameter's type is optional and its label required (Language
+     * Reference, PROCEDURE: "the data type of each parameter (optional) followed by the label"),
+     * so a one-word parameter is a label, returned as '' — it matches any type. A one-word
+     * built-in type (`PROCEDURE(LONG)`) is still read as that type. A prototype's one-word
+     * parameter is its type: use extractParameterTypes for prototypes.
+     */
+    public static extractImplementationParameterTypes(signature: string, overloaded = false): string[] {
+        // An overloaded procedure's definition must carry its types: with Test (LONG) and
+        // Test (*STRING), Clarion reads `Test PROCEDURE (q)` as type Q and finds no prototype
+        // (compiler-verified, Clarion 10 and 12). So the label-only reading is for one prototype.
+        if (overloaded) return this.extractParameterTypes(signature);
+        const params = this.splitParameters(signature);
+        return params.map(param => {
+            const bare = param.replace(/^<\s*/, '').replace(/\s*>$/, '').replace(/\s*=.+$/, '')
+                .replace(/\bCONST\s+/gi, '').replace(/\bREF\s+/gi, '').trim();
+            const isLabelOnly = /^[A-Za-z_][\w:]*$/.test(bare) && !this.BUILTIN_TYPES.has(bare.toUpperCase());
+            return isLabelOnly ? '' : this.extractParameterType(param);
+        });
+    }
+
+    /** Built-in type names a one-word implementation parameter can be (#793): anything else is a label. */
+    private static readonly BUILTIN_TYPES = new Set([
+        'STRING', 'CSTRING', 'PSTRING', 'ASTRING', 'BSTRING', 'USTRING',
+        'LONG', 'SHORT', 'BYTE', 'ULONG', 'USHORT', 'SIGNED', 'UNSIGNED',
+        'REAL', 'SREAL', 'BFLOAT4', 'BFLOAT8', 'DECIMAL', 'PDECIMAL',
+        'DATE', 'TIME', 'BOOL', 'ANY', 'VARIANT',
+        'GROUP', 'QUEUE', 'FILE', 'KEY', 'INDEX', 'VIEW', 'WINDOW', 'REPORT', 'BLOB', 'MEMO',
+    ]);
+
+    /**
      * Compares two parameter type arrays to see if they match
-     * Handles reference indicators like *, &, etc.
+     * Handles reference indicators like *, &, etc. '' in either list matches any type: an
+     * implementation parameter given by its label only (#793).
      */
     public static parametersMatch(implParams: string[], declParams: string[]): boolean {
         if (implParams.length !== declParams.length) {
@@ -135,6 +173,7 @@ export class ProcedureSignatureUtils {
         for (let i = 0; i < implParams.length; i++) {
             const implType = implParams[i];
             const declType = declParams[i];
+            if (implType === '' || declType === '') continue;
 
             // Normalize for comparison (remove extra spaces)
             const normalizedImpl = this.normalizeComplexRef(implType.replace(/\s+/g, ' ').trim());
@@ -290,7 +329,66 @@ export class ProcedureSignatureUtils {
                 count++;
             }
         }
-        
+
         return count;
+    }
+
+    /**
+     * #825 — the parameter `word` names in the PROCEDURE/FUNCTION header starting at
+     * `procedureLine`, following `|` continuation lines: a parameter declared on a continued
+     * line is a parameter. `getLine(n)` returns line n of the source (undefined past the end).
+     * A prefixed parameter (`LOC:test`) also matches its bare name. The returned position is
+     * the line and column of the parameter's name; `type` keeps a `*`/`&` and a colon type
+     * (`*HTTP:Query`); `declaration` is the parameter's text without `<` `>`.
+     */
+    public static findHeaderParameter(
+        getLine: (line: number) => string | undefined,
+        procedureLine: number,
+        word: string
+    ): { name: string; type: string; declaration: string; line: number; character: number } | null {
+        // The header as one string; segments map an offset in it back to a line and column.
+        let header = '';
+        const segments: { line: number; offset: number }[] = [];
+        for (let i = procedureLine; i < procedureLine + 100; i++) {
+            const raw = getLine(i);
+            if (raw === undefined) break;
+            const code = DeclaredValueParser.stripTrailingComment(raw.replace(/\r$/, '')).trimEnd();
+            segments.push({ line: i, offset: header.length });
+            if (!ClarionTokenizer.endsWithContinuation(code)) { header += code; break; }
+            header += code.slice(0, -1) + '  ';
+        }
+
+        const match = /(?:PROCEDURE|FUNCTION)\s*\((.*?)\)/i.exec(header); // #247
+        if (!match || !match[1]) return null;
+
+        const wordLower = word.toLowerCase();
+        let column = match.index + match[0].indexOf('(') + 1;
+        for (const param of match[1].split(',')) {
+            const stripped = param.trim().replace(/^<(.*)>$/, '$1').trim();
+            // [*&]? TYPE[[]] NAME [= default]; TYPE may carry a prefix (*HTTP:Query) and an array's
+            // `[]` or `[,]` (*STRING[] Names), NAME may be prefixed (LOC:test)
+            const m = stripped.match(/([*&]?\s*[\w:]+(?:\s*\[[^\]]*\])?)\s+([A-Za-z_][A-Za-z0-9_]*(?::[A-Za-z_][A-Za-z0-9_]*)?)(?:\s*=.*)?$/i);
+            if (m) {
+                const name = m[2];
+                const nameLower = name.toLowerCase();
+                if (nameLower === wordLower || nameLower.endsWith(':' + wordLower)) {
+                    // Where the match put the name, after its type: a type spelled like the name
+                    // (`&Window Window`, `HTTP:Query Query`) is never taken for it.
+                    const at = param.indexOf(stripped) + m.index! + m[0].indexOf(m[2], m[1].length);
+                    const offset = column + Math.max(at, 0);
+                    let seg = segments[0];
+                    for (const s of segments) { if (s.offset <= offset) seg = s; else break; }
+                    return {
+                        name,
+                        type: m[1].trim(),
+                        declaration: stripped,
+                        line: seg.line,
+                        character: offset - seg.offset,
+                    };
+                }
+            }
+            column += param.length + 1; // +1 for the comma
+        }
+        return null;
     }
 }

@@ -23934,6 +23934,11 @@
       "DLL('x'): Expression must be constant"
      ]
     },
+    "EXPORT": {
+     "kind": "flag",
+     "bare": true,
+     "sample": null
+    },
     "OEM": {
      "kind": "flag",
      "bare": true,
@@ -24014,6 +24019,9 @@
      "kind": "rejected"
     },
     "DLL": {
+     "kind": "rejected"
+    },
+    "EXPORT": {
      "kind": "rejected"
     },
     "OEM": {
@@ -24106,6 +24114,9 @@
     "DLL": {
      "kind": "rejected"
     },
+    "EXPORT": {
+     "kind": "rejected"
+    },
     "OEM": {
      "kind": "rejected"
     },
@@ -24196,6 +24207,9 @@
     "DLL": {
      "kind": "rejected"
     },
+    "EXPORT": {
+     "kind": "rejected"
+    },
     "OEM": {
      "kind": "rejected"
     },
@@ -24276,6 +24290,9 @@
      "kind": "rejected"
     },
     "DLL": {
+     "kind": "rejected"
+    },
+    "EXPORT": {
      "kind": "rejected"
     },
     "OEM": {

@@ -3,6 +3,7 @@
  * Handles INCLUDE files, MEMBER files, and global symbol lookups
  */
 
+import { compiledIncludeTest } from './ConditionalIncludes'; // #807
 import { Location, Position } from 'vscode-languageserver-protocol';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../ClarionTokenizer';
@@ -185,12 +186,13 @@ export class FileDefinitionResolver {
 
         const content = fs.readFileSync(fromPath, 'utf8');
         const lines = content.split('\n');
+        const compiled = compiledIncludeTest(fromPath, content); // #807
 
         // Find INCLUDE statements
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             const includeMatch = line.match(/INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/i);
-            if (!includeMatch) continue;
+            if (!includeMatch || !compiled.atLine(i)) continue;
 
             const includeFileName = includeMatch[1];
             logger.info(`Found INCLUDE: ${includeFileName}`);

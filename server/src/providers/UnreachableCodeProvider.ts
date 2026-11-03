@@ -9,6 +9,7 @@
  * - LOOP/ACCEPT are looping structures: RETURN terminates the entire procedure
  * - BEGIN is a grouping structure: defers to parent, no control-flow impact
  * - Branch keywords reset termination: ELSE/ELSIF (IF), OF/OROF/ELSE (CASE)
+ * - EXECUTE has no branch keywords: each statement in it is a branch (#808)
  * - Top-level RETURN (outside any structure) always terminates the procedure
  */
 
@@ -247,7 +248,17 @@ export class UnreachableCodeProvider {
                                 terminationLevel = i;
                                 logger.info(`Line ${lineNum}: Terminator inside ROUTINE (branching) - terminates only this ROUTINE`);
                                 break;
-                            } else if (/^(IF|CASE|EXECUTE|BEGIN)$/i.test(structValue)) {
+                            } else if (structValue === 'EXECUTE') {
+                                // #808 — every statement directly inside an EXECUTE is its
+                                // own branch (a BEGIN ... END block counts as one, and is
+                                // caught above as the nearer BEGIN). Only one branch runs,
+                                // so a terminator here ends this branch and nothing else:
+                                // the next line is already the next branch. Leave the
+                                // EXECUTE unterminated.
+                                terminationLevel = -2;
+                                logger.info(`Line ${lineNum}: Terminator is one EXECUTE branch - next statement is the next branch`);
+                                break;
+                            } else if (/^(IF|CASE|BEGIN)$/i.test(structValue)) {
                                 // Branching structure: RETURN only terminates this branch
                                 // BEGIN is included here because it represents a block/branch within EXECUTE
                                 terminationLevel = i;
@@ -257,7 +268,9 @@ export class UnreachableCodeProvider {
                             // If we get here, continue searching parent (shouldn't happen with current structures)
                         }
                         
-                        if (terminationLevel === -1) {
+                        if (terminationLevel === -2) {
+                            // EXECUTE branch: nothing further to mark
+                        } else if (terminationLevel === -1) {
                             // Procedure-level termination (top-level or inside LOOP/ACCEPT)
                             if (structureStack.length > 0) {
                                 // Inside LOOP/ACCEPT - clear stack and mark procedure terminated

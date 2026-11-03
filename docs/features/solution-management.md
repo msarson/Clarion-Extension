@@ -70,19 +70,16 @@ The containing folder opens automatically, and the solution is loaded.
 
 ### Method 4: Create New Solution (Wizard)
 
-**Start a brand-new Clarion project from scratch:**
+**Make a new solution:** click the **`+`** button in the Solution View toolbar, or run `Clarion: New Solution` from the Command Palette (`Ctrl+Shift+P`). One page asks everything:
 
-1. Open **Clarion Tools** sidebar
-2. Click the **`+`** button in the Solution View toolbar, or run `Clarion: New Solution` from the Command Palette (`Ctrl+Shift+P`)
-3. Enter a solution name when prompted
-4. Choose a parent folder
+- **Folder:** the open folder to start with; **Choose folder…** picks another, or creates one. Made in another folder, the window then opens that folder with the solution.
+- **Build with:** the Clarion installation, compiler version and configuration. **Browse…** finds an installation outside the standard locations.
+- **Start from:** the programs already in the folder, or a new empty program.
+  - **From the programs:** the page shows one project per program, as an EXE or a DLL, with its sources, the projects it references and its export file. It also lists the modules it could not place and possible leftovers, so you can settle them before anything is written. Where a legacy `.prj` or `.pr` in the folder compiles a program, that project gets exactly the sources the `.prj` lists, and its `.cwproj` includes the `.prj` (under **Projects to include**) so the `.prj`'s defines still apply. Every source is listed in the `.cwproj` as well: the build compiles what the `.prj` names but links only the `.cwproj`'s own sources.
+  - **A new empty program:** name its main source file. The solution gets one project, `SolutionName.cwproj`, and a starter `.clw` with `PROGRAM` and `CODE`.
+- **Solution name**, then **Create**.
 
-The wizard creates a minimal ready-to-compile solution:
-- `SolutionName.sln` — Visual Studio solution file
-- `SolutionName.cwproj` — Clarion project file (auto-configured with detected Clarion version)
-- `SolutionName.clw` — Starter source file with `PROGRAM` and `CODE`
-
-The Clarion version and configuration are auto-detected from your installed Clarion. The solution opens immediately after creation.
+The solution opens as soon as it is created.
 
 ---
 
@@ -95,11 +92,16 @@ Clarion Tools
 ├── Solution View
 │   ├── MySolution.sln
 │   │   ├── MyApplication.cwproj
-│   │   │   ├── MyApp.app
-│   │   │   ├── MyApp.clw
-│   │   │   └── includes/
-│   │   │       └── MyFile.inc
+│   │   │   ├── File Drivers
+│   │   │   │   └── TOPSPEED
+│   │   │   ├── Libraries, Objects and Resource Files
+│   │   │   ├── Projects to include
+│   │   │   ├── Referenced Projects
+│   │   │   │   └── MyLibrary
+│   │   │   └── MyApp.clw
 │   │   └── MyLibrary.cwproj
+│   │       ├── File Drivers
+│   │       ├── …
 │   │       └── MyLib.clw
 │   └── Recent Solutions
 │       ├── ProjectA (Last opened: 2026-01-08)
@@ -113,6 +115,12 @@ Clarion Tools
 **Click to open files:**
 - Single-click: Selects file
 - Double-click: Opens file in editor
+
+**A project's folders, as in the Clarion IDE:** each project shows **File Drivers**, **Libraries, Objects and Resource Files**, **Projects to include** (legacy TopSpeed `.prj`/`.pr` projects pulled into the build) and **Referenced Projects**, always, then its source files. Right-click a folder for **Add…** (also its `+` button) and an entry for **Remove**; the change is saved to the `.cwproj` at once, as the IDE does. A click on a folder opens Project Properties on its Sources tab, on a referenced project its own Project Properties, on an included project its file.
+
+**A source's own pragmas:** on the Sources tab of Project Properties, the **Pragmas** button of a compiled source shows and sets the options the Clarion IDE keeps for that one file (its File Options): defines (`name=>value;name=>value`), debug info, warnings, line numbers, and the stack and index checks. Each is **Default** (the project's setting) or the source's own value, and is stored on the source's item in the `.cwproj` as the IDE stores it. A source's own defines also decide its `COMPILE`/`OMIT` blocks, after the project's.
+
+**Legacy projects:** the Clarion sources an included `.prj` or `.pr` compiles (its `#compile` lines) belong to the project and are listed with its sources, so hover, Go to Definition and redirection work for them as for any other source. The `.prj`'s `#include` files, `#set` macros and `#if` conditions are followed; a condition that cannot be decided (`#older`, or `#exists` for a file not found) counts every branch it might take. A `.prj` changed outside VS Code is read again with the solution, and saving one in VS Code redraws the Solution View.
 
 **Projects sorted by build order:** Projects in the Solution View are ordered dependency-first (libraries before the applications that depend on them), matching the actual build order.
 
@@ -328,7 +336,7 @@ Redirection comes from the selected **Clarion version** — its `ClarionProperti
 
 - The installation list ends with **Browse for ClarionProperties.xml…**, so any file can be chosen even when a normal install was also found.
 - Opening a solution offers **Select Different Configuration…** before adopting the current one (Enter or Esc keeps it).
-- While a non-default file is active, the Clarion Tools panel shows a **Config dir** row, and builds pass the same directory to MSBuild as `ConfigDir`, so what you see is what compiles.
+- While a non-default file is active, Solution Properties names its folder, and builds pass the same directory to MSBuild as `ConfigDir`, so what you see is what compiles.
 
 **Manual configuration:**
 ```json
@@ -376,28 +384,26 @@ The full list is in the **[Commands Reference](../reference/commands.md)**.
 
 ---
 
-## The Actions Panel
+## The Solution View's Title Bar
 
-The **Actions** panel at the top of the **Clarion Tools** sidebar has a toolbar and a summary of the open solution.
+With a solution open, the Solution View's title bar has **Build**, **Run** (Ctrl+F5), **Debug** (F5) and **Solution Properties** (the gear). Its `…` menu has Build and Run, Build and Debug, Open in Clarion IDE, Refresh Solution, Open Solution List, Close Solution, and the tree's Filter, Clear Filter and sort order.
 
-**Toolbar:** Open in the Clarion IDE, Build, Run, Build and Run, Debug, Build and Debug. It wraps to a second line in a narrow sidebar.
+With no solution open, the view offers Open Solution, a recent solution, and, with a folder open, New Solution.
 
-**Rows** (a row with a command behind it is clickable):
+## Solution Properties
 
-| Row | Shows | Click |
-|---|---|---|
-| Clarion | The Clarion version in use | Set the version (for this solution when one is open) |
-| Solution | The open solution | — |
-| Config | The build configuration | Change it |
-| Projects | How many projects the solution has | — |
-| Startup | The project Run and Debug start | Choose another (also **Clarion: Choose Startup Project**) |
-| Run | *Only when `clarion.run.command` is set* | Open that setting |
-| Build log | Whether the build log is kept | Open the last log, or keep / stop keeping it |
-| Settings | — | Open the Clarion build settings |
-| Graph | The file graph: files, edges, build time, and a ⚠️ count when project sources cannot be found | Open the **Unresolved File References** report |
-| Config dir | *Only when a non-default ClarionProperties file is active* | — |
+**Solution Properties** (the gear, the solution node's menu, or **Clarion: Solution Properties**) opens a page for the open solution. Changes apply at once.
 
-The Graph row follows the graph: it updates when the graph is rebuilt after a project (`.cwproj`) or build configuration change. A source file added to or removed from a project while the solution is open is picked up then, without a reload.
+| Section | Shows |
+|---|---|
+| Build with | The Clarion installation (with the folder of a ClarionProperties.xml outside the standard location), the compiler version, the configuration and the startup project. **Browse…** finds an installation outside the standard locations |
+| Projects | Each project's type (EXE, DLL or LIB), the projects it references, and for a DLL whether its export file is found through redirection. **Properties** opens the project's own page. **New project…** adds a project to the solution (its name, EXE or DLL, main source file, and optionally a folder below the solution's folder, such as `Libs\Orders`, made when it is missing; a DLL also gets its export file), and **Add an existing project…** adds a .cwproj from disk. A project in a sub-folder reads the redirection file in its own folder, else the one in Clarion's `bin`, not one beside the .sln; the add warns when that applies |
+| Build and run | Whether the build log is kept (and the last one), what Run starts (`clarion.run.command`), and the Clarion build settings |
+| File graph | Files, edges and build time, with a ⚠️ count when project sources cannot be found; **Unresolved file references…** opens that report |
+
+The file graph line follows the graph: it updates when the graph is rebuilt after a project (`.cwproj`) or build configuration change. A source file added to or removed from a project while the solution is open is picked up then, without a reload.
+
+**Open Solution** shows the same page when something has to be chosen: a solution with no remembered installation, compiler or configuration that works, when there is more than one to choose from. A solution whose remembered choice still works opens straight away.
 
 ---
 

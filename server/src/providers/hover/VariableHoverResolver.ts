@@ -65,7 +65,8 @@ export class VariableHoverResolver {
                 type: symbolInfo.type,
                 line: symbolInfo.location.line
             };
-            return this.formatter.formatParameter(word, parameterInfo, currentScope, symbolInfo.location.uri ?? document.uri);
+            // The procedure that declares it: a ROUTINE's parameters are its procedure's (#757).
+            return this.formatter.formatParameter(word, parameterInfo, symbolInfo.scope?.token ?? currentScope, symbolInfo.location.uri ?? document.uri);
         }
         return null;
     }

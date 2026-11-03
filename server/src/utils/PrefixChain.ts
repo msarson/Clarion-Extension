@@ -82,9 +82,24 @@ export function resolvePrefixedName(tokens: Token[], index: number): PrefixedNam
  * Inside a MAP this is what separates a prototype from a parameter, a type argument
  * or a continuation: `GROUP(CFG:Type)` carries a prefixed name that is emphatically
  * not a declaration, and it is never first on its line.
+ *
+ * #790: nor does a name start a statement on a line continued from the one above with
+ * `|` (comments between are skipped): `Proc(LONG n), |` then `EXPORT,NAME('x')` is one
+ * prototype, and EXPORT is its attribute, not a second declaration.
  */
 export function prefixedNameStartsLine(tokens: Token[], index: number): boolean {
     const { startIndex } = resolvePrefixedName(tokens, index);
     const previous = tokens[startIndex - 1];
-    return previous === undefined || previous.line !== tokens[index].line;
+    if (previous && previous.line === tokens[index].line) return false;
+    return !continuesPreviousLine(tokens, startIndex);
+}
+
+/**
+ * Whether the line whose first token is `tokens[firstOnLine]` continues the statement above it:
+ * the previous token, comments skipped, is a `|` line continuation (#790).
+ */
+export function continuesPreviousLine(tokens: Token[], firstOnLine: number): boolean {
+    let p = firstOnLine - 1;
+    while (p >= 0 && tokens[p].type === TokenType.Comment) p--;
+    return p >= 0 && (tokens[p].type === TokenType.LineContinuation || tokens[p].value === '|');
 }
