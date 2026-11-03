@@ -89,16 +89,17 @@ Install from the Marketplace: open Extensions (`Ctrl+Shift+X`), search for **Cla
 
 ## What's new
 
-### 1.0.9 (2026-10-24)
+### 1.0.10 (2026-11-03)
 
-Hover cards that edit declarations, and solutions with their own versions and redirection layouts.
+Projects and solutions managed in VS Code as in the Clarion IDE, and code read the way the compiler reads it.
 
-- Hovering a control, a WINDOW, APPLICATION or REPORT header, or a FILE, KEY, INDEX, MEMO or BLOB declaration lists the attributes it sets, offers the ones it accepts, and adds or removes one with a click; completion after a comma offers only those attributes, and one the compiler rejects is flagged.
-- Hovering IF, LOOP, CASE, EXECUTE, BEGIN or ACCEPT shows what closes it, and warns when its END lines up with an enclosing block.
-- Custom-named Clarion versions, redirection files named by full path, quoted paths and masks such as `ab*.inc` all resolve, and a solution opened from another folder, or whose settings can't be saved, still opens.
-- Fixes for hover and Go to Definition on `SELF.InterfaceName`, member chains, ITEMIZE equates and prototypes in library includes, and for false discarded-return and indistinguishable-overload warnings.
+- Project Properties and Solution Properties show a project's and a solution's options as the Clarion IDE's pages do; projects can be added, sources, references and pragmas edited, and the Solution View shows each project's IDE folders.
+- New Solution asks everything on one page and builds a project for each program already in a folder, with its references and export files, following a legacy .prj where one compiles the program.
+- An INCLUDE inside a COMPILE or OMIT block that does not compile is no longer followed, decided from the equates before it and the project's defines.
+- Prototypes and headers continued with `|`, LIKE declarations and the attributes of CLASS, QUEUE and variable lines read correctly in hover, the Outline, Find All References and the diagnostics; BREAK and CYCLE show the loop they act on, and EXPORT has a card.
+- TXA files are highlighted.
 
-**Earlier:** 1.0.8 (2026-10-04) made diagnostics after an edit about three times quicker on large modules and let hover, completion and Go to Definition run ahead of the background check; 1.0.7 (2026-10-03) fixed the extension reading a module wrongly after some edits and made the hover after an edit much quicker on large modules. [Full changelog](CHANGELOG.md).
+**Earlier:** 1.0.9 (2026-10-24) added hover cards that list and edit a declaration's attributes and resolved solutions with custom-named versions and redirection layouts; 1.0.8 (2026-10-04) made diagnostics after an edit about three times quicker on large modules and let hover, completion and Go to Definition run ahead of the background check. [Full changelog](CHANGELOG.md).
 
 ---
 
@@ -125,7 +126,7 @@ Hover cards that edit declarations, and solutions with their own versions and re
 ## Contributors
 
 <!-- ALL-CONTRIBUTORS-BADGE:START - Do not remove or modify this section -->
-[![All Contributors](https://img.shields.io/badge/all_contributors-13-orange.svg?style=flat-square)](#contributors-)
+[![All Contributors](https://img.shields.io/badge/all_contributors-13-orange.svg?style=flat-square)](#contributors)
 <!-- ALL-CONTRIBUTORS-BADGE:END -->
 
 Thanks to everyone who has helped improve the Clarion Language Extension through code, bug reports, testing, ideas, documentation and their knowledge of the Clarion language.
