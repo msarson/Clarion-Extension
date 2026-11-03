@@ -29,6 +29,8 @@ Works in the current file with no solution open; opens out across files when a s
 - In a solution with several projects, a name is resolved through the redirection of the project that compiles the file you are in.
 - [Navigation in detail](docs/features/navigation.md)
 
+![Hover on the FILE keyword of Orders: the attributes it sets (DRIVER, PRE, CREATE, THREAD), the flags it accepts and those that take a value, each a link that adds or removes it](docs/images/hover-file-attributes.png)
+
 ### IntelliSense and signature help
 
 - Member completion after `SELF.`, `PARENT.`, `MyVar.` or `ClassName.`, walking inheritance and honouring PRIVATE and PROTECTED.
@@ -63,9 +65,12 @@ On Ctrl+.: Surround With, Negate Condition, Flip IF/ELSE, Introduce EQUATE, and 
 - Build from the Solution View with live output, projects ordered by dependency, and each build states what it is building, in which configuration, and the MSBuild command line. A solution that loads in a degraded state says so instead of silently returning nothing.
 - The Clarion version is remembered per solution and can be changed while it is loaded: the editor and the build follow the new install at once, without a reload. A version the properties file no longer registers is reported rather than used.
 - Settings are read and written in one place, so a pick sticks in a multi-root workspace; settings an earlier version wrote into a folder, which override the `.code-workspace` file, are reported with an offer to remove them.
+- Project Properties and Solution Properties show a project's and a solution's options as the Clarion IDE's pages do; New Solution builds projects from the programs already in a folder.
 - [Solution management in detail](docs/features/solution-management.md)
 
-<img src="docs/images/solution-view.png" width="344" alt="The Clarion Tools side bar: Actions with the selected Clarion version and configuration, the Solution View with the loaded solution and its project, and the Structure view of the open file">
+<img src="docs/images/solution-view.png" width="344" alt="The Clarion Tools side bar: the Solution View with Build, Run, Debug and Solution Properties on its title bar, the loaded solution and its project with the IDE's folders (File Drivers; Libraries, Objects and Resource Files; Projects to include; Referenced Projects), and the Structure view of the open file">
+
+![Project Properties for ViewJoinTest: the Application page with its target name, output path, output type, link mode and icon, each marked as applying to all configurations or not set](docs/images/project-properties.png)
 
 ### Editing and syntax
 
