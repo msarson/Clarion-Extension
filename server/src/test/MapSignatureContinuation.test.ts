@@ -136,6 +136,36 @@ suite('MAP signature checks read |-continued signatures whole', () => {
         assert.deepStrictEqual((diags ?? []).map(d => String(d.code)), []);
     });
 
+    /** A member file with its PROGRAM beside it (`programMap`: that PROGRAM's MAP lines); returns the member-side codes. */
+    async function standalone(memberLines: string[], programMap: string[] = []): Promise<string[]> {
+        const member = memberLines.join('\n');
+        fs.writeFileSync(path.join(tmpRoot, 'parent.clw'), ['  PROGRAM', '  MAP', ...programMap, '  END', '  CODE', ''].join('\n'));
+        const file = path.join(tmpRoot, 'member.clw');
+        fs.writeFileSync(file, member);
+        const doc = TextDocument.create(toUri(file), 'clarion', 1, member);
+        const diags = await validateMissingMapDeclarations(new ClarionTokenizer(member).tokenize(), doc);
+        return (diags ?? []).map(d => String(d.code));
+    }
+    const CONTINUED_IMPL_DIFFERS = [
+        'MyProc PROCEDURE(*SomeClass pObj, STRING pName, |',
+        '                 STRING pValue, LONG pOut)',
+        '  CODE',
+        '  RETURN 0'
+    ];
+
+    test('a procedure-local MAP, both continued: a parameter that differs after the break is reported', async () => {
+        const outer = ['Outer PROCEDURE', '  MAP', ...CONTINUED_DECL, '  END', '  CODE', '  RETURN', ''];
+        const programMap = ["    MODULE('member.clw')", 'Outer    PROCEDURE', '    END'];
+        assert.deepStrictEqual(await standalone(["  MEMBER('parent.clw')", '', ...outer, ...CONTINUED_IMPL], programMap), []);
+        assert.deepStrictEqual(await standalone(["  MEMBER('parent.clw')", '', ...outer, ...CONTINUED_IMPL_DIFFERS], programMap), ['map-signature-mismatch']);
+    });
+
+    test('a bare prototype in the member\'s own MAP, both continued: a parameter that differs after the break is reported', async () => {
+        const map = ['  MAP', ...CONTINUED_DECL, '  END', ''];
+        assert.deepStrictEqual(await standalone(["  MEMBER('parent.clw')", '', ...map, ...CONTINUED_IMPL]), []);
+        assert.deepStrictEqual(await standalone(["  MEMBER('parent.clw')", '', ...map, ...CONTINUED_IMPL_DIFFERS]), ['map-signature-mismatch']);
+    });
+
     test('PROGRAM side: continued MAP prototype, one-line implementation: no mismatch', async () => {
         const codes = await parentSide(CONTINUED_DECL, ONE_LINE_IMPL);
         assert.deepStrictEqual(codes, []);
