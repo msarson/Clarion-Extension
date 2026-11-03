@@ -80,7 +80,8 @@ suite('PROP: cards describe their own property (#824)', () => {
         assert.match(service().getPropEntry('PROP:RejectCode')!.description, /REJECTCODE/);
     });
 
-    for (const name of ['PROP:Step', 'PROP:Ticks', 'PROP:Vertical']) {
+    // PROP:Ticks was here until #847 found Clarion does not declare it; PROP:NoTicks is the real one.
+    for (const name of ['PROP:Step', 'PROP:NoTicks', 'PROP:Vertical']) {
         test(`${name} is not the SLIDER page's title`, () => {
             const entry = service().getPropEntry(name);
             assert.ok(entry, `${name} is known`);

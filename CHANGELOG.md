@@ -8,6 +8,10 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [1.0.11] - Unreleased
 
+#### Navigation and hover
+
+- **Completion and hover no longer offer four runtime properties Clarion does not have.** PROP:Break, PROP:Select, PROP:Slider and PROP:Ticks are declared nowhere and do not compile; the properties that do their job, PROP:NoTicks, PROP:SliderPos, PROP:RangeLow and PROP:RangeHigh, now have cards of their own. [#847](https://github.com/msarson/Clarion-Extension/issues/847)
+
 ---
 
 ### [1.0.10] - 2026-11-03
