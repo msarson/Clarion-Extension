@@ -2869,14 +2869,16 @@ export class DocumentStructure {
     /**
      * Gets the first CODE marker token in the document
      * This marks the boundary between global scope and procedural code
-     * CODE can be tokenized as either Keyword or Label depending on context
+     * CODE is tokenized as an ExecutionMarker when indented and a Label at column 0
      * @returns First CODE token or null if not found
      */
     public getFirstCodeMarker(): Token | null {
         // Find first CODE keyword or label
         for (const token of this.tokens) {
             if (token.value.toUpperCase() === 'CODE' &&
-                (token.type === TokenType.Keyword || token.type === TokenType.Label) &&
+                // #856: an indented CODE is an ExecutionMarker token, a column-0 one a Label.
+                (token.type === TokenType.ExecutionMarker || token.type === TokenType.Keyword ||
+                 token.type === TokenType.Label) &&
                 this.isBareExecutionMarker(token)) {   // #855: not a global `Code  LONG`
                 return token;
             }

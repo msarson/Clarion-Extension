@@ -112,9 +112,7 @@ suite('Issue #855 — fields and variables labelled Code or Data', () => {
         ]);
         const ds = new DocumentStructure(tokens);
         ds.process();
-        // Only the declaration on line 3 is pinned here: getFirstCodeMarker does not yet
-        // recognise an indented CODE (an ExecutionMarker token), a separate gap.
-        assert.notStrictEqual(ds.getFirstCodeMarker()?.line, 3, 'the Code LONG declaration is not a CODE marker');
+        assert.strictEqual(ds.getFirstCodeMarker()?.line, 6, 'the program CODE, not the Code LONG declaration');
         const globals = ds.getGlobalVariables().map(t => t.value.toUpperCase());
         assert.deepStrictEqual(globals, ['CODE', 'DATA', 'OTHER']);
     });
