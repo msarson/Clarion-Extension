@@ -769,7 +769,9 @@ export class DocumentStructure {
                         break;
                     case "CODE":
                     case "DATA":
-                        this.handleExecutionMarker(token);
+                        // #855: `Code = 1` in a procedure body is an assignment to a
+                        // variable labelled Code, not a second CODE statement.
+                        if (this.isBareExecutionMarker(token)) this.handleExecutionMarker(token);
                         break;
                     case "WHILE":
                     case "UNTIL":
@@ -788,7 +790,11 @@ export class DocumentStructure {
             ) {
                 // Special case: CODE/DATA at column 0 should be execution markers, not field labels
                 const upperValue = token.value.toUpperCase();
-                if ((token.type === TokenType.Label && token.start === 0) && (upperValue === 'CODE' || upperValue === 'DATA')) {
+                // #855: only when nothing but a comment follows it. `Code  CSTRING(16)`
+                // is a field or variable labelled Code (compiler-verified legal on C10
+                // and C12) and belongs to its structure like any other label.
+                if ((token.type === TokenType.Label && token.start === 0) && (upperValue === 'CODE' || upperValue === 'DATA') &&
+                    this.isBareExecutionMarker(token)) {
                     if (DOCSTRUCT_TRACE) logger.info(`🔧 [ROUTINE-DATA-FIX] Handling CODE/DATA as execution marker: "${token.value}" at line ${token.line}`);
                     if (DOCSTRUCT_TRACE) logger.debug(`🔧 [ROUTINE-DATA-FIX] Handling CODE/DATA as execution marker: "${token.value}" at line ${token.line}`);
                     this.handleExecutionMarker(token);
@@ -1460,6 +1466,14 @@ export class DocumentStructure {
             if (t.value && t.value.toUpperCase() === 'EQUATE') return true;
         }
         return false;
+    }
+
+    /** #855 — a CODE or DATA statement stands alone on its line (a comment may follow).
+     *  Anything else after it makes the word a label (`Code  LONG`) or a variable
+     *  reference (`Code = 1`), not the execution marker. */
+    private isBareExecutionMarker(token: Token): boolean {
+        const lineTokens = this.tokensByLine.get(token.line) ?? [];
+        return lineTokens.every(t => t === token || t.start < token.start || t.type === TokenType.Comment);
     }
 
     private handleExecutionMarker(token: Token): void {
@@ -2825,7 +2839,7 @@ export class DocumentStructure {
                 const upperValue = token.value.toUpperCase();
                 
                 // Skip keywords that might be tokenized as labels (DATA, CODE)
-                if (upperValue === 'DATA' || upperValue === 'CODE') {
+                if ((upperValue === 'DATA' || upperValue === 'CODE') && this.isBareExecutionMarker(token)) {
                     continue;
                 }
                 
@@ -2862,7 +2876,8 @@ export class DocumentStructure {
         // Find first CODE keyword or label
         for (const token of this.tokens) {
             if (token.value.toUpperCase() === 'CODE' &&
-                (token.type === TokenType.Keyword || token.type === TokenType.Label)) {
+                (token.type === TokenType.Keyword || token.type === TokenType.Label) &&
+                this.isBareExecutionMarker(token)) {   // #855: not a global `Code  LONG`
                 return token;
             }
         }

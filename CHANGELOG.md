@@ -12,6 +12,10 @@ All notable changes to the Clarion Extension are documented here.
 
 - **Completion and hover no longer offer four runtime properties Clarion does not have.** PROP:Break, PROP:Select, PROP:Slider and PROP:Ticks are declared nowhere and do not compile; the properties that do their job, PROP:NoTicks, PROP:SliderPos, PROP:RangeLow and PROP:RangeHigh, now have cards of their own. [#847](https://github.com/msarson/Clarion-Extension/issues/847)
 
+#### Diagnostics
+
+- **A field or variable labelled Code or Data is no longer taken for the CODE or DATA statement.** A VIEW that projected such a field, `PROJECT(PRL:Code)`, was warned that it is not a field on its FILE, and a procedure's local `Code` variable could move where its code section was thought to start. Only a CODE or DATA alone on its line now counts as the statement. [#855](https://github.com/msarson/Clarion-Extension/issues/855)
+
 ---
 
 ### [1.0.10] - 2026-11-03
