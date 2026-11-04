@@ -995,6 +995,30 @@ export class FileRelationshipGraph {
     }
 
     /**
+     * The PROGRAM files that INCLUDE `filePath` at program level — directly, or through other
+     * included files. A MAP in such a file is that PROGRAM's MAP, visible to every module of the
+     * program. A walk stops at a MEMBER module (its own MEMBER edge or a shim's): a MAP that
+     * arrives there is that module's, not the program's (#322's callout INCs).
+     */
+    public getIncludingProgramFiles(filePath: string): string[] {
+        if (!this._built) return [];
+        const programs = new Map<string, string>();
+        const visited = new Set<string>([this.normalizePath(filePath)]);
+        const queue = [filePath];
+        while (queue.length > 0 && visited.size <= FileRelationshipGraph.MAX_INCLUDER_FILES) {
+            for (const includer of this.getIncludingFiles(queue.shift()!)) {
+                const key = this.normalizePath(includer);
+                if (visited.has(key)) continue;
+                visited.add(key);
+                if (this.getProgramFile(includer) ?? this.programViaIncludedShim(includer)) continue;
+                if (this.getMemberFiles(includer).length > 0) programs.set(key, includer);
+                else queue.push(includer);
+            }
+        }
+        return [...programs.values()];
+    }
+
+    /**
      * #483 — can `fromPath` legitimately see a declaration that lives in `declPath`?
      *
      * A procedure prototype is visible to a caller only through the caller's own
@@ -1018,9 +1042,13 @@ export class FileRelationshipGraph {
         if (decl === from) return true;
         if (!this.forwardEdges.has(decl) && !this.reverseEdges.has(decl)) return undefined;
 
-        const program = this.getProgramFile(from);
+        // A shim-headed module (`INCLUDE('member.clw')` holding the MEMBER) has no MEMBER edge of
+        // its own; without the shim lookup it had no PROGRAM here, so a prototype INCLUDEd by that
+        // PROGRAM answered `false` and was dropped in favour of a stale copy the graph never saw.
+        const programOf = (f: string): string | undefined => this.getProgramFile(f) ?? this.programViaIncludedShim(f);
+        const program = programOf(from);
         const belongsHere = (f: string): boolean =>
-            f === from || (program !== undefined && (f === program || this.getProgramFile(f) === program));
+            f === from || (program !== undefined && (f === program || programOf(f) === program));
 
         if (belongsHere(decl)) return true;
 
