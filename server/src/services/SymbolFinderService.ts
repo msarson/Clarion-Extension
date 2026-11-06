@@ -2237,7 +2237,11 @@ export class SymbolFinderService {
         // walk tiers, which start from this file and its MEMBER parent.
         const curPathForReach = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
         const frg = FileRelationshipGraph.getInstance();
-        const hits = allHits.filter(h => frg.isDeclarationReachableFrom(h.filePath, curPathForReach) !== false);
+        // A hit the graph PROVES reachable outranks one it has never seen: a stale copy of the
+        // same header in a later .red folder (unknown to the graph) otherwise wins on index order.
+        const reach = allHits.map(h => ({ h, r: frg.isDeclarationReachableFrom(h.filePath, curPathForReach) }));
+        const proven = reach.filter(x => x.r === true).map(x => x.h);
+        const hits = proven.length > 0 ? proven : reach.filter(x => x.r !== false).map(x => x.h);
         if (hits.length === 0) {
             logger.info(`#483: ${allHits.length} index hit(s) for "${word}" are all unreachable from ${path.basename(curPathForReach)} — falling through to the walk`);
             return null;
