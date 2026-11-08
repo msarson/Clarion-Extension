@@ -11,6 +11,7 @@ All notable changes to the Clarion Extension are documented here.
 #### Navigation and hover
 
 - **Completion and hover no longer offer four runtime properties Clarion does not have.** PROP:Break, PROP:Select, PROP:Slider and PROP:Ticks are declared nowhere and do not compile; the properties that do their job, PROP:NoTicks, PROP:SliderPos, PROP:RangeLow and PROP:RangeHigh, now have cards of their own. [#847](https://github.com/msarson/Clarion-Extension/issues/847)
+- **Go to Symbol in Workspace lists a declaration by its label.** Ctrl+T showed and searched the Structure view's text, `GROUP (GLO:Settings),PRE(GLO)`, so typing GROUP returned every group. It now shows `GLO:Settings` with the type and attributes beside it. [#859](https://github.com/msarson/Clarion-Extension/issues/859)
 
 #### Diagnostics
 
