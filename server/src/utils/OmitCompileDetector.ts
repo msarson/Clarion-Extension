@@ -5,6 +5,7 @@
 import { Token, TokenType } from '../ClarionTokenizer';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import LoggerManager from '../logger';
+import { terminatorOnLine } from './ConditionalCompile';
 
 const logger = LoggerManager.getLogger("OmitCompileDetector");
 logger.setLevel("error");
@@ -108,16 +109,29 @@ export class OmitCompileDetector {
             if (directiveType !== 'OMIT' && directiveType !== 'COMPILE') continue;
 
             let terminatorString: string | null = null;
+            let terminatorToken: Token | undefined;
+            // Whether the directive's line goes on after its closing parenthesis (code or a comment).
+            let tail = false;
             for (let j = i + 1; j < Math.min(i + 5, tokens.length); j++) {
                 if (tokens[j].type === TokenType.String) {
                     terminatorString = tokens[j].value.replace(/^'(.*)'$/, '$1');
+                    terminatorToken = tokens[j];
                     // If there is a condition argument after the terminator string (comma + identifier),
                     // we cannot evaluate macros at analysis time, so treat conditional OMIT/COMPILE
-                    // as not-omitted for navigation purposes (hover, F12, FAR).
-                    for (let k = j + 1; k < Math.min(j + 4, tokens.length); k++) {
-                        if (tokens[k].type === TokenType.Delimiter) continue; // skip comma/parens
-                        if (tokens[k].line !== token.line) break;
-                        // Any non-delimiter token on the same line = condition argument present
+                    // as not-omitted for navigation purposes (hover, F12, FAR). The argument list ends
+                    // at `)`, and a comment is not an argument: what follows either is the rest of the line.
+                    let closed = false;
+                    for (let k = j + 1; k < tokens.length && tokens[k].line === token.line; k++) {
+                        const t = tokens[k];
+                        if (!closed && t.type === TokenType.Delimiter) {
+                            if (t.value === ')') closed = true;
+                            continue; // skip comma/parens
+                        }
+                        if (closed || t.type === TokenType.Comment) {
+                            tail = true;
+                            break;
+                        }
+                        // Any other token before `)` = condition argument present
                         terminatorString = null;
                         break;
                     }
@@ -126,6 +140,20 @@ export class OmitCompileDetector {
             }
 
             if (terminatorString) {
+                // The rest of the directive's own line can hold the terminator (`OMIT('**') ! **`):
+                // the block opens and closes on that line. Read only when there is a rest (#733).
+                const rest = tail && terminatorToken && terminatorToken.line === token.line
+                    ? lineText(token.line).slice(terminatorToken.start + terminatorToken.value.length)
+                    : '';
+                if (rest && terminatorOnLine(rest, terminatorString)) {
+                    blocks.push({
+                        type: directiveType as 'OMIT' | 'COMPILE',
+                        terminator: terminatorString,
+                        startLine: token.line,
+                        endLine: token.line
+                    });
+                    continue;
+                }
                 pendingBlocks.push({
                     type: directiveType as 'OMIT' | 'COMPILE',
                     terminator: terminatorString,
@@ -140,9 +168,8 @@ export class OmitCompileDetector {
 
         // Pass 2: scan every document line to find terminator positions.
         // This correctly handles terminator lines that have no tokens.
-        // String literals are stripped before checking so a terminator that
-        // appears only inside quotes (e.g. MESSAGE('***')) does NOT close the block.
-        // Clarion strings are single-quoted; '' is an escaped single quote inside a string.
+        // A terminator inside a string in code (e.g. MESSAGE('***')) does NOT close the block;
+        // one in a comment does, quoted or not (`!'***'`) — see terminatorOnLine.
         const activeBlocks = [...pendingBlocks];
         // #733: this runs on every edit, so start after the first directive, and strip strings
         // only from a line that holds a terminator (stripping cannot create one that has no quote).
@@ -152,14 +179,12 @@ export class OmitCompileDetector {
         for (let lineNum = firstLine; lineNum < lineCount && activeBlocks.length > 0; lineNum++) {
             const rawLine = lineText(lineNum);
             if (!quoted && !activeBlocks.some(b => rawLine.includes(b.terminator))) continue;
-            // Strip string literals (handles '' escaped quotes inside strings)
-            const lineWithoutStrings = rawLine.replace(/'([^']|'')*'/g, "''");
 
             for (let b = activeBlocks.length - 1; b >= 0; b--) {
                 const block = activeBlocks[b];
                 if (lineNum <= block.startLine) continue;
 
-                if (lineWithoutStrings.includes(block.terminator)) {
+                if (terminatorOnLine(rawLine, block.terminator)) {
                     blocks.push({
                         type: block.type,
                         terminator: block.terminator,
