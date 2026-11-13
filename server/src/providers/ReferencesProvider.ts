@@ -44,6 +44,7 @@ import { OmitCompileDetector, DirectiveBlock } from '../utils/OmitCompileDetecto
 import { cooperativeCheckpoint } from '../utils/cooperativeScan';
 import { ReferenceCountIndex } from '../services/ReferenceCountIndex';
 import { resolvePrefixedName } from '../utils/PrefixChain';
+import { resolveFieldEquate } from '../utils/FieldEquateResolver';
 import { onDiskSpelling, pathToCanonicalUri } from '../utils/UriUtils';
 import LoggerManager from '../logger';
 
@@ -344,6 +345,15 @@ export class ReferencesProvider {
         // GENERATED code; the durable edit belongs in the .app (see #325).
         crossProjectDll: boolean = true
     ): Promise<Location[] | null> {
+        // A `?Name` field equate names a control, resolved by the rule hover and F12 use (#614).
+        // Terminal: the word ladder below drops the `?` (and bails on the sigil itself), then
+        // searches for the bare name, which no symbol carries.
+        const feqToken = TokenHelper.getFieldEquateTokenAt(this.tokenCache.getTokens(document), position.line, position.character);
+        if (feqToken) {
+            this.trace({ route: 'fieldEquate', word: feqToken.value });
+            return this.provideFieldEquateReferences(document, feqToken, context.includeDeclaration);
+        }
+
         const wordRange = TokenHelper.getWordRangeAtPosition(document, position);
         if (!wordRange) return null;
 
@@ -2066,6 +2076,42 @@ export class ReferencesProvider {
             }
         }
         return locations;
+    }
+
+    /**
+     * References for a `?Name` field equate: every `?Name` in this file that resolves to the
+     * same control, by the rule hover and F12 use (utils/FieldEquateResolver). Resolving each
+     * hit at ITS line keeps a same-named control in another procedure's window out, and puts a
+     * use inside a method of the procedure's local WindowManager class with that procedure.
+     * A window's controls are visible only to the code of the procedure that declares it, which
+     * is in the same file, so no cross-file scan exists.
+     *
+     * The declaration is the `?Name` in the control's `USE()`. Ranges cover the name without
+     * the `?`: that is the word rename replaces.
+     */
+    private provideFieldEquateReferences(document: TextDocument, feqToken: Token, includeDeclaration: boolean): Location[] | null {
+        const structure = this.tokenCache.getStructure(document);
+        const controlKeys = (line: number): Set<string> => {
+            const target = resolveFieldEquate(structure, feqToken.value, line);
+            if (!target) return new Set();
+            const controls = target.kind === 'control' ? [target.control] : target.controls.map(c => c.control);
+            return new Set(controls.map(c => `${c.line}:${c.start}`));
+        };
+        const wanted = controlKeys(feqToken.line);
+        if (wanted.size === 0) return null;
+
+        const nameLower = feqToken.value.toLowerCase();
+        const locations: Location[] = [];
+        for (const t of this.tokenCache.getTokens(document)) {
+            if (t.type !== TokenType.FieldEquateLabel || t.value.toLowerCase() !== nameLower) continue;
+            if (![...controlKeys(t.line)].some(k => wanted.has(k))) continue;
+            if (!includeDeclaration) {
+                const before = document.getText({ start: { line: t.line, character: 0 }, end: { line: t.line, character: t.start } });
+                if (/\bUSE\s*\(\s*$/i.test(before)) continue;
+            }
+            locations.push(Location.create(document.uri, Range.create(t.line, t.start + 1, t.line, t.start + t.value.length)));
+        }
+        return locations.length > 0 ? locations : null;
     }
 
     /**
