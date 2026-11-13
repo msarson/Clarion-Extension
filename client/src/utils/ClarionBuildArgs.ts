@@ -39,18 +39,36 @@ export function buildConfigDirArg(clarionPropertiesFile: string | undefined | nu
  * the redirection file and the macros. Without it the compile picks a version matching
  * ClarionBinPath, which cannot tell apart two registered versions sharing one bin.
  *
- * Passed only when the properties file registers that name: the CW task fails a name it
- * cannot find ("Could not find the Clarion version"), where leaving it out still builds
- * with the version ClarionBinPath belongs to. Omitted rather than passed empty.
+ * Passed only when it is safe; otherwise omitted, which still builds with the version
+ * ClarionBinPath belongs to, and `skipped` says why:
+ * - the properties file must register that exact name (the solution loader matches it
+ *   exactly too): the CW task fails a name it cannot find;
+ * - that version's own bin must be ClarionBinPath: a version from another install than
+ *   ClarionBinPath's crashes MSBuild, and the two can disagree while a solution is
+ *   still loading;
+ * - no `;` or `,`, which MSBuild would split into further properties.
  */
 export function buildClarionVersionArg(
     clarionVersion: string | undefined | null,
-    registeredVersions: ReadonlyArray<string> | null
-): string {
+    registeredVersions: ReadonlyArray<{ name: string; bin: string | undefined }> | null,
+    clarionBinPath: string
+): { arg: string; skipped?: string } {
     const version = (clarionVersion ?? '').trim();
-    if (!version || !registeredVersions?.includes(version)) return "";
+    if (!version) return { arg: "" };
+    if (/[;,]/.test(version)) return { arg: "", skipped: `"${version}" contains ; or , which MSBuild would split` };
+    const entry = registeredVersions?.find(v => v.name === version);
+    if (!entry) return { arg: "", skipped: `"${version}" is not registered in the properties file` };
+    if (!entry.bin || !sameFolder(entry.bin, clarionBinPath)) {
+        return { arg: "", skipped: `"${version}" belongs to ${entry.bin ?? 'no bin'}, not ClarionBinPath ${clarionBinPath}` };
+    }
     // #708 — bare, like ConfigDir: the launcher quotes an argument containing a space.
-    return `/property:clarion_version=${version}`;
+    return { arg: `/property:clarion_version=${version}` };
+}
+
+/** Windows folder paths compared without case or a trailing separator. */
+function sameFolder(a: string, b: string): boolean {
+    const norm = (p: string) => path.win32.normalize(p.trim()).replace(/[\\/]+$/, '').toLowerCase();
+    return norm(a) === norm(b);
 }
 
 /** #708 — an argument as it would be typed at a prompt: quoted when it contains whitespace. */

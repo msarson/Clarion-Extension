@@ -19,7 +19,7 @@ All notable changes to the Clarion Extension are documented here.
 
 #### Configuration and build
 
-- **The build compiles with the Clarion version chosen for the solution.** It named the settings folder and the version's bin but not the version itself, so with two versions registered on one bin, MSBuild could build with a different one from the version used for navigation and diagnostics. The chosen version is now passed when the properties file registers it. [#863](https://github.com/msarson/Clarion-Extension/issues/863)
+- **The build compiles with the Clarion version chosen for the solution.** It named the settings folder and the version's bin but not the version itself, so with two versions registered on one bin, MSBuild could build with a different one from the version used for navigation and diagnostics. The chosen version is now passed when the properties file registers it for the bin being built with. [#863](https://github.com/msarson/Clarion-Extension/issues/863)
 
 ---
 

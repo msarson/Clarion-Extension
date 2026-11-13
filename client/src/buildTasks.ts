@@ -54,7 +54,7 @@ import { ProjectDependencyResolver } from "./utils/ProjectDependencyResolver";
 import { ClarionProjectInfo } from "../../common/types";
 import { failOperationStatusBar, startOperationStatusBar, succeedOperationStatusBar } from "./statusbar/StatusBarManager";
 import { buildConfigDirArg, buildClarionVersionArg } from "./utils/ClarionBuildArgs";
-import { readRegisteredVersionNames } from "./utils/SolutionFallbackPolicy"; // #863
+import { readRegisteredVersions } from "./utils/SolutionFallbackPolicy"; // #863
 import { recordBuildLog } from "./utils/LastBuildLog"; // #681
 import { refreshSolutionPage } from "./views/ViewManager"; // #681
 
@@ -415,13 +415,16 @@ export function prepareBuildParameters(buildConfig: {
     }
 
     // #863 — and WHICH of that file's registered versions to compile with. The same tasks
-    // take Version="$(clarion_version)"; without it the compile picks a version matching
-    // ClarionBinPath, which cannot tell apart two versions sharing one bin. Only a name the
-    // properties file registers is passed: the CW task fails one it cannot find.
-    const clarionVersionArg = buildClarionVersionArg(globalClarionVersion, readRegisteredVersionNames(globalClarionPropertiesFile));
-    if (clarionVersionArg) {
-        buildArgs.push(clarionVersionArg);
-        logger.info(`🔹 Clarion version: ${globalClarionVersion}`);
+    // take Version="$(clarion_version)"; without it the compile picks the version
+    // ClarionBinPath belongs to, which cannot tell apart two versions sharing one bin.
+    // Left out whenever passing it could fail or crash the build (see buildClarionVersionArg).
+    const clarionVersion = buildClarionVersionArg(
+        globalClarionVersion, readRegisteredVersions(globalClarionPropertiesFile), clarionBinPath);
+    if (clarionVersion.arg) {
+        buildArgs.push(clarionVersion.arg);
+        logger.info(`🔹 Clarion version: ${globalClarionVersion.trim()}`);
+    } else if (clarionVersion.skipped) {
+        logger.warn(`⚠️ Clarion version not passed: ${clarionVersion.skipped}; building with the version ClarionBinPath belongs to`);
     }
 
     // Log the build configuration
