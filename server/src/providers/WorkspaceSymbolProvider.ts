@@ -21,6 +21,12 @@ const GROUPING_NODE = /^(?:MAP$|MODULE\b|PROJECT\b|JOIN\b)/i;
 const LABEL_FIRST_KINDS: SymbolKind[] = [SymbolKind.Function, SymbolKind.Method, SymbolKind.Key];
 
 /**
+ * An INDEX has the KEY's display shape, `Label INDEX(...)`, but kind Field, which a
+ * VIEW's `PROJECT(...)` also has, so it is matched by shape rather than by kind.
+ */
+const INDEX_SHAPE = /^\S+ INDEX\(/i;
+
+/**
  * Provides Workspace Symbol Search (Ctrl+T) — returns SymbolInformation[] for
  * all procedure/class/structure symbols across all cached and project source files.
  *
@@ -102,9 +108,12 @@ export class WorkspaceSymbolProvider {
         for (const sym of symbols) {
             const label = this.labelOf(sym);
             if (label !== undefined && (!queryLower || label.toLowerCase().includes(queryLower))) {
-                results.push(
-                    SymbolInformation.create(label, sym.kind, sym.range, uri, parentLabel ?? this.declarationText(sym, label))
-                );
+                // A MAP or MODULE prototype's name is the bare label and its signature is in
+                // detail, which is what tells overloads apart. Other details are descriptions
+                // ("Global Procedure"), not declaration text.
+                const signature = sym.detail?.trimStart().startsWith('(') ? sym.detail : undefined;
+                const container = parentLabel ?? this.declarationText(sym, label) ?? signature;
+                results.push(SymbolInformation.create(label, sym.kind, sym.range, uri, container));
             }
             if (sym.children && sym.children.length > 0) {
                 this.flattenSymbols(
@@ -122,21 +131,31 @@ export class WorkspaceSymbolProvider {
      * #859 — the label a symbol is searched and listed by. A symbol's own name is the
      * Outline's display text (`GROUP (Label),PRE(X)`, `Label LONG`, `Label ( LONG p )`).
      * A window control has no label, so it keeps its text. Returns undefined for a
-     * grouping node, which is not listed.
+     * grouping node, which is not listed. (No "Functions" or "Methods" containers are
+     * produced any more, so those names are real procedures and are listed.)
      */
     private labelOf(sym: ClarionDocumentSymbol): string | undefined {
         if (sym._clarionVarName) return sym._clarionVarName;
-        if (/^(?:Functions|Methods)$/.test(sym.name)) return undefined;
-        if (LABEL_FIRST_KINDS.includes(sym.kind)) return /^[^\s(]+/.exec(sym.name)?.[0];
+        if (LABEL_FIRST_KINDS.includes(sym.kind) || INDEX_SHAPE.test(sym.name)) {
+            return /^[^\s(]+/.exec(sym.name)?.[0];
+        }
         return GROUPING_NODE.test(sym.name) ? undefined : sym.name;
     }
 
-    /** The display text without the label: `GROUP,PRE(X)`, `LONG`, `( LONG p )`. */
+    /**
+     * The display text without the label: `GROUP,PRE(X)`, `LONG`, `( LONG p )`. Undefined
+     * for an empty parameter list, or when the text does not start with the label.
+     */
     private declarationText(sym: ClarionDocumentSymbol, label: string): string | undefined {
         const bracketed = ` (${label})`;
-        const text = sym.name.includes(bracketed)
-            ? sym.name.replace(bracketed, '')
-            : sym.name.slice(label.length).trim();
-        return text || undefined;
+        let text: string;
+        if (sym.name.includes(bracketed)) {
+            text = sym.name.replace(bracketed, '');
+        } else if (sym.name.toLowerCase().startsWith(label.toLowerCase())) {
+            text = sym.name.slice(label.length).trim();
+        } else {
+            return undefined;
+        }
+        return text && !/^\(\s*\)$/.test(text) ? text : undefined;
     }
 }

@@ -129,6 +129,50 @@ suite('Issue #859 — workspace/symbol names are labels', () => {
         assert.strictEqual(find(results, "BUTTON('OK')").containerName, 'Win');
     });
 
+    // Review follow-up: shapes the first fixture did not hold.
+    test('procedures named Functions or Methods, an INDEX, overloads and empty parameter lists', async () => {
+        const uri = 'file:///c:/test859/review.clw';
+        TokenCache.getInstance().getTokens(TextDocument.create(uri, 'clarion', 1, [
+            '  PROGRAM',
+            '  MAP',
+            'Functions   PROCEDURE(LONG a)',
+            "    MODULE('ext.clw')",
+            'Over          PROCEDURE(LONG a)',
+            'Over          PROCEDURE(STRING a)',
+            '    END',
+            '  END',
+            "Cust        FILE,DRIVER('TOPSPEED'),PRE(CUS)",
+            'NameIdx       INDEX(CUS:Name)',
+            'Record        RECORD',
+            'Name            STRING(20)',
+            '              END',
+            '            END',
+            'Thing       CLASS,TYPE',
+            'Methods       PROCEDURE',
+            '            END',
+            '  CODE',
+            '  RETURN',
+            'Sub         PROCEDURE()',
+            '  CODE'
+        ].join('\r\n')));
+        const results = (await provider.provideWorkspaceSymbols('')).filter(r => r.location.uri === uri);
+        const names = results.map(r => `${r.name} [${r.containerName}]`).join(' | ');
+
+        assert.ok(results.some(r => r.name === 'Functions'), `a MAP procedure named Functions is listed: ${names}`);
+        assert.strictEqual(find(results, 'Methods').containerName, 'Thing', names);
+
+        const index = find(results, 'NameIdx');
+        assert.strictEqual(index.containerName, 'Cust', names);
+        assert.ok(!results.some(r => /INDEX\(/.test(r.name)), `no INDEX text in a name: ${names}`);
+
+        const overloads = results.filter(r => r.name === 'Over');
+        assert.strictEqual(overloads.length, 2, names);
+        assert.ok(overloads.some(r => /LONG/i.test(r.containerName ?? '')), `the LONG overload shows its signature: ${names}`);
+        assert.ok(overloads.some(r => /STRING/i.test(r.containerName ?? '')), `the STRING overload shows its signature: ${names}`);
+
+        assert.strictEqual(find(results, 'Sub').containerName, undefined, `no "()" beside a procedure without parameters: ${names}`);
+    });
+
     test('the Outline keeps its display text', () => {
         const tokens = TokenCache.getInstance().getTokensByUri(URI)!;
         const names = new ClarionDocumentSymbolProvider().provideDocumentSymbols(tokens, URI).map(s => s.name);
