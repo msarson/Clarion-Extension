@@ -15,7 +15,7 @@ import * as path from "path";
  * `ConfigDir` is not an MSBuild concept — it appears nowhere in
  * Microsoft.Common.targets and `msbuild /help` has no such switch. It is an ordinary
  * property that `SoftVelocity.Build.Clarion.targets` hands to its own tasks
- * (`Redirection` ×3, `CWClean`) and never defines itself, so it can only come from the
+ * (the `CW` compile, `Redirection` ×3, `CWClean`; #863) and never defines itself, so it can only come from the
  * caller. It names the FOLDER holding ClarionProperties.xml, which is where the
  * compile target's version, its redirection file name and its macros are read from.
  *
@@ -28,6 +28,29 @@ export function buildConfigDirArg(clarionPropertiesFile: string | undefined | nu
     // #708 — bare: MSBuild is started without a shell, and the launcher quotes an argument
     // containing a space itself. A quote of our own reaches MSBuild literally.
     return `/property:ConfigDir=${path.dirname(clarionPropertiesFile)}`;
+}
+
+/**
+ * #863 — the `/property:clarion_version=` argument naming the chosen version, or an empty
+ * string when none is chosen.
+ *
+ * The targets hand `Version="$(clarion_version)"` to the `CW` compile, `Redirection` and
+ * `CWClean`, so it selects which of ConfigDir's registered versions supplies the compiler,
+ * the redirection file and the macros. Without it the compile picks a version matching
+ * ClarionBinPath, which cannot tell apart two registered versions sharing one bin.
+ *
+ * Passed only when the properties file registers that name: the CW task fails a name it
+ * cannot find ("Could not find the Clarion version"), where leaving it out still builds
+ * with the version ClarionBinPath belongs to. Omitted rather than passed empty.
+ */
+export function buildClarionVersionArg(
+    clarionVersion: string | undefined | null,
+    registeredVersions: ReadonlyArray<string> | null
+): string {
+    const version = (clarionVersion ?? '').trim();
+    if (!version || !registeredVersions?.includes(version)) return "";
+    // #708 — bare, like ConfigDir: the launcher quotes an argument containing a space.
+    return `/property:clarion_version=${version}`;
 }
 
 /** #708 — an argument as it would be typed at a prompt: quoted when it contains whitespace. */

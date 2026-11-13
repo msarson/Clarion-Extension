@@ -43,7 +43,7 @@ function writeBuildHeader(p: { buildTarget: "Solution" | "Project"; targetName: 
     for (const line of formatBuildHeader(p)) buildOut.appendLine(line);
     buildOut.show(true);
 }
-import { globalSolutionFile, globalSettings, globalClarionPropertiesFile } from "./globals";
+import { globalSolutionFile, globalSettings, globalClarionPropertiesFile, globalClarionVersion } from "./globals";
 import * as path from "path";
 import * as fs from "fs";
 import processBuildErrors from "./processBuildErrors";
@@ -53,7 +53,8 @@ import { SolutionCache } from "./SolutionCache";
 import { ProjectDependencyResolver } from "./utils/ProjectDependencyResolver";
 import { ClarionProjectInfo } from "../../common/types";
 import { failOperationStatusBar, startOperationStatusBar, succeedOperationStatusBar } from "./statusbar/StatusBarManager";
-import { buildConfigDirArg } from "./utils/ClarionBuildArgs";
+import { buildConfigDirArg, buildClarionVersionArg } from "./utils/ClarionBuildArgs";
+import { readRegisteredVersionNames } from "./utils/SolutionFallbackPolicy"; // #863
 import { recordBuildLog } from "./utils/LastBuildLog"; // #681
 import { refreshSolutionPage } from "./views/ViewManager"; // #681
 
@@ -392,7 +393,7 @@ export function prepareBuildParameters(buildConfig: {
     // `ConfigDir` is not an MSBuild concept (it appears nowhere in
     // Microsoft.Common.targets and there is no such switch); it is an ordinary
     // property that SoftVelocity.Build.Clarion.targets hands to its own tasks —
-    // Redirection ×3 and CWClean — and never defines itself. It selects the folder
+    // the CW compile, Redirection ×3 and CWClean (#863) — and never defines itself. It selects the folder
     // holding ClarionProperties.xml, which is where the compile target's version,
     // its redirection file name and its macros all come from. `clarion.exe` and
     // `clarioncl.exe` expose the same thing as a /ConfigDir= switch.
@@ -411,6 +412,16 @@ export function prepareBuildParameters(buildConfig: {
         logger.info(`🔹 Clarion ConfigDir: ${path.dirname(globalClarionPropertiesFile)}`);
     } else {
         logger.info(`🔹 Clarion ConfigDir: not set — the targets will use their default location`);
+    }
+
+    // #863 — and WHICH of that file's registered versions to compile with. The same tasks
+    // take Version="$(clarion_version)"; without it the compile picks a version matching
+    // ClarionBinPath, which cannot tell apart two versions sharing one bin. Only a name the
+    // properties file registers is passed: the CW task fails one it cannot find.
+    const clarionVersionArg = buildClarionVersionArg(globalClarionVersion, readRegisteredVersionNames(globalClarionPropertiesFile));
+    if (clarionVersionArg) {
+        buildArgs.push(clarionVersionArg);
+        logger.info(`🔹 Clarion version: ${globalClarionVersion}`);
     }
 
     // Log the build configuration
