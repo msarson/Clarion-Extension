@@ -141,14 +141,14 @@ suite('OmitCompileDetector', () => {
             assert.strictEqual(OmitCompileDetector.isLineOmittedWithBlocks(3, blocks), false, 'line 3 NOT omitted');
         });
 
-        test('terminator inside a string literal does NOT close block', () => {
-            // OMIT('***',Cond); MESSAGE('***') !***
-            // The '***' in MESSAGE('***') must be ignored; only the trailing !*** closes it
+        test('terminator inside a string literal does NOT close a COMPILE block (compiled)', () => {
+            // A compiled block is read through its strings: the '***' in MESSAGE('***') is ignored;
+            // only the trailing !*** closes it
             const code = [
-                "  OMIT('***')",                          // line 0 - OMIT start
+                "  COMPILE('***')",                       // line 0 - COMPILE start
                 "  MESSAGE('***')",                        // line 1 - *** only inside string - block stays open
                 "  MESSAGE('***') !***",                   // line 2 - *** in string AND after ! - block closes here
-                'NormalCode    EQUATE(3)',                  // line 3 - should NOT be omitted
+                'NormalCode    EQUATE(3)',                  // line 3
             ].join('\n');
 
             const doc = makeDoc(code);
@@ -157,14 +157,29 @@ suite('OmitCompileDetector', () => {
 
             assert.strictEqual(blocks.length, 1);
             assert.strictEqual(blocks[0].endLine, 2, 'block closes at line 2 (not line 1)');
-            assert.strictEqual(OmitCompileDetector.isLineOmittedWithBlocks(1, blocks), true, 'line 1 still inside OMIT');
-            assert.strictEqual(OmitCompileDetector.isLineOmittedWithBlocks(3, blocks), false, 'line 3 NOT omitted');
         });
 
-        test('terminator inside a string with escaped quotes does NOT close block', () => {
+        test('terminator inside a string literal DOES close an OMIT block (skipped)', () => {
+            // A skipped block is searched as raw text: the '***' in MESSAGE('***') closes it
+            const code = [
+                "  OMIT('***')",                          // line 0 - OMIT start
+                "  MESSAGE('***')",                        // line 1 - *** inside a string - block closes here
+                'NormalCode    EQUATE(3)',                  // line 2 - should NOT be omitted
+            ].join('\n');
+
+            const doc = makeDoc(code);
+            const tokens = tokenize(code);
+            const blocks = OmitCompileDetector.findDirectiveBlocks(tokens, doc);
+
+            assert.strictEqual(blocks.length, 1);
+            assert.strictEqual(blocks[0].endLine, 1, 'block closes at line 1');
+            assert.strictEqual(OmitCompileDetector.isLineOmittedWithBlocks(2, blocks), false, 'line 2 NOT omitted');
+        });
+
+        test('terminator inside a string with escaped quotes does NOT close a COMPILE block', () => {
             // String with an escaped quote: MESSAGE('it''s ***') - the *** is inside the string
             const code = [
-                "  OMIT('***')",                            // line 0
+                "  COMPILE('***')",                         // line 0
                 "  MESSAGE('it''s ***')",                   // line 1 - *** inside string with '' escape
                 '  ***',                                    // line 2 - real terminator
                 'NormalCode    EQUATE(1)',                   // line 3
@@ -176,8 +191,6 @@ suite('OmitCompileDetector', () => {
 
             assert.strictEqual(blocks.length, 1);
             assert.strictEqual(blocks[0].endLine, 2, 'block closes at line 2 (not line 1)');
-            assert.strictEqual(OmitCompileDetector.isLineOmittedWithBlocks(1, blocks), true, 'line 1 still inside OMIT');
-            assert.strictEqual(OmitCompileDetector.isLineOmittedWithBlocks(3, blocks), false, 'line 3 NOT omitted');
         });
 
         test('no OMIT/COMPILE blocks returns empty array', () => {

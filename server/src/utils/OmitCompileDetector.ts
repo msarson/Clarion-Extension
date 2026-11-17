@@ -145,7 +145,8 @@ export class OmitCompileDetector {
                 const rest = tail && terminatorToken && terminatorToken.line === token.line
                     ? lineText(token.line).slice(terminatorToken.start + terminatorToken.value.length)
                     : '';
-                if (rest && terminatorOnLine(rest, terminatorString)) {
+                // Only unconditional blocks get here: an OMIT is skipped, a COMPILE is compiled.
+                if (rest && terminatorOnLine(rest, terminatorString, directiveType === 'OMIT')) {
                     blocks.push({
                         type: directiveType as 'OMIT' | 'COMPILE',
                         terminator: terminatorString,
@@ -168,8 +169,9 @@ export class OmitCompileDetector {
 
         // Pass 2: scan every document line to find terminator positions.
         // This correctly handles terminator lines that have no tokens.
-        // A terminator inside a string in code (e.g. MESSAGE('***')) does NOT close the block;
-        // one in a comment does, quoted or not (`!'***'`) — see terminatorOnLine.
+        // An OMIT (skipped) closes on its terminator anywhere on a line, a string included; a
+        // COMPILE (compiled) closes on one in code or in a comment, not inside a string — see
+        // terminatorOnLine.
         const activeBlocks = [...pendingBlocks];
         // #733: this runs on every edit, so start after the first directive, and strip strings
         // only from a line that holds a terminator (stripping cannot create one that has no quote).
@@ -184,7 +186,7 @@ export class OmitCompileDetector {
                 const block = activeBlocks[b];
                 if (lineNum <= block.startLine) continue;
 
-                if (terminatorOnLine(rawLine, block.terminator)) {
+                if (terminatorOnLine(rawLine, block.terminator, block.type === 'OMIT')) {
                     blocks.push({
                         type: block.type,
                         terminator: block.terminator,
