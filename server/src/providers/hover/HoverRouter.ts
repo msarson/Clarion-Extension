@@ -635,39 +635,78 @@ export class HoverRouter {
         return { contents: { kind: 'markdown', value: lines.join('\n') } };
     }
 
+    /** Most branch rows in a CASE's branch list, unless the client asked for all of them. */
+    private static readonly CASE_BRANCH_LIST_CAP = 40;
+    /** Longest source text in a branch-list row, `…` included. */
+    private static readonly CASE_BRANCH_TEXT_MAX = 100;
+
     /**
      * The branch table of a CASE (markdown lines, header included): one row per OF / OROF / ELSE,
      * the line number linked (title `Go to branch`) and the branch's source line with its comment.
-     * `current` is the 0-based line of the branch being hovered, marked with ▸ so the reader sees
-     * where they are in the list. `withOpener` puts the CASE line itself first (title `Go to CASE`):
-     * the branch and END cards show it there instead of a separate code block and link, which keeps
-     * them short enough for the list to fit the hover. Empty when the CASE has no recorded branches.
+     * `current` is the index (in `branches`) of the branch being hovered, marked with ▸ so the reader
+     * sees where they are in the list; an index rather than a line, because `OF 1 OROF 2` puts two
+     * branches on one line. `withOpener` puts the CASE line itself first (title `Go to CASE`): the
+     * branch and END cards show it there instead of a separate code block and link, which keeps them
+     * short enough for the list to fit the hover. Empty when the CASE has no recorded branches.
+     *
+     * The list is capped at CASE_BRANCH_LIST_CAP branches (a generated `CASE EVENT()` can have
+     * hundreds) unless the client announced `clarionCaseBranchListAll`. A capped list always keeps
+     * the hovered branch and ends with a `…N more` row whose line number links to the first branch
+     * left out. Each row's text is cut at CASE_BRANCH_TEXT_MAX characters.
      */
     private caseBranchTable(caseToken: Token, document: any, current?: number, withOpener = false): string[] {
         const branches = caseToken.branches;
         if (!branches || branches.length === 0) return [];
         const sourceLines: string[] = document.getText().split(/\r?\n/);
+        const cell = (line: number) => this.tableCode(this.clipRowText((sourceLines[line] ?? '').trim()));
         const rows = ['| Line | Branch |', '|---:|:---|'];
         if (withOpener) {
-            const text = (sourceLines[caseToken.line] ?? '').trim();
-            rows.push(`| ${this.formatter.lineLink(document.uri, caseToken.line, 'Go to CASE')} | ${this.tableCode(text)} |`);
+            rows.push(`| ${this.formatter.lineLink(document.uri, caseToken.line, 'Go to CASE')} | ${cell(caseToken.line)} |`);
         }
-        for (const branch of branches) {
-            const line = branch.keywordToken.line;
-            const text = (sourceLines[line] ?? '').trim();
-            const mark = line === current ? '▸ ' : '';
-            rows.push(`| ${mark}${this.formatter.lineLink(document.uri, line, 'Go to branch')} | ${this.tableCode(text)} |`);
+        const shown = this.caseBranchesShown(branches.length, current);
+        for (const i of shown) {
+            const line = branches[i].keywordToken.line;
+            const mark = i === current ? '▸ ' : '';
+            rows.push(`| ${mark}${this.formatter.lineLink(document.uri, line, 'Go to branch')} | ${cell(line)} |`);
+        }
+        const left = branches.length - shown.length;
+        if (left > 0) {
+            const firstLeft = shown.findIndex((index, at) => index !== at);
+            const line = branches[firstLeft === -1 ? shown.length : firstLeft].keywordToken.line;
+            rows.push(`| ${this.formatter.lineLink(document.uri, line, 'Go to branch')} | …${left} more |`);
         }
         return rows;
     }
 
     /**
+     * Indexes of the branches a CASE's branch list shows, in order: all of them when the client asked
+     * for every branch or there are no more than the cap; otherwise the first CASE_BRANCH_LIST_CAP,
+     * the last of those giving way to the hovered branch when it lies further down.
+     */
+    private caseBranchesShown(count: number, current?: number): number[] {
+        const cap = HoverRouter.CASE_BRANCH_LIST_CAP;
+        const all = Array.from({ length: count }, (_v, i) => i);
+        if (clientFeatures.caseBranchListAll || count <= cap) return all;
+        if (current === undefined || current < cap) return all.slice(0, cap);
+        return [...all.slice(0, cap - 1), current];
+    }
+
+    /** A branch-list row's source text, cut at CASE_BRANCH_TEXT_MAX characters with `…`. */
+    private clipRowText(text: string): string {
+        const max = HoverRouter.CASE_BRANCH_TEXT_MAX;
+        return text.length > max ? text.slice(0, max - 1).trimEnd() + '…' : text;
+    }
+
+    /**
      * Source text as inline code inside a markdown table cell: `|` escaped (it would end the cell
-     * otherwise), and a longer backtick fence when the text itself holds a backtick.
+     * otherwise), and a longer backtick fence when the text itself holds a backtick. A backslash
+     * already before a `|` (`'\|'` in a string) gets a zero-width space after it: the markdown
+     * renderer VS Code and Monaco use (marked) counts the backslashes before a pipe, so `\\|` would
+     * read as an escaped backslash and an unescaped pipe, and end the cell there.
      */
     private tableCode(text: string): string {
         if (!text) return '';
-        const escaped = text.replace(/\|/g, '\\|');
+        const escaped = text.replace(/(\\*)\|/g, (_m, slashes: string) => `${slashes}${slashes ? '​' : ''}\\|`);
         const runs = escaped.match(/`+/g);
         const fence = '`'.repeat(runs ? Math.max(...runs.map(r => r.length)) + 1 : 1);
         const pad = runs ? ' ' : '';
@@ -882,7 +921,7 @@ export class HoverRouter {
         // A CASE's branches as the quick-navigation list, this branch marked and the CASE line as the
         // first row, in place of the opener preview below (IF keeps the preview).
         const table = containerKind === 'CASE'
-            ? this.caseBranchTable(container, document, branch.keywordToken.line, true) : [];
+            ? this.caseBranchTable(container, document, index, true) : [];
         if (table.length) {
             lines.push('', ...table);
             return { contents: { kind: 'markdown', value: lines.join('\n') } };

@@ -5,6 +5,7 @@ import * as path from 'path';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Hover } from 'vscode-languageserver-protocol';
 import { HoverProvider } from '../providers/HoverProvider';
+import { clientFeatures } from '../utils/ClientFeatures';
 
 /**
  * Hovering a CASE shows a quick-navigation list of its branches: one table row per
@@ -67,6 +68,20 @@ const PIPE = program([
     "  OF 2 ! uses `tick`",                   // 8
     "    BREAK",                              // 9
     "  END",                                  // 10
+]);
+
+// 60 branches: OF n on line 5 + n (0-based), shown as line n + 6; END on line 66.
+const BIG = program([
+    "  CASE pNo",                             // 5
+    ...Array.from({ length: 60 }, (_v, i) => `  OF ${i + 1}  ! branch ${i + 1}`),
+    "  END",                                  // 66
+]);
+
+const SAME_LINE = program([
+    "  CASE 1",                               // 5
+    "  OF 1 OROF 2",                          // 6
+    "    BREAK",                              // 7
+    "  END",                                  // 8
 ]);
 
 const NO_BRANCHES = program([
@@ -172,5 +187,80 @@ suite('CASE hover — quick-navigation list of its branches', () => {
         const card = await hoverAt(NO_BRANCHES, 5, 'CASE');
         assert.ok(/\*\*CASE\*\* — closed by END on line 7\b/.test(card), card);
         assert.ok(!/\| Line \|/.test(card), card);
+    });
+
+    test('OF and OROF on one line: only the hovered one is marked', async () => {
+        const card = await hoverAt(SAME_LINE, 6, 'OROF');
+        assert.deepStrictEqual(rows(card).map(r => r[0]), ['6', '7', '▸7'], card);
+    });
+
+    test('a \\ before a | in the source keeps the cell whole (zero-width space between the backslashes)', async () => {
+        const text = program([
+            "  CASE 1",                           // 5
+            "  OF 1 ! s = '\\|'",                 // 6
+            "    BREAK",                          // 7
+            "  END",                              // 8
+        ]);
+        const card = await hoverAt(text, 5, 'CASE');
+        assert.deepStrictEqual(rows(card), [['7', "`OF 1 ! s = '\\​\\|'`"]], card);
+    });
+
+    test('a long source line is cut at 100 characters with …', async () => {
+        const long = '  OF 1 ! ' + 'x'.repeat(150);
+        const text = program(["  CASE 1", long, "    BREAK", "  END"]);
+        const card = await hoverAt(text, 5, 'CASE');
+        const cell = rows(card)[0][1];
+        assert.strictEqual(cell, '`' + long.trim().slice(0, 99) + '…`', card);
+    });
+});
+
+suite('CASE hover — the branch list is capped at 40 unless the client asks for all', () => {
+
+    setup(() => { tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'hover-case-')); });
+    teardown(() => {
+        clientFeatures.caseBranchListAll = false;
+        try { fs.rmSync(tmpRoot, { recursive: true, force: true }); } catch { /* best-effort */ }
+    });
+
+    /** 1-based line of branch n (1..60) in BIG. */
+    const lineOf = (n: number) => String(n + 6);
+    const first = (count: number) => Array.from({ length: count }, (_v, i) => lineOf(i + 1));
+
+    test('the CASE card lists the first 40 and a …20 more row linking to branch 41', async () => {
+        const card = await hoverAt(BIG, 5, 'CASE');
+        assert.ok(/^\*\*CASE\*\* — 60 branches ·/.test(card), card);
+        const r = rows(card);
+        assert.deepStrictEqual(r.map(x => x[0]), [...first(40), lineOf(41)], card);
+        assert.deepStrictEqual(r[r.length - 1], [lineOf(41), '…20 more'], card);
+    });
+
+    test('a branch past the cap is kept, marked, in place of the 40th', async () => {
+        const card = await hoverAt(BIG, 5 + 50, 'OF');
+        assert.ok(/\*\*OF\*\* — branch 50 of 60 in CASE/.test(card), card);
+        const r = rows(card);
+        assert.deepStrictEqual(r.map(x => x[0]), ['6', ...first(39), '▸' + lineOf(50), lineOf(40)], card);
+        assert.deepStrictEqual(r[r.length - 1], [lineOf(40), '…20 more'], card);
+    });
+
+    test('a branch within the cap is marked in the first 40', async () => {
+        const card = await hoverAt(BIG, 5 + 10, 'OF');
+        const labels = rows(card).map(x => x[0]);
+        assert.strictEqual(labels.length, 1 + 40 + 1, card);
+        assert.strictEqual(labels[10], '▸' + lineOf(10), card);
+    });
+
+    test('the END card is capped the same way', async () => {
+        const card = await hoverAt(BIG, 66, 'END');
+        const r = rows(card);
+        assert.deepStrictEqual(r.map(x => x[0]), ['6', ...first(40), lineOf(41)], card);
+        assert.deepStrictEqual(r[r.length - 1], [lineOf(41), '…20 more'], card);
+    });
+
+    test('a client that announced clarionCaseBranchListAll gets every branch and no …more row', async () => {
+        clientFeatures.caseBranchListAll = true;
+        const card = await hoverAt(BIG, 5 + 50, 'OF');
+        const r = rows(card);
+        assert.deepStrictEqual(r.map(x => x[0]), ['6', ...first(60).map(l => l === lineOf(50) ? '▸' + l : l)], card);
+        assert.ok(!/more \|$/m.test(card), card);
     });
 });
