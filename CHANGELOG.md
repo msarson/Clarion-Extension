@@ -12,10 +12,13 @@ All notable changes to the Clarion Extension are documented here.
 
 - **Completion and hover no longer offer four runtime properties Clarion does not have.** PROP:Break, PROP:Select, PROP:Slider and PROP:Ticks are declared nowhere and do not compile; the properties that do their job, PROP:NoTicks, PROP:SliderPos, PROP:RangeLow and PROP:RangeHigh, now have cards of their own. [#847](https://github.com/msarson/Clarion-Extension/issues/847)
 - **Go to Symbol in Workspace lists a declaration by its label.** Ctrl+T showed and searched the Structure view's text, `GROUP (GLO:Settings),PRE(GLO)`, so typing GROUP returned every group. It now shows `GLO:Settings` with the type and attributes beside it. [#859](https://github.com/msarson/Clarion-Extension/issues/859)
+- **Find All References reaches callers of a procedure prototyped in an .inc the PROGRAM includes.** Callers in modules that take their MEMBER from an INCLUDEd file were missed, and an older copy of the prototype in a later .red folder could be listed in place of the real one. [#854](https://github.com/msarson/Clarion-Extension/pull/854) @geircodes
+- **Find All References and Rename work on a `?Name` control.** References on a field equate returned nothing. It now lists the control's USE() and every use that refers to the same control in the file, including uses in the window's local class methods, and Rename rewrites them while keeping the `?`. [#862](https://github.com/msarson/Clarion-Extension/pull/862) @geircodes
 
 #### Diagnostics
 
 - **A field or variable labelled Code or Data is no longer taken for the CODE or DATA statement.** A VIEW that projected such a field, `PROJECT(PRL:Code)`, was warned that it is not a field on its FILE, and a procedure's local `Code` variable could move where its code section was thought to start. Only a CODE or DATA alone on its line now counts as the statement. [#855](https://github.com/msarson/Clarion-Extension/issues/855)
+- **A statement that assigns to a variable called Data no longer ends the code section.** After `data = ''` in a procedure, every later LOOP and IF lost its structure and each BREAK or CYCLE in such a LOOP was warned as outside a LOOP. [#861](https://github.com/msarson/Clarion-Extension/pull/861) @geircodes
 
 #### Configuration and build
 
