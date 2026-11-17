@@ -3203,7 +3203,16 @@ export class ReferencesProvider {
                 // above still returns early on its own terms.
                 if (!this.isMemberFile(symbolInfo.location.uri)) {
                     const declPath = decodeURIComponent(symbolInfo.location.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
-                    const program = solutionManager?.findProjectForFile?.(path.basename(declPath));
+                    let program = solutionManager?.findProjectForFile?.(path.basename(declPath));
+                    // A MAP in an .inc the PROGRAM INCLUDEs in its global data is the PROGRAM's MAP
+                    // too, but the .inc is rarely a project source file, so the lookup above misses
+                    // it and the search stayed at the .inc, its MODULE target and its includers.
+                    if (!program && graph.isBuilt) {
+                        for (const programFile of graph.getIncludingProgramFiles(declPath)) {
+                            program = solutionManager?.findProjectForFile?.(programFile.replace(/\//g, '\\'));
+                            if (program) break;
+                        }
+                    }
                     if (program) {
                         const have = new Set(implFiles.map(u => u.toLowerCase()));
                         for (const sourceFile of program.sourceFiles) {
