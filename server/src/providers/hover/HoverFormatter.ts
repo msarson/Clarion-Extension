@@ -936,6 +936,18 @@ export class HoverFormatter {
         return uri ? `[${label}](${uri}#L${lineNo})` : label;
     }
 
+    /**
+     * A link to a line of the SAME document, labelled with the bare line number (no file name: the
+     * target is the file the card is shown in). `title` becomes the link's tooltip, which a client can
+     * also key styling on. Plain line number when the location isn't openable, as `locationLink`.
+     */
+    lineLink(fileOrUri: string, line0: number, title?: string): string {
+        const lineNo = line0 + 1;
+        const uri = this.toFileUri(fileOrUri);
+        const titlePart = title ? ` "${title.replace(/"/g, "'")}"` : '';
+        return uri ? `[${lineNo}](${uri}#L${lineNo}${titlePart})` : `${lineNo}`;
+    }
+
     /** File name for a footer label, from either a `file:///` URI or a plain path (percent-decoded). */
     private locationBaseName(fileOrUri: string): string {
         const last = (fileOrUri || '').split(/[\/\\]/).pop() || fileOrUri || '';

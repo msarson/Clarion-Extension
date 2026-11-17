@@ -9,10 +9,18 @@ export const clientFeatures = {
      * client without the command would show links that lead nowhere.
      */
     attributeEditLinks: false,
+    /**
+     * `clarionCaseBranchListAll`: the client wants every branch in the branch list of the CASE, OF
+     * and END cards. Off by default: the list is then capped (HoverRouter's CASE_BRANCH_LIST_CAP),
+     * because a generated `CASE EVENT()` can have hundreds of branches and a client that does not
+     * limit the list's height itself would show a card as tall as the CASE.
+     */
+    caseBranchListAll: false,
 };
 
 /** Read the experimental client capabilities from an `initialize` request. */
 export function readClientFeatures(capabilities: { experimental?: unknown } | undefined): void {
     const experimental = (capabilities?.experimental ?? {}) as Record<string, unknown>;
     clientFeatures.attributeEditLinks = experimental.clarionAttributeEditLinks === true;
+    clientFeatures.caseBranchListAll = experimental.clarionCaseBranchListAll === true;
 }
