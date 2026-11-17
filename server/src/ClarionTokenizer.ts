@@ -156,7 +156,10 @@ export class ClarionTokenizer {
     static codeSectionSetBy(line: string): boolean | undefined {
         // #333: CODE may carry a trailing ! comment (appgen emits e.g. `CODE   !STOP('Print')`)
         if (/^\s*code\s*(!.*)?$/i.test(line)) return true;
-        if (/^\s*(DATA|ROUTINE)\b/i.test(line)) return false; // DATA/ROUTINE sections can have structures
+        // DATA/ROUTINE sections can have structures. The DATA header stands alone on its line,
+        // like CODE: a statement starting with a variable called Data (`data = ''`) is code.
+        if (/^\s*data\s*(!.*)?$/i.test(line)) return false;
+        if (/^\s*ROUTINE\b/i.test(line)) return false;
         if (/(?<![:\w])(?:PROCEDURE|FUNCTION)\b/i.test(line)) {
             // Strip string literals and comments before checking — "function" inside a string
             // like Trace('...function pointers...') must not reset inCodeSection.
