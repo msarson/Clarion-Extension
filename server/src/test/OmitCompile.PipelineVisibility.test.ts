@@ -24,8 +24,8 @@ import { setServerInitialized } from '../serverState';
  * code, but the detector treated it identically to OMIT.
  *
  * Conditional OMIT/COMPILE (with a define argument) stays conservatively LIVE
- * everywhere — define evaluation from the active configuration is the deferred
- * substrate phase.
+ * for references and rename. Diagnostics decide it from its switches (#270,
+ * ConditionalCompileDiagnostics270.test.ts).
  */
 
 function makeDoc(code: string, uri = 'file:///t255.clw'): TextDocument {

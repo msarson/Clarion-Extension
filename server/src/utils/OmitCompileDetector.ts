@@ -50,7 +50,8 @@ export class OmitCompileDetector {
             // #255 polarity — only OMIT excludes its body. An UNCONDITIONAL
             // COMPILE('term') is the "always compile this" directive: its body is
             // LIVE code. (Conditional forms of both never become blocks — see
-            // findDirectiveBlocks — so they stay conservatively live too.)
+            // findDirectiveBlocks — so they stay conservatively live too here;
+            // the diagnostics filter decides them from their switches, #270.)
             // COMPILE blocks are still returned by findDirectiveBlocks because
             // the folding provider folds them.
             if (block.type !== 'OMIT') continue;
