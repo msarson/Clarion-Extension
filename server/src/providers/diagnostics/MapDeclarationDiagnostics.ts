@@ -15,6 +15,7 @@ import { makeTimeSlicer } from '../../utils/cooperativeScan';
 import { withContinuations } from '../../utils/ClassMemberScan';
 import * as fs from 'fs';
 import * as nodePath from 'path';
+import { resolveMemberHeaderTokenForUri } from '../../utils/MemberHeaderResolver';
 
 const logger = LoggerManager.getLogger('MapDeclarationDiagnostics');
 logger.setLevel('error');
@@ -67,7 +68,7 @@ export async function validateMissingMapDeclarations(
     getOpenDocumentContent?: (absPath: string) => string | null
 ): Promise<Diagnostic[]> {
     // Only relevant for MEMBER files
-    const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+    const memberToken = resolveMemberHeaderTokenForUri(tokens, document.uri);
 
     if (!memberToken?.referencedFile) {
         return [];

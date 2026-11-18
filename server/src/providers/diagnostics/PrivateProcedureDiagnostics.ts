@@ -2,12 +2,12 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver/node';
 import { Token, TokenType } from '../../ClarionTokenizer';
 import { TokenCache } from '../../TokenCache';
-import { TokenHelper } from '../../utils/TokenHelper';
 import { CrossFileResolver } from '../../utils/CrossFileResolver';
 import { ProcedureSignatureUtils } from '../../utils/ProcedureSignatureUtils';
 import { moduleTargetMatchesFile } from '../../utils/ClarionSourceNaming';
 import { pathToCanonicalUri } from '../../utils/UriUtils';
 import * as nodePath from 'path';
+import { resolveMemberHeaderTokenForUri } from '../../utils/MemberHeaderResolver';
 
 /**
  * Every prototype of one name in one MAP, as seen from the file being validated.
@@ -114,7 +114,7 @@ async function loadProgramScope(
     document: TextDocument,
     getOpenDocumentContent?: (absPath: string) => string | null
 ): Promise<MapScope | null> {
-    const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+    const memberToken = resolveMemberHeaderTokenForUri(tokens, document.uri);
     if (!memberToken?.referencedFile) return null;
 
     const cache = TokenCache.getInstance();

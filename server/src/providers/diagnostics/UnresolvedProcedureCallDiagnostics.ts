@@ -12,6 +12,7 @@ import { MapProcedureResolver } from '../../utils/MapProcedureResolver';
 import { CrossFileResolver } from '../../utils/CrossFileResolver';
 import { TokenCache } from '../../TokenCache';
 import LoggerManager from '../../logger';
+import { resolveMemberHeaderTokenForUri } from '../../utils/MemberHeaderResolver';
 
 const logger = LoggerManager.getLogger('UnresolvedProcedureCallDiagnostics');
 const perfLogger = LoggerManager.getLogger('UnresolvedProcedureCallDiagnostics.Perf', 'perf');
@@ -192,7 +193,7 @@ const getCrossFileResolver = () => (crossFileResolver ??= new CrossFileResolver(
  * that cannot read it would flag them all.
  */
 export function createF12Resolver(tokens: Token[], document: TextDocument): CallResolver {
-    const memberFile = TokenHelper.findMemberHeaderToken(tokens)?.referencedFile;
+    const memberFile = resolveMemberHeaderTokenForUri(tokens, document.uri)?.referencedFile;
     let parentFound: Promise<boolean> | undefined;
 
     return async (name: string): Promise<CallResolution> => {
