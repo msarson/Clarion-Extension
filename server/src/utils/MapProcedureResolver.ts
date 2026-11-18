@@ -28,6 +28,7 @@ import { StructureDeclarationIndexer } from './StructureDeclarationIndexer';
 import LoggerManager from '../logger';
 import * as fsSync from 'fs';
 import * as pathUtil from 'path';
+import { resolveMemberHeader } from './MemberHeaderResolver';
 
 /**
  * #711 — a module source as the server sees it: the open buffer's text as the token cache last
@@ -355,31 +356,16 @@ export class MapProcedureResolver {
 
     /**
      * The MEMBER parent of a module: its literal MEMBER header, or the header of the
-     * include shim that is its first statement (TokenHelper.findShimIncludeToken —
-     * `INCLUDE('Member.clw')` whose file holds the MEMBER line), followed up to
-     * MAX_SHIM_HOPS shims deep.
+     * include shim that is its first statement (MemberHeaderResolver), resolved from
+     * the file the MEMBER line is written in.
      */
     private async memberParentPathOf(tokens: Token[], filePath: string): Promise<string | null> {
-        const visited = new Set<string>();
-        for (let hop = 0; hop <= MapProcedureResolver.MAX_SHIM_HOPS; hop++) {
-            const memberToken = TokenHelper.findMemberHeaderToken(tokens);
-            if (memberToken?.referencedFile) {
-                return this.resolveIncludeTarget(TokenHelper.normalizeMemberFilename(memberToken.referencedFile), filePath);
-            }
-            const shim = TokenHelper.findShimIncludeToken(tokens);
-            if (!shim?.referencedFile) return null;
-            const shimPath = this.resolveIncludeTarget(shim.referencedFile, filePath);
-            if (!shimPath || visited.has(shimPath.toLowerCase())) return null;
-            visited.add(shimPath.toLowerCase());
-            const shimFile = await this.loadDocForWalk(shimPath);
-            if (!shimFile) return null;
-            tokens = shimFile.tokens;
-            filePath = shimPath;
-        }
-        return null;
+        const header = resolveMemberHeader(tokens, filePath, {
+            resolveInclude: (fileName, from) => this.resolveIncludeTarget(fileName, from)
+        });
+        if (!header) return null;
+        return this.resolveIncludeTarget(TokenHelper.normalizeMemberFilename(header.token.referencedFile!), header.hostFile);
     }
-
-    private static readonly MAX_SHIM_HOPS = 3;
 
     /**
      * Cheap pre-check before tokenizing an include that sits outside a MAP. Only a file

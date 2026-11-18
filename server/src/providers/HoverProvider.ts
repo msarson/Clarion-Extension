@@ -42,6 +42,7 @@ import { getLocalMapScope } from '../utils/LocalMapScopeHelper';
 import { tokensOnLine } from '../utils/TokenLineIndex';
 import * as fs from 'fs';
 import * as path from 'path';
+import { resolveMemberHeaderTokenForUri } from '../utils/MemberHeaderResolver';
 
 const logger = LoggerManager.getLogger("HoverProvider");
 logger.setLevel("error");
@@ -396,7 +397,7 @@ export class HoverProvider {
             
             // 🔗 Check if MEMBER file exists
             const mapTokens = this.tokenCache.getTokens(document);
-            const memberToken = TokenHelper.findMemberHeaderToken(mapTokens);
+            const memberToken = resolveMemberHeaderTokenForUri(mapTokens, document.uri);
             
             if (memberToken && memberToken.referencedFile) {
                 logger.info(`Found MEMBER reference to: ${memberToken.referencedFile}`);

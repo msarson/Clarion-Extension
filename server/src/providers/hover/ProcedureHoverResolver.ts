@@ -11,6 +11,7 @@ import { ProcedureCallDetector } from '../utils/ProcedureCallDetector';
 import LoggerManager from '../../logger';
 import { getLocalMapScope } from '../../utils/LocalMapScopeHelper';
 import * as fs from 'fs';
+import { resolveMemberHeaderTokenForUri } from '../../utils/MemberHeaderResolver';
 
 const logger = LoggerManager.getLogger("ProcedureHoverResolver");
 logger.setLevel("error");
@@ -228,7 +229,7 @@ export class ProcedureHoverResolver {
         if (!mapLocation) {
             // Not found in current file, check for MEMBER
             logger.info(`MAP declaration not found in current file, checking for MEMBER...`);
-            const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+            const memberToken = resolveMemberHeaderTokenForUri(tokens, document.uri);
             
             if (memberToken?.referencedFile) {
                 logger.info(`Found MEMBER('${memberToken.referencedFile}'), searching parent for MAP declaration`);
