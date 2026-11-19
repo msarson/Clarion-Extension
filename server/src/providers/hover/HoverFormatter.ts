@@ -26,6 +26,7 @@ import { EventEntry } from '../../utils/EventService';
 import { DirectiveEntry } from '../../utils/DirectiveService';
 import { KeywordEntry } from '../../utils/KeywordService';
 import { ProcedureSignatureUtils } from '../../utils/ProcedureSignatureUtils';
+import { DeclaredValueParser } from '../../tokenizer/DeclaredValueParser';
 
 const logger = LoggerManager.getLogger("HoverFormatter");
 logger.setLevel("error");
@@ -373,9 +374,12 @@ export class HoverFormatter {
      * Parses modifiers from a Clarion type/signature string.
      * Attributes (PRIVATE, PROTECTED, VIRTUAL, DERIVED) can appear anywhere after the parameter list.
      * The first unrecognized token after the params is treated as the return type.
+     * The declaration arrives as written, so a trailing `!` comment is stripped first: split on commas, it
+     * became the return type ("LONG  !Rows found") or hid an attribute ("DERIVED  !note" is not DERIVED).
      */
     private parseMethodModifiers(typeStr: string): { visibility: string; modifiers: string[]; returnType: string | null } {
         const KNOWN_NON_TYPES = new Set(['PRIVATE', 'PROTECTED', 'VIRTUAL', 'DERIVED', 'STATIC', 'PROC', 'PROCEDURE', 'FUNCTION']);
+        typeStr = DeclaredValueParser.stripTrailingComment(typeStr);
         let afterParams = typeStr;
 
         // Find content after the closing paren of the parameter list
