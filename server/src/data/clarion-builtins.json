@@ -540,8 +540,8 @@
       "signatures": [
         {
           "params": [],
-          "returnType": "STRING",
-          "description": "Returns the error code number as a string from the most recent file operation (OPEN, GET, ADD, etc.). Returns empty string if no error. Check after every file operation."
+          "returnType": "LONG",
+          "description": "Returns the code number for any error that was posted (for example by OPEN, GET or ADD). Returns zero if no error was posted. Check it immediately after the statement that may post an error: any later statement that can post an error clears it."
         }
       ]
     },
@@ -570,8 +570,8 @@
       "signatures": [
         {
           "params": [],
-          "returnType": "LONG",
-          "description": "Returns the file driver-specific error code as a numeric value. Useful for programmatic error handling and driver-specific error checking."
+          "returnType": "STRING",
+          "description": "Returns a string containing the code number of the native error from the file system (file driver) used to access the data file. Valid only when ERRORCODE() = 90 or ERRORCODE() = 47."
         }
       ]
     },
