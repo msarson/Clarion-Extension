@@ -45,7 +45,7 @@ import { cooperativeCheckpoint } from '../utils/cooperativeScan';
 import { ReferenceCountIndex } from '../services/ReferenceCountIndex';
 import { resolvePrefixedName } from '../utils/PrefixChain';
 import { resolveFieldEquate } from '../utils/FieldEquateResolver';
-import { onDiskSpelling, pathToCanonicalUri } from '../utils/UriUtils';
+import { onDiskSpelling, pathToCanonicalUri, toCanonicalUri } from '../utils/UriUtils';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("ReferencesProvider");
@@ -1100,6 +1100,21 @@ export class ReferencesProvider {
                     className = info.className;
                     logger.info(`✅ ${beforeDot}.${memberName} → class="${info.className}" at ${info.file}:${info.line}`);
                 }
+            }
+        }
+
+        // A field of a GROUP or QUEUE declared in this document (`Tally.Rows`) is data, not a
+        // class member: the class-member scan below matched `.Rows` behind any receiver and
+        // missed the group's own accesses. Answer from the field's declaration instead, so a
+        // use site lists what the declaration lists.
+        if (!isSelfOrParent && declarationFile && declarationLine >= 0 &&
+            toCanonicalUri(declarationFile).toLowerCase() === toCanonicalUri(document.uri).toLowerCase()) {
+            const docTokens = this.tokenCache.getTokens(document);
+            const declToken = docTokens.find(t =>
+                t.line === declarationLine && t.start === 0 && t.type === TokenType.Label);
+            if (declToken && this.structureFieldQualifier(declToken, () => docTokens)) {
+                this.trace({ route: 'member-structure-field', word });
+                return this.provideReferencesUnfiltered(document, { line: declarationLine, character: 0 }, context, token);
             }
         }
 
@@ -3648,6 +3663,11 @@ export class ReferencesProvider {
             };
 
             const scopeType = symbolInfo.scope.type;
+            // A field of a GROUP or QUEUE that is not field-scoped (one declared in a procedure)
+            // is reached as `Group.Field`: those accesses name it only through that group.
+            const dotQualifier = scopeType !== 'field'
+                ? this.structureFieldQualifier(symbolInfo.token, () => this.getTokensForUri(symbolInfo.location.uri))
+                : undefined;
             let startLine = 0;
             let endLine = Number.MAX_SAFE_INTEGER;
 
@@ -3789,6 +3809,11 @@ export class ReferencesProvider {
                     } else {
                         continue;
                     }
+                } else if (dotQualifier && token.type === TokenType.StructureField &&
+                           this.isQualifiedFieldAccess(token.value, dotQualifier, searchWordLower)) {
+                    // `Tally.Rows` when searching for the field Rows of `Tally GROUP`
+                    matchStart = token.start + token.value.length - searchWord.length;
+                    matchLength = searchWord.length;
                 } else if (token.type === TokenType.StructureField || token.type === TokenType.Class) {
                     // Object prefix of a StructureField: "st.SetValue" when searching for "st"
                     const dotIndex = token.value.indexOf('.');
@@ -3882,6 +3907,37 @@ export class ReferencesProvider {
         }
 
         return locations;
+    }
+
+    /**
+     * The lower-cased label of the GROUP, QUEUE, FILE or RECORD that declares `declToken`
+     * as a field, or undefined when it is not such a field. A structure with the TYPE
+     * attribute is excluded: its fields are reached through the variables declared with
+     * it (`MyQ.Field` for `MyQ QUEUE(BaseQ)`), never through its own label.
+     */
+    private structureFieldQualifier(declToken: Token, getDeclTokens: () => Token[]): string | undefined {
+        const parent = declToken.parent;
+        if (declToken.type !== TokenType.Label || !parent?.label) return undefined;
+        if (parent.type !== TokenType.Structure) return undefined;
+        if (!ReferencesProvider.LABEL_QUALIFIED_STRUCTURES.has(parent.value.toUpperCase())) return undefined;
+        const isTypeDeclaration = getDeclTokens().some(t =>
+            t.line === parent.line && t.start > parent.start &&
+            t.type === TokenType.Attribute && t.value.toUpperCase() === 'TYPE');
+        return isTypeDeclaration ? undefined : parent.label.toLowerCase();
+    }
+
+    private static readonly LABEL_QUALIFIED_STRUCTURES = new Set(['GROUP', 'QUEUE', 'FILE', 'RECORD']);
+
+    /**
+     * Whether a dotted StructureField token (`Tally.Rows`, `Outer.Tally.Rows`)
+     * accesses the field `fieldLower` through the structure labelled `qualifierLower`:
+     * the last segment is the field and the one before it is that structure.
+     */
+    private isQualifiedFieldAccess(value: string, qualifierLower: string, fieldLower: string): boolean {
+        const segments = value.toLowerCase().split('.');
+        return segments.length >= 2 &&
+            segments[segments.length - 1] === fieldLower &&
+            segments[segments.length - 2] === qualifierLower;
     }
 
     /**
