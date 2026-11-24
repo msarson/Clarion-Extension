@@ -3,6 +3,7 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Location, Position } from 'vscode-languageserver-protocol';
 import { ClarionTokenizer, Token, TokenType } from '../ClarionTokenizer';
 import { ReferencesProvider } from '../providers/ReferencesProvider';
+import { DocumentHighlightProvider } from '../providers/DocumentHighlightProvider';
 import { TokenCache } from '../TokenCache';
 import { setServerInitialized } from '../serverState';
 
@@ -167,6 +168,60 @@ suite('`&` in executable code is concatenation, not a reference declaration', ()
         test('FAR on a GROUP label finds `& Tally.Rows`', async () => {
             const got = await far(12, 'Tally');
             assert.ok(got.includes(`21:${SOURCE[21].indexOf('Tally')}`), `line 21 missing: ${got.join(', ')}`);
+        });
+    });
+
+    // Document highlight matched `&Tally` as a ReferenceVariable token. In code that is now
+    // `Tally.Rows`, a StructureField, so the provider must read the receiver of a StructureField.
+    suite('Document highlight', () => {
+        const HL = [
+            '  PROGRAM',                                  // 0
+            '  CODE',                                     // 1
+            '',                                           // 2
+            'Worker       PROCEDURE()',                   // 3
+            'Num            LONG',                        // 4
+            'Tally          GROUP',                       // 5
+            'Rows             LONG',                      // 6
+            '               END',                         // 7
+            'Other          GROUP',                       // 8
+            'Rows             LONG',                      // 9
+            '               END',                         // 10
+            '  CODE',                                     // 11
+            '  Tally.Rows += 1',                          // 12
+            "  MESSAGE('Rows: ' & Tally.Rows)",           // 13
+            "  MESSAGE('Rows: ' &Tally.Rows& ' rows')",   // 14
+            "  MESSAGE('Rows: ' &tally.rows)",            // 15
+            '  Other.Rows = TALLY.ROWS',                  // 16
+            "  MESSAGE('Rows: ' & Num)",                  // 17
+        ];
+
+        function highlights(line: number, word: string): string[] {
+            const doc = TextDocument.create(`file:///C:/temp/ampersandhl-${++counter}.clw`, 'clarion', 1, HL.join('\r\n'));
+            TokenCache.getInstance().getTokens(doc);
+            const pos = Position.create(line, HL[line].indexOf(word) + 1);
+            return (new DocumentHighlightProvider().provideDocumentHighlights(doc, pos) ?? [])
+                .map(h => `${h.range.start.line}:${h.range.start.character}-${h.range.end.character}`).sort();
+        }
+        const span = (line: number, word: string, from = 0): string => {
+            const idx = HL[line].toUpperCase().indexOf(word.toUpperCase(), from);
+            return `${line}:${idx}-${idx + word.length}`;
+        };
+
+        test('a GROUP label is highlighted as the receiver of Group.Field, with or without `&`, any case', () => {
+            const got = highlights(5, 'Tally');
+            const want = [span(5, 'Tally'), span(12, 'Tally'), span(13, 'Tally'), span(14, 'Tally'),
+                span(15, 'Tally'), span(16, 'TALLY')].sort();
+            assert.deepStrictEqual(got, want);
+        });
+
+        test('control: another GROUP with a same-named field is not highlighted', () => {
+            const got = highlights(8, 'Other');
+            assert.deepStrictEqual(got, [span(8, 'Other'), span(16, 'Other')].sort());
+        });
+
+        test('a plain local after `& ` is highlighted', () => {
+            const got = highlights(4, 'Num');
+            assert.deepStrictEqual(got, [span(4, 'Num'), span(17, 'Num')].sort());
         });
     });
 });
