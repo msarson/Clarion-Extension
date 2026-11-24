@@ -734,6 +734,13 @@ export class ClarionTokenizer {
                         }
                     }
 
+                    // In executable code `&` is string concatenation (or `&=`), never a reference
+                    // declaration: `'Rows: ' & Num` became one `& Num` token, which hid the use of
+                    // Num and split `& Grp.Field`. Skipped here, the `&` is stepped over as before a
+                    // string literal and the name tokenizes normally. Declarations are not in a CODE
+                    // section, and a procedure header line resets it, so `&LONG pX` stays a reference.
+                    if (tokenType === TokenType.ReferenceVariable && inCodeSection) continue;
+
                     // 🔬 PROFILING: Time each pattern test (only when tracing — #353)
                     const testStart = TOKENIZER_TRACE ? performance.now() : 0;
                     let match = pattern.exec(substring);
