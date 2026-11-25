@@ -1509,6 +1509,11 @@ export class DocumentStructure {
         for (const token of this.tokens) {
             const insideExecutionCode = this.procedureStack.length > 0;
 
+            // A CODE or DATA statement written at column 0 (the compiler accepts it) stays the
+            // execution marker: the outline and the diagnostics only look for ExecutionMarker.
+            // `Code  LONG` is not bare and still becomes a Label (#855).
+            if (token.type === TokenType.ExecutionMarker && this.isBareExecutionMarker(token)) continue;
+
             if (!insideExecutionCode && token.start === 0 && 
                 token.type !== TokenType.Comment && 
                 token.type !== TokenType.Directive && 
