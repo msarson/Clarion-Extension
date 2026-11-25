@@ -101,6 +101,13 @@ export class DocumentHighlightProvider {
                 if (t.value.toUpperCase() !== '&' + wordUpper) continue;
                 matchStart = t.start + 1;
                 isDeclaration = false;
+            } else if (t.type === TokenType.StructureField) {
+                // `Grp.Field` — highlight the receiver when it is the word (`Tally` in
+                // `'x' & Tally.Rows`). Only the receiver: a bare field name would also match
+                // `Other.Field` of an unrelated GROUP, which needs resolution, not text.
+                const dot = t.value.indexOf('.');
+                if (dot <= 0 || t.value.slice(0, dot).toUpperCase() !== wordUpper) continue;
+                isDeclaration = false;
             } else if (t.type === TokenType.Structure || TokenHelper.isProcedureOrFunction(t)) {
                 // Label-carrying header tokens. The same-line col-0 Label token emits
                 // the (correctly-positioned) highlight — suppress the duplicate whose
