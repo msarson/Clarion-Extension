@@ -878,7 +878,7 @@ export class DocumentStructure {
 
         // Walk every CASE / IF structure and record its OF / OROF / ELSE / ELSIF
         // clauses on the parent token's `branches` field.
-        this.populateBranches();
+        this.populateBranches(omitted);
     }
 
     /**
@@ -890,8 +890,12 @@ export class DocumentStructure {
      * Nested CASE/IF inside a branch are handled by their own `populateBranches`
      * pass — the outer pass skips their inner ConditionalContinuation tokens to
      * avoid double-attribution.
+     *
+     * `omitted` is the unconditional OMIT body flags from `process()`. A branch keyword in an
+     * OMIT body belongs only to a CASE/IF opened in that body, as the body's ENDs do: an ELSE
+     * left in an omitted block is not a branch of the CASE around the block.
      */
-    private populateBranches(): void {
+    private populateBranches(omitted: Uint8Array | undefined): void {
         const cases = this.structuresByType.get('CASE') ?? [];
         const ifs   = this.structuresByType.get('IF') ?? [];
         const containers: Token[] = [...cases, ...ifs];
@@ -922,10 +926,15 @@ export class DocumentStructure {
         const owned = new Map<Token, Token[]>();
         let open: Token[] = [];
         let next = 0;
+        const inOmit = (line: number): boolean => omitted !== undefined && omitted[line] === 1;
         for (const t of allBranchTokens) {
             while (next < byStart.length && byStart[next].line < t.line) open.push(byStart[next++]);
             if (open.some(c => c.finishesAt! <= t.line)) open = open.filter(c => c.finishesAt! > t.line);
+            // Only a structure opened in the OMIT body can own an omitted keyword. One opened in a
+            // body closes with it, so "opened in an OMIT body" here means this body.
+            const keywordOmitted = inOmit(t.line);
             for (const container of open) {
+                if (keywordOmitted && !inOmit(container.line)) continue;
                 const inNested = open.some(n =>
                     n !== container && n.line > container.line && n.finishesAt! < container.finishesAt!
                 );
