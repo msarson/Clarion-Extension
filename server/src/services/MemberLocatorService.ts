@@ -38,6 +38,7 @@ import { isAncestorOf, ancestorChain, pickDeclaration } from '../utils/ClassAnce
 import { inactiveIncludeLines } from '../utils/ConditionalIncludes';
 import { resolveEnclosingClassName } from '../utils/EnclosingClassResolver';
 import { ScopeKind } from '../scope/ScopeTypes';
+import { resolveMemberHeaderToken } from '../utils/MemberHeaderResolver';
 
 const logger = LoggerManager.getLogger("MemberLocatorService");
 const dotAccessTraceEnabled = process.env.CLARION_TRACE_DOT_ACCESS === '1';
@@ -2276,52 +2277,14 @@ export class MemberLocatorService {
      * direct-fix-sites.
      */
     /**
-     * Resolves the MEMBER token for a file, following its FIRST statement into an
-     * INCLUDE'd shim when no literal MEMBER statement is present locally.
-     *
-     * Project convention seen across many member modules: the real MEMBER('program')
-     * statement lives in a small generated shim file reached via e.g. INCLUDE('member.clw')
-     * rather than being written directly in each member — this lets the same shared source
-     * files belong to different PROGRAMs across projects by swapping just that one shim.
-     * TokenHelper.findMemberHeaderToken() only sees literal tokens in the tokens it's given,
-     * so it can never find a MEMBER hidden behind that indirection on its own.
-     *
-     * Because MEMBER/PROGRAM must be the first statement of the compiled token stream
-     * (see TokenHelper.findShimIncludeToken), only the FIRST statement of each file is
-     * ever consulted: if it isn't an INCLUDE, the file cannot be a shim-headed member
-     * module and the walk stops immediately — the common miss (a definition include, a
-     * PROGRAM file, plain data) costs zero file reads. Each hop reads exactly one file;
-     * MAX_SHIM_HOPS bounds the legal-but-rare chained-shim case and a visited set stops
-     * include cycles.
-     *
-     * `fromFile` (the CURRENT file's own path, not the include target) must be threaded through
-     * to resolveFilePath's owner-project-first redirection (#328) — some projects use a DIFFERENT
-     * same-named shim per project (e.g. many `member.clw` files, one per project, each redirecting
-     * to a different MEMBER target so the same shared source tree can belong to different PROGRAMs).
-     * Omitting it makes redirection fall back to an unscoped solution-wide walk that can resolve to
-     * the WRONG project's shim.
+     * The module's MEMBER token, following a first-statement INCLUDE shim — the shared walk in
+     * MemberHeaderResolver, with this service's resolveFilePath for the shim (owner-project-first
+     * redirection (#328), and the no-solution search when no solution is loaded).
      */
-    private static readonly MAX_SHIM_HOPS = 3;
     private async resolveMemberHeaderToken(tokens: Token[], fromDir: string, fromFile?: string): Promise<Token | undefined> {
-        const visited = new Set<string>();
-        for (let hop = 0; hop <= MemberLocatorService.MAX_SHIM_HOPS; hop++) {
-            const direct = TokenHelper.findMemberHeaderToken(tokens);
-            if (direct) return direct;
-
-            const shimInclude = TokenHelper.findShimIncludeToken(tokens);
-            if (!shimInclude) return undefined;
-            const resolvedPath = this.resolveFilePath(shimInclude.referencedFile!, fromDir, fromFile);
-            if (!resolvedPath) return undefined;
-            const key = resolvedPath.toLowerCase();
-            if (visited.has(key)) return undefined;
-            visited.add(key);
-            const data = await this.loadDocument(resolvedPath);
-            if (!data) return undefined;
-            tokens = data.tokens;
-            fromDir = path.dirname(resolvedPath);
-            fromFile = resolvedPath;
-        }
-        return undefined;
+        return resolveMemberHeaderToken(tokens, fromFile ?? path.join(fromDir, '_'), {
+            resolveInclude: (fileName, from) => this.resolveFilePath(fileName, path.dirname(from), from)
+        });
     }
 
     /** See TokenHelper.normalizeMemberFilename — kept as a thin delegate for existing call sites. */

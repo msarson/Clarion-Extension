@@ -39,6 +39,7 @@ import { DottedAccessResolver } from '../services/DottedAccessResolver';
 import { getLocalMapScope } from '../utils/LocalMapScopeHelper';
 import { DefinitionTrace } from './utils/DefinitionTrace';
 import { getCrossFileEpoch } from '../utils/crossFileEpoch';
+import { resolveMemberHeaderTokenForUri } from '../utils/MemberHeaderResolver';
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
 logger.setLevel("error");
@@ -418,7 +419,7 @@ export class DefinitionProvider {
                     logger.info(`❌ MAP declaration not found in current file for ${tokenAtPosition.label}`);
                     
                     // Check if this file has a MEMBER header, indicating it's part of another file
-                    const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+                    const memberToken = resolveMemberHeaderTokenForUri(tokens, document.uri);
                     
                     if (memberToken) {
                         logger.info(`✅ Found MEMBER token at line ${memberToken.line}: value="${memberToken.value}", referencedFile="${memberToken.referencedFile}"`);
@@ -735,7 +736,7 @@ export class DefinitionProvider {
         }
 
         // If not found locally and file has MEMBER, check parent file's MAP
-        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+        const memberToken = resolveMemberHeaderTokenForUri(tokens, document.uri);
 
         if (memberToken?.referencedFile) {
             logger.info(`File has MEMBER('${memberToken.referencedFile}'), checking parent MAP for ${word}`);
@@ -1458,12 +1459,14 @@ export class DefinitionProvider {
         // Types like base classes (e.g. Class(ce_MetroWizardForm)) may only be included
         // in the parent PROGRAM file, not in the MEMBER module.
         const tokens = this.tokenCache.getTokensByUri(document.uri);
-        const memberToken = tokens ? TokenHelper.findMemberHeaderToken(tokens) : undefined;
+        const memberToken = tokens ? resolveMemberHeaderTokenForUri(tokens, document.uri) : undefined;
         if (memberToken?.referencedFile) {
+            // MEMBER('Parent') names Parent.clw: the extension is implied.
+            const parentName = TokenHelper.normalizeMemberFilename(memberToken.referencedFile);
             // #328: owner-project-first redirection
-            let parentPath: string | null = resolveViaProjectRedirectionFromUri(memberToken.referencedFile, document.uri);
+            let parentPath: string | null = resolveViaProjectRedirectionFromUri(parentName, document.uri);
             if (!parentPath) {
-                const candidate = path.join(path.dirname(fromPath), memberToken.referencedFile);
+                const candidate = path.join(path.dirname(fromPath), parentName);
                 if (fs.existsSync(candidate)) parentPath = candidate;
             }
             if (parentPath) {

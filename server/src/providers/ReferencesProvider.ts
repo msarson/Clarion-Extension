@@ -47,6 +47,7 @@ import { resolvePrefixedName } from '../utils/PrefixChain';
 import { resolveFieldEquate } from '../utils/FieldEquateResolver';
 import { onDiskSpelling, pathToCanonicalUri } from '../utils/UriUtils';
 import LoggerManager from '../logger';
+import { resolveMemberHeaderTokenForUri } from '../utils/MemberHeaderResolver';
 
 const logger = LoggerManager.getLogger("ReferencesProvider");
 logger.setLevel("error");
@@ -2870,7 +2871,7 @@ export class ReferencesProvider {
             t.subType === TokenType.GlobalProcedure &&
             (t.label ?? '').toLowerCase() === name);
         if (!impl) return symbolInfo;
-        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+        const memberToken = resolveMemberHeaderTokenForUri(tokens, document.uri);
         if (!memberToken?.referencedFile) return symbolInfo;
 
         const signature = document.getText({

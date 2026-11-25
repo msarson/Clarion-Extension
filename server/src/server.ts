@@ -50,7 +50,7 @@ import { readUnopenedSource } from './utils/RestoredTabSource'; // #696
 import { ClarionDocumentSymbolProvider } from './providers/ClarionDocumentSymbolProvider';
 import { ClarionSemanticTokensProvider } from './providers/ClarionSemanticTokensProvider';
 
-import { Token, TokenType } from './ClarionTokenizer';
+import { Token } from './ClarionTokenizer';
 import { TokenCache } from './TokenCache';
 import { getServerVersionInfo } from './buildInfo';
 
@@ -117,6 +117,7 @@ import { DiagnosticsStore, DiagnosticsState } from './DiagnosticsStore';
 import { yieldToRequests } from './utils/cooperativeScan';
 import { beginInteractive, runAsBackground } from './utils/interactivePriority';
 import { readClientFeatures } from './utils/ClientFeatures';
+import { resolveMemberHeaderTokenForUri } from './utils/MemberHeaderResolver';
 
 /**
  * #715 item 1 — a request handler that background validation waits for while it runs (hover,
@@ -1509,7 +1510,8 @@ connection.onCodeLensResolve(async (lens) => {
 function revalidateRelatedDocuments(changedDocument: TextDocument, tokens: Token[]): void {
     try {
         const isProgramFile = TokenHelper.findProgramHeaderToken(tokens) !== undefined;
-        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+        // A module's MEMBER may sit in an INCLUDE'd shim (MemberHeaderResolver).
+        const memberToken = resolveMemberHeaderTokenForUri(tokens, changedDocument.uri);
 
         if (isProgramFile) {
             // Re-validate any open MEMBER files that reference this PROGRAM file
@@ -1520,9 +1522,7 @@ function revalidateRelatedDocuments(changedDocument: TextDocument, tokens: Token
                 if (openDoc.uri === changedDocument.uri) continue;
                 const openTokens = tokenCache.getCachedTokens(openDoc);
                 if (!openTokens) continue;
-                const openMemberToken = openTokens.find(t =>
-                    t.type === TokenType.ClarionDocument && t.value.toUpperCase() === 'MEMBER' && t.referencedFile
-                );
+                const openMemberToken = resolveMemberHeaderTokenForUri(openTokens, openDoc.uri);
                 // #450 — MEMBER('name') without an extension names name.clw, so this
                 // comparison must infer it or an edit to the PROGRAM never revalidates
                 // its member modules.

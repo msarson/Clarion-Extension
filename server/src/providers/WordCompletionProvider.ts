@@ -18,6 +18,7 @@ import { AttributeService } from '../utils/AttributeService';
 import { DirectiveService } from '../utils/DirectiveService';
 import { resolveViaProjectRedirection } from '../utils/RedirectionResolution';
 import LoggerManager from '../logger';
+import { resolveMemberHeader } from '../utils/MemberHeaderResolver';
 
 const logger = LoggerManager.getLogger("WordCompletionProvider");
 // Completion timing breakdown — emitted only for a slow request, so it stays readable in a user's log.
@@ -918,8 +919,6 @@ export class WordCompletionProvider {
         return names;
     }
 
-    private static readonly MAX_SHIM_HOPS = 3;
-
     /**
      * The PROGRAM a MEMBER module belongs to, following a MEMBER-via-INCLUDE shim
      * (`INCLUDE('member.clw')` as the first statement, the shim holding the MEMBER).
@@ -939,30 +938,19 @@ export class WordCompletionProvider {
     }
 
     private resolveProgramViaMember(tokens: Token[], filePath: string, graph: FileRelationshipGraph): string | undefined {
-        const visited = new Set<string>();
-        for (let hop = 0; hop <= WordCompletionProvider.MAX_SHIM_HOPS; hop++) {
-            const raw = (graph.isBuilt ? graph.getProgramFile(filePath) : undefined)
-                ?? this.getProgramFileFromTokens(tokens);
-            if (raw) {
-                if (path.isAbsolute(raw)) return raw;
-                const name = TokenHelper.normalizeMemberFilename(raw);
-                return resolveViaProjectRedirection(name, filePath) ?? path.join(path.dirname(filePath), name);
-            }
-
-            const shim = TokenHelper.findShimIncludeToken(tokens);
-            if (!shim?.referencedFile) return undefined;
-            const relative = path.join(path.dirname(filePath), shim.referencedFile);
-            const shimPath = resolveViaProjectRedirection(shim.referencedFile, filePath)
-                ?? (fs.existsSync(relative) ? relative : undefined);
-            if (!shimPath || visited.has(shimPath.toLowerCase())) return undefined;
-            visited.add(shimPath.toLowerCase());
-
-            const shimFile = this.getTokensForFile(shimPath);
-            if (!shimFile) return undefined;
-            tokens = shimFile.tokens;
-            filePath = shimPath;
+        // The graph records the MEMBER edge on the file that holds the MEMBER line: the
+        // module itself, or its shim (MemberHeaderResolver).
+        let hostFile = filePath;
+        let raw = graph.isBuilt ? graph.getProgramFile(filePath) : undefined;
+        if (!raw) {
+            const header = resolveMemberHeader(tokens, filePath);
+            if (!header) return undefined;
+            hostFile = header.hostFile;
+            raw = (graph.isBuilt ? graph.getProgramFile(hostFile) : undefined) ?? header.token.referencedFile!;
         }
-        return undefined;
+        if (path.isAbsolute(raw)) return raw;
+        const name = TokenHelper.normalizeMemberFilename(raw);
+        return resolveViaProjectRedirection(name, hostFile) ?? path.join(path.dirname(hostFile), name);
     }
 
     /** #565 — PROGRAM global symbols per token array (replaced when the file changes). */
