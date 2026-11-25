@@ -205,6 +205,48 @@ suite('CASE hover — quick-navigation list of its branches', () => {
         assert.deepStrictEqual(rows(card), [['7', "`OF 1 ! s = '\\​\\|'`"]], card);
     });
 
+    // An unconditional OMIT inside the CASE holds a stray ELSE and one END too many: dead code,
+    // so neither is part of the CASE. (Branches of structures in the body: OmitBodyStructures.test.ts.)
+    const OMITTED = program([
+        "  CASE pKind",                           // 5
+        "  OF 'A'",                               // 6
+        "    x# = 1",                             // 7
+        "  OMIT('***')",                          // 8
+        "    IF x# = 1",                          // 9
+        "      x# = 2",                           // 10
+        "    ELSE  ! omitted ELSE of the IF",     // 11
+        "      x# = 3",                           // 12
+        "    END",                                // 13
+        "    ELSE  ! omitted, no structure",      // 14
+        "      x# = 4",                           // 15
+        "    END",                                // 16
+        "    CASE x#",                            // 17
+        "    OF 1",                               // 18
+        "    END",                                // 19
+        "  !***",                                 // 20
+        "  OF 'B'",                               // 21
+        "    x# = 5",                             // 22
+        "  ELSE  ! the real ELSE",                // 23
+        "    x# = 6",                             // 24
+        "  END",                                  // 25
+    ]);
+
+    test('a branch keyword in an OMIT body is not a branch of the CASE around it', async () => {
+        const card = await hoverAt(OMITTED, 5, 'CASE');
+        assert.ok(/^\*\*CASE\*\* — 3 branches · END on line \[26\]/.test(card), card);
+        assert.deepStrictEqual(rows(card).map(r => r[0]), ['7', '22', '24'], card);
+    });
+
+    test('the END card of that CASE lists the same branches', async () => {
+        const card = await hoverAt(OMITTED, 25, 'END');
+        assert.deepStrictEqual(rows(card).map(r => r[0]), ['6', '7', '22', '24'], card);
+    });
+
+    test('the real ELSE of that CASE counts only the live branches', async () => {
+        const card = await hoverAt(OMITTED, 23, 'ELSE');
+        assert.ok(/\*\*ELSE\*\* — branch 3 of 3 in CASE/.test(card), card);
+    });
+
     test('a long source line is cut at 100 characters with …', async () => {
         const long = '  OF 1 ! ' + 'x'.repeat(150);
         const text = program(["  CASE 1", long, "    BREAK", "  END"]);
