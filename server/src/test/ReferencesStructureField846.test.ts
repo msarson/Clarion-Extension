@@ -90,15 +90,18 @@ const USER = [
     '  END',                                       // 3
     'ProcC PROCEDURE',                             // 4
     'U          Token',                            // 5
-    '  CODE',                                      // 6
-    '  U.Grp.Hits = 12',                           // 7 Grp.Hits, from another module
-    '  U.Arr[2].Hits = 13',                        // 8 Arr.Hits, from another module
+    'Loc:V      Token',                            // 6 a colon-named object (no plain V)
+    '  CODE',                                      // 7
+    '  U.Grp.Hits = 12',                           // 8 Grp.Hits, from another module
+    '  U.Arr[2].Hits = 13',                        // 9 Arr.Hits, from another module
+    '  Loc:V.Grp.Hits = 14',                       // 10 Grp.Hits, through the colon-named object
 ];
 
 suite('Find All References: a class member and its inline GROUP\'s field are apart (#846)', () => {
     let fx: DiskSolution;
     let inc: TextDocument;
     let clw: TextDocument;
+    let user: TextDocument;
 
     // On disk: the inline structure's fields are read from its declaring file.
     suiteSetup(() => {
@@ -106,7 +109,7 @@ suite('Find All References: a class member and its inline GROUP\'s field are apa
         fx = createDiskSolution({ 'refs.inc': INC, 'refs.clw': CLW, 'user.clw': USER });
         inc = fx.open('refs.inc');
         clw = fx.open('refs.clw');
-        fx.open('user.clw');
+        user = fx.open('user.clw');
     });
     suiteTeardown(() => fx.dispose());
 
@@ -124,7 +127,7 @@ suite('Find All References: a class member and its inline GROUP\'s field are apa
     }
 
     const TOKEN_HITS = ['refs.inc:4', 'refs.clw:8'];
-    const GRP_HITS = ['refs.inc:7', 'refs.clw:9', 'refs.clw:22', 'user.clw:7'];
+    const GRP_HITS = ['refs.inc:7', 'refs.clw:9', 'refs.clw:22', 'user.clw:8', 'user.clw:10'];
     const OTHER_GRP_HITS = ['refs.inc:23', 'refs.clw:18', 'refs.clw:26'];
 
     test('bug-pin: Token.Hits from its declaration lists no group field', async function () {
@@ -166,7 +169,12 @@ suite('Find All References: a class member and its inline GROUP\'s field are apa
 
     test('a field of a DIM\'d group is found behind a subscript', async function () {
         this.timeout(10000);
-        assertExactly(await refs(inc, INC, 16, 'Hits'), 'Arr.Hits declaration', ['refs.inc:16', 'refs.clw:14', 'user.clw:8']);
+        assertExactly(await refs(inc, INC, 16, 'Hits'), 'Arr.Hits declaration', ['refs.inc:16', 'refs.clw:14', 'user.clw:9']);
+    });
+
+    test('the group field from an access through a colon-named object', async function () {
+        this.timeout(10000);
+        assertExactly(await refs(user, USER, 10, 'Hits'), 'Loc:V.Grp.Hits', GRP_HITS);
     });
 
     test('a typed GROUP\'s own field is that structure\'s', async function () {

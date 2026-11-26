@@ -395,11 +395,14 @@ export class ReferencesProvider {
                     word = anchorMatch[0] + '.' + word;
                     logger.info(`🔗 Reconstructed chained word: "${word}" from middle-segment cursor`);
                 } else {
-                    // Typed variable access: e.g. INIMgr.Init — pick the nearest identifier before the dot
-                    const varMatch = textBeforeDot.match(/\b([A-Za-z_][A-Za-z0-9_]*)$/);
-                    if (varMatch) {
-                        word = varMatch[1] + '.' + word;
-                        logger.info(`🔗 Reconstructed typed-variable word: "${word}" from before-dot identifier`);
+                    // Typed variable access: e.g. INIMgr.Init — the whole chain before the dot, as
+                    // the resolvers read a receiver. #846: taking only the nearest plain identifier
+                    // cut a colon-named root (`Glo:Obj.Grp.Field` became `Obj.Grp.Field`) and
+                    // named another variable, or none.
+                    const chain = ChainedPropertyResolver.extractChain(textBeforeDot);
+                    if (/^[A-Za-z_][\w:]*(?:\.[A-Za-z_][\w:]*)*$/.test(chain)) {
+                        word = chain + '.' + word;
+                        logger.info(`🔗 Reconstructed typed-variable word: "${word}" from the chain before the dot`);
                     }
                 }
             }
