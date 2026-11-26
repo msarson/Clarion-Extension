@@ -188,14 +188,26 @@
       "name": "CENTER",
       "applicableTo": [
         "WINDOW",
+        "APPLICATION",
         "ENTRY",
         "TEXT",
         "LIST",
         "COMBO",
         "PROMPT",
-        "SPIN"
+        "SPIN",
+        "STRING"
       ],
-      "description": "Sets the window to be centered on screen when first opened. The window is positioned at the center of the screen or MDI parent window client area.",
+      "description": "On a WINDOW or APPLICATION, centers the window when it opens. On a control, centers the control's text.",
+      "controlDescriptions": {
+        "WINDOW": "Centers the window when it opens: an MDI window on the APPLICATION, any other window on its parent. It only supplies the AT parameters that are omitted, so it has no effect when AT gives a position.",
+        "APPLICATION": "Centers the application frame on the screen when it opens. It only supplies the AT parameters that are omitted, so it has no effect when AT gives a position.",
+        "ENTRY": "Centers the text in the control (justification). The optional offset in CENTER(offset) moves it from the center; a negative value moves it left.",
+        "COMBO": "Centers the text in the control (justification). The optional offset in CENTER(offset) moves it from the center; a negative value moves it left.",
+        "LIST": "Centers the text in the control (justification). The optional offset in CENTER(offset) moves it from the center; a negative value moves it left.",
+        "SPIN": "Centers the text in the control (justification). The optional offset in CENTER(offset) moves it from the center; a negative value moves it left.",
+        "STRING": "Centers the text in the control (justification). The optional offset in CENTER(offset) moves it from the center; a negative value moves it left.",
+        "TEXT": "Centers the text in the control (justification). A TEXT control takes CENTER without an offset."
+      },
       "short": "centered text",
       "propertyEquate": "PROP:Center",
       "signatures": [
@@ -307,11 +319,24 @@
     {
       "name": "IMM",
       "applicableTo": [
+        "WINDOW",
+        "APPLICATION",
         "CONTROL"
       ],
-      "description": "Sets immediate event notification for the control. Changes to the control generate an EVENT:Accepted immediately rather than waiting for the user to press Enter or Tab.",
-      "short": "an event on every keystroke",
-      "propertyEquate": "PROP:Immediate",
+      "description": "Sets immediate event generation. What it generates depends on where it is: window move and size events on a WINDOW or APPLICATION, mouse events on a REGION, EVENT:Accepted on mouse-down on a BUTTON, and EVENT:NewSelection on a LIST, COMBO, ENTRY, SPIN or SHEET.",
+      "controlDescriptions": {
+        "WINDOW": "The window generates an event before the user moves or resizes it: EVENT:Move, EVENT:Size, EVENT:Restore, EVENT:Maximize or EVENT:Iconize. A CYCLE in the code for that event stops the action. Once it is done, EVENT:Moved, EVENT:Sized, EVENT:Restored, EVENT:Maximized or EVENT:Iconized follow (one action can give several).",
+        "APPLICATION": "The frame generates an event before the user moves or resizes it: EVENT:Move, EVENT:Size, EVENT:Restore, EVENT:Maximize or EVENT:Iconize. A CYCLE in the code for that event stops the action. Once it is done, EVENT:Moved, EVENT:Sized, EVENT:Restored, EVENT:Maximized or EVENT:Iconized follow (one action can give several).",
+        "BUTTON": "The button generates EVENT:Accepted when the left mouse button is pressed down on it, not when it is released, and keeps generating it while the button is held. DELAY and REPEAT set the timing.",
+        "LIST": "Every keystroke on the control generates EVENT:NewSelection (all keys are implicitly alerted), usually so the code can refill the QUEUE.",
+        "COMBO": "Every keystroke on the control generates EVENT:NewSelection (all keys are implicitly alerted), usually so the code can refill the QUEUE.",
+        "ENTRY": "EVENT:NewSelection is generated whenever the control's contents or the cursor position change. To act only on a change of contents, compare with the previous contents (for example through PROP:ScreenText).",
+        "SPIN": "EVENT:NewSelection is generated whenever the control's contents or the cursor position change. To act only on a change of contents, compare with the previous contents (for example through PROP:ScreenText).",
+        "SHEET": "EVENT:NewSelection is generated whenever the user clicks a TAB, even the TAB that is already selected.",
+        "REGION": "The region generates EVENT:MouseIn, EVENT:MouseMove and EVENT:MouseOut as the mouse enters, moves within and leaves the area its AT gives. MOUSEX and MOUSEY give the position."
+      },
+      "short": "events at once, not on completion",
+      "propertyEquate": "PROP:IMM",
       "signatures": [
         {
           "params": [],
@@ -648,6 +673,7 @@
       "snippet": "ALRT(${1:F2Key})",
       "applicableTo": [
         "WINDOW",
+        "APPLICATION",
         "BUTTON",
         "ENTRY",
         "TEXT",
@@ -657,7 +683,11 @@
         "RADIO",
         "SPIN"
       ],
-      "description": "Sets window 'hot' keys. Defines keys that generate an alert when pressed in the window.",
+      "description": "Sets a 'hot' key that is active while the APPLICATION, WINDOW or control it is on has focus. Pressing it generates EVENT:PreAlertKey and then EVENT:AlertKey: field-independent on a window, field-specific on a control. Up to 255 ALRT attributes, separate from the ALERT statement.",
+      "controlDescriptions": {
+        "WINDOW": "Sets a 'hot' key that is active while the window has focus. Pressing it generates the field-independent events EVENT:PreAlertKey and then EVENT:AlertKey. Up to 255 ALRT attributes, separate from the ALERT statement.",
+        "APPLICATION": "Sets a 'hot' key that is active while the application frame has focus. Pressing it generates the field-independent events EVENT:PreAlertKey and then EVENT:AlertKey. Up to 255 ALRT attributes, separate from the ALERT statement."
+      },
       "propertyEquate": "PROP:Alrt",
       "signatures": [
         {
@@ -1023,7 +1053,7 @@
         "PROMPT",
         "SPIN"
       ],
-      "description": "Enables scrolling for TEXT control. Allows vertical scrolling through text content.",
+      "description": "The control moves with the window when the window scrolls, keeping its place in the virtual window, which can be larger than the screen. Without SCROLL the control stays where it is on screen while the rest of the window scrolls.",
       "short": "moves when the window scrolls",
       "propertyEquate": "PROP:Scroll",
       "signatures": [
@@ -1082,7 +1112,7 @@
         "PROMPT",
         "SPIN"
       ],
-      "description": "Sets window to full-screen mode. Window occupies the entire display with no borders.",
+      "description": "The control expands to the full size of the WINDOW for any width or height its AT attribute omits. Not valid on TOOLBAR controls.",
       "short": "fills the window where AT omits width/height",
       "propertyEquate": "PROP:Full",
       "signatures": [
