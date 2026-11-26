@@ -27,7 +27,7 @@ import { nearestClassLabel } from '../utils/ClassNameUtils';
 import { extractParentName, findParentInText } from '../utils/ParentClassName';
 import type { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { SymbolFinderService } from './SymbolFinderService';
-import { SolutionManager } from '../solution/solutionManager';
+import { SolutionManager, getProjectsGeneration } from '../solution/solutionManager';
 import { resolveViaProjectRedirection } from '../utils/RedirectionResolution';
 import { resolveFileInNoSolutionMode } from '../solution/findFileNoSolution';
 import * as fs from 'fs';
@@ -70,6 +70,9 @@ interface LabelScan { labels: Set<string>; includes: string[] }
 interface InterfaceDeclaredMembers { methods: Array<{ name: string; paramCount: number }>; parentName?: string }
 const labelScanCache = new Map<string, LabelScan | null>();
 let labelScanEpoch = -1;
+// #890: resolveFilePath answers (path or null), per cross-file epoch.
+const fileResolveCache = new Map<string, string | null>();
+let fileResolveEpoch = "";
 
 export class MemberLocatorService {
     private sdi = StructureDeclarationIndexer.getInstance();
@@ -2349,7 +2352,31 @@ export class MemberLocatorService {
         return TokenHelper.normalizeMemberFilename(name);
     }
 
+    /**
+     * #890 — where `filename` resolves from `fromDir` / `fromFile`, remembered (found or not) until
+     * the cross-file epoch bumps: every watched-file change does, a created or deleted file too, as
+     * does a solution or redirection change (ResolutionEnvironment). A dotted-access resolve walks
+     * INCLUDE chains through here once per receiver, so a Find All References over hundreds of
+     * files asked the redirection and the disk the same question thousands of times.
+     */
     private resolveFilePath(filename: string, fromDir: string, fromFile?: string): string | null {
+        // Loading the solution assigns its projects without bumping the epoch, and an answer
+        // worked out before it (no-solution mode) or for other projects must not outlive that.
+        const sm = SolutionManager.getInstance();
+        const epoch = `${getCrossFileEpoch()}|${getProjectsGeneration()}|${sm?.solution ? 1 : 0}`;
+        if (epoch !== fileResolveEpoch) {
+            fileResolveCache.clear();
+            fileResolveEpoch = epoch;
+        }
+        const key = `${filename.toLowerCase()}|${fromDir.toLowerCase()}|${(fromFile ?? '').toLowerCase()}`;
+        const known = fileResolveCache.get(key);
+        if (known !== undefined) return known;
+        const resolved = this.resolveFilePathUncached(filename, fromDir, fromFile);
+        fileResolveCache.set(key, resolved);
+        return resolved;
+    }
+
+    private resolveFilePathUncached(filename: string, fromDir: string, fromFile?: string): string | null {
         const sm = SolutionManager.getInstance();
         if (sm?.solution) {
             // #328: owner-project-first when the caller knows the from FILE
