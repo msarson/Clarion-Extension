@@ -375,7 +375,7 @@ export class CrossFileResolver {
                     logger.info(`✅ Found ${procName} in parent MAP at ${declaringPath}:${token.line}`);
                     // #689: the canonical URI (#251) and the name's own range.
                     let lineText: string | undefined;
-                    try { lineText = fs.readFileSync(declaringPath, 'latin1').split(/\r?\n/)[token.line]; } catch { /* range from the token alone */ }
+                    try { lineText = readSourceText(declaringPath).split(/\r?\n/)[token.line]; } catch { /* range from the token alone */ }
                     const location = Location.create(pathToCanonicalUri(declaringPath), procedureNameRange(token, lineText));
                     return {
                         token,

@@ -35,6 +35,7 @@ export function sourceEncoding(): string {
 export function decodeSource(buf: Buffer): string {
     if (buf.length >= 3 && buf[0] === 0xEF && buf[1] === 0xBB && buf[2] === 0xBF) return buf.toString('utf8');
     if (buf.length >= 2 && buf[0] === 0xFF && buf[1] === 0xFE) return buf.toString('utf16le');
+    if (buf.length >= 2 && buf[0] === 0xFE && buf[1] === 0xFF) return iconv.decode(buf, 'utf16be');
     if (isUtf8(buf)) return buf.toString('utf8');
     return iconv.decode(buf, ansiEncoding);
 }
@@ -42,6 +43,33 @@ export function decodeSource(buf: Buffer): string {
 /** A Clarion source's text, read from disk (see decodeSource). */
 export function readSourceText(filePath: string): string {
     return decodeSource(fs.readFileSync(filePath));
+}
+
+/**
+ * The persisted caches built from source text: names, line content and include targets decoded
+ * with one encoding are wrong under another, and their mtime checks cannot tell (the files did not
+ * change). The same families `lsp-driver.js --cold` clears; they rebuild by themselves.
+ */
+const SOURCE_DERIVED_CACHES = ['sdi', 'frg', 'chainindex', 'siblingindex', 'refindex', 'reachableset', 'iv'];
+const ENCODING_MARKER = 'clarion-extension-source-encoding.txt';
+
+/**
+ * #879 — clears the source-derived caches in `tempDir` when the sources were last read with another
+ * encoding, then records this one. The first run only records it: this release's cache versions
+ * already rebuilt those caches. Returns whether anything was cleared.
+ */
+export function invalidateCachesOnEncodingChange(tempDir: string, encoding = ansiEncoding): boolean {
+    const marker = `${tempDir}/${ENCODING_MARKER}`;
+    let last: string | undefined;
+    try { last = fs.readFileSync(marker, 'utf8').trim(); } catch { /* first run */ }
+    if (last === encoding) return false;
+    if (last !== undefined) {
+        for (const family of SOURCE_DERIVED_CACHES) {
+            try { fs.rmSync(`${tempDir}/clarion-extension-${family}`, { recursive: true, force: true }); } catch { /* rebuilt as needed */ }
+        }
+    }
+    try { fs.writeFileSync(marker, encoding, 'utf8'); } catch { /* checked again next start */ }
+    return last !== undefined;
 }
 
 /** The async form of readSourceText. */

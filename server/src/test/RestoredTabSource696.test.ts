@@ -3,6 +3,7 @@ import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
 import { decodeSourceBytes, isClarionSourcePath, readUnopenedSource } from '../utils/RestoredTabSource';
+import { decodeSource, setSourceEncoding } from '../utils/SourceText';
 
 /**
  * #696 — a restored tab VS Code has not instantiated is pulled by URI; the server reads the file
@@ -14,11 +15,22 @@ suite('Reading a restored tab\'s file from disk (#696)', () => {
         assert.strictEqual(decodeSourceBytes(Buffer.from("S STRING('café')", 'utf8')), "S STRING('café')");
     });
 
-    test('ANSI bytes are read as Latin-1, with no replacement characters', () => {
+    test('ANSI bytes are read in the ANSI code page (Windows-1252 by default), with no replacement characters', () => {
         const ansi = Buffer.from([0x53, 0x20, 0x27, 0x41, 0xB3, 0x42, 0xFE, 0x27]); // generated-code field delimiters
         const text = decodeSourceBytes(ansi);
         assert.ok(!text.includes('\uFFFD'), JSON.stringify(text));
         assert.strictEqual(text, "S 'A\u00B3B\u00FE'");
+    });
+
+    test('#879: an unopened tab decodes as every other file read from disk, with files.encoding', () => {
+        setSourceEncoding('windows1251');
+        try {
+            const bytes = Buffer.from([0x21, 0x20, 0xD1, 0xF3, 0xEC, 0xEC, 0xE0]); // "! \u0421\u0443\u043C\u043C\u0430" in Windows-1251
+            assert.strictEqual(decodeSourceBytes(bytes), '! \u0421\u0443\u043C\u043C\u0430');
+            assert.strictEqual(decodeSourceBytes(bytes), decodeSource(bytes));
+        } finally {
+            setSourceEncoding(undefined);
+        }
     });
 
     test('only Clarion sources are read', () => {

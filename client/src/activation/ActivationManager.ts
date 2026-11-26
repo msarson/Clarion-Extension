@@ -256,6 +256,11 @@ export async function setupFolderDependentFeatures(
                 const encoding = clarionFilesEncoding();
                 client.sendNotification('clarion/updateSourceEncoding', { encoding });
                 logger.info(`🔄 files.encoding for Clarion changed — sent to the server: ${encoding}`);
+                // The solution's index was read with the old encoding; a reload reads it again.
+                void window.showInformationMessage(
+                    `Clarion files are now read as ${encoding}. Reload the window so the solution's index reads them again.`,
+                    'Reload Window'
+                ).then(choice => { if (choice) void commands.executeCommand('workbench.action.reloadWindow'); });
             })
         );
 

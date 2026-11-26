@@ -42,7 +42,12 @@ suite('Clarion source is never read as plain UTF-8 (#879)', () => {
                 const rel = path.relative(srcRoot, full).replace(/\\/g, '/');
                 const allowed = ALLOWED[rel] ?? [];
                 fs.readFileSync(full, 'utf8').split('\n').forEach((line, i) => {
-                    if (/readFile(Sync)?\([^;]*['"]utf-?8['"]/.test(line) && !allowed.some(a => line.includes(a))) {
+                    // A file read as text in a named encoding (UTF-8, Latin-1, binary), an encoding
+                    // option, or a decoder of its own: each is a second rule for decoding a file.
+                    const textRead = /readFile(Sync)?\([^;]*['"](utf-?8|latin1|binary|ascii)['"]/.test(line)
+                        || /readFile(Sync)?\([^;]*\bencoding\s*:/.test(line)
+                        || /new TextDecoder\b/.test(line);
+                    if (textRead && !allowed.some(a => line.includes(a))) {
                         offenders.push(`${rel}:${i + 1}: ${line.trim()}`);
                     }
                 });

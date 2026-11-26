@@ -118,7 +118,8 @@ import { yieldToRequests } from './utils/cooperativeScan';
 import { beginInteractive, runAsBackground } from './utils/interactivePriority';
 import { readClientFeatures } from './utils/ClientFeatures';
 import { resolveMemberHeaderTokenForUri } from './utils/MemberHeaderResolver';
-import { setSourceEncoding, sourceEncoding } from './utils/SourceText';
+import { invalidateCachesOnEncodingChange, readSourceText, setSourceEncoding, sourceEncoding } from './utils/SourceText'; // #879
+import * as os from 'os'; // #879
 
 /**
  * #715 item 1 — a request handler that background validation waits for while it runs (hover,
@@ -464,7 +465,10 @@ connection.onInitialize((params) => {
         globalClarionSettings = params.initializationOptions || {};
         // #879: the encoding VS Code decodes Clarion files with, for the sources read from disk.
         setSourceEncoding((params.initializationOptions as { sourceEncoding?: string } | undefined)?.sourceEncoding);
-        logger.info(`📥 Source encoding for files read from disk: valid UTF-8, else ${sourceEncoding()}`);
+        // The persisted caches hold text decoded with the encoding of their run; a changed
+        // setting clears them before the solution loads them (they rebuild).
+        const cleared = invalidateCachesOnEncodingChange(os.tmpdir());
+        logger.info(`📥 Source encoding for files read from disk: valid UTF-8, else ${sourceEncoding()}${cleared ? ' (changed: source-derived caches cleared)' : ''}`);
         // Optional client features under capabilities.experimental (attribute edit links on control cards).
         readClientFeatures(params.capabilities);
 
@@ -703,7 +707,6 @@ const lastValidatedVersions = new Map<string, number>();
 // change pipeline — including revalidateRelatedDocuments, which otherwise
 // re-validated a MEMBER file's 68k-token parent PROGRAM on every member open.
 import { ContentChangeGuard } from './utils/ContentChangeGuard';
-import { readSourceText } from './utils/SourceText'; // #879
 const contentChangeGuard = new ContentChangeGuard();
 
 // ✅ Diagnostic validation function
@@ -2766,6 +2769,10 @@ connection.onNotification('clarion/updateSourceEncoding', (params: { encoding?: 
     setSourceEncoding(params?.encoding);
     logger.info(`📥 clarion/updateSourceEncoding — ${before} → ${sourceEncoding()}`);
     if (sourceEncoding() === before) return;
+    // Files read from now on use the new encoding. The indexes this server built hold names and
+    // lines read with the old one, so the client offers a reload; the persisted caches are cleared
+    // now so that reload rebuilds them.
+    invalidateCachesOnEncodingChange(os.tmpdir());
     TokenCache.getInstance().clearAllTokens();
     bumpCrossFileEpoch();
     lastValidatedVersions.clear();
@@ -2998,7 +3005,7 @@ connection.onRequest('clarion/unresolvedReferences', async () => {
     const started = Date.now();
     const files = graph.getScannedFiles();
     const read = (file: string): string | null => {
-        try { return fs.readFileSync(file, 'latin1'); } catch { return null; }
+        try { return readSourceText(file); } catch { return null; }
     };
     const references: Array<ReturnType<typeof unresolvedReferences>[number] & { inProject: boolean }> = [];
     for (let i = 0; i < files.length; i += 100) {

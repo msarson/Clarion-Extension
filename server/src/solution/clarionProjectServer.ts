@@ -9,7 +9,7 @@ import { DirectoryFileIndex } from './DirectoryFileIndex';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { parseLegacyProject } from '../../../common/LegacyProject';
 import { addItem, listItems, removeItem } from '../../../common/CwprojItems';
-import { readSourceText } from '../utils/SourceText'; // #879
+import { readSourceText, readSourceTextAsync } from '../utils/SourceText'; // #879
 
 /** A Compile item's Include and a file name name the same file, in any case. */
 const sameFileName = (include: string, fileName: string) => include.toLowerCase() === fileName.toLowerCase();
@@ -459,7 +459,7 @@ export class ClarionProjectServer {
                 continue;
             }
             let text: string;
-            try { text = await fs.promises.readFile(prjPath, 'latin1'); } catch { continue; }
+            try { text = await readSourceTextAsync(prjPath); } catch { continue; }
             read.found = true;
             const prjDir = path.dirname(prjPath);
             const locate = (file: string) => this.findLegacyFile(file, prjDir);
@@ -468,7 +468,7 @@ export class ClarionProjectServer {
                     const at = locate(file);
                     if (!at) return undefined;
                     read.watch.push(at);
-                    try { return fs.readFileSync(at, 'latin1'); } catch { return undefined; }
+                    try { return readSourceText(at); } catch { return undefined; }
                 },
                 exists: file => locate(file) ? true : undefined,
             });

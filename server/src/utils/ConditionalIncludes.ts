@@ -4,6 +4,7 @@ import * as path from 'path';
 import { scanConditionalCompile } from './ConditionalCompile';
 import { resolveViaProjectRedirection } from './RedirectionResolution';
 import { isProjectDependency, projectDependencyHolds, projectSwitches } from '../solution/ProjectDefines';
+import { readSourceText } from './SourceText'; // #879
 
 /**
  * #807 — the INCLUDE lines of a file that sit in a COMPILE/OMIT block decided not to compile, for
@@ -80,7 +81,7 @@ function equatesOfFile(file: string, visiting: Set<string>, depth: number, deep:
     const mtimeMs = mtimeOf(file);
     if (mtimeMs === undefined) return undefined;
     let text: string;
-    try { text = fs.readFileSync(file, 'latin1'); } catch { return undefined; }
+    try { text = readSourceText(file); } catch { return undefined; }
     const own = new Map<string, number>([[file, mtimeMs]]);
     visiting.add(file.toLowerCase());
     const scan = scanConditionalCompile(text.split(/\r?\n/), deep ? {

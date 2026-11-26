@@ -14,7 +14,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Position } from 'vscode-languageserver-protocol';
-import { decodeSource, readSourceText, setSourceEncoding } from '../utils/SourceText';
+import { decodeSource, invalidateCachesOnEncodingChange, readSourceText, setSourceEncoding } from '../utils/SourceText';
 import { HoverProvider } from '../providers/HoverProvider';
 import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
@@ -61,6 +61,18 @@ suite('Clarion sources read from disk keep their encoding (#879)', () => {
             assert.strictEqual(decodeSource(Buffer.from([0xE9])), 'é');
         });
 
+        test('a UTF-16 byte-order mark is honoured, little- or big-endian', () => {
+            const le = Buffer.concat([Buffer.from([0xFF, 0xFE]), Buffer.from('PROGRAM', 'utf16le')]);
+            const be = Buffer.from([0xFE, 0xFF, 0x00, 0x50, 0x00, 0x52]); // "PR"
+            assert.strictEqual(decodeSource(le).replace(/^﻿/, ''), 'PROGRAM');
+            assert.strictEqual(decodeSource(be).replace(/^﻿/, ''), 'PR');
+        });
+
+        test('an empty file is empty text', () => {
+            setSourceEncoding('windows1251');
+            assert.strictEqual(decodeSource(Buffer.alloc(0)), '');
+        });
+
         test('readSourceText reads a file with the same rule', () => {
             const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce879-'));
             try {
@@ -71,6 +83,37 @@ suite('Clarion sources read from disk keep their encoding (#879)', () => {
             } finally {
                 fs.rmSync(dir, { recursive: true, force: true });
             }
+        });
+    });
+
+    suite('persisted caches follow the encoding', () => {
+        let tmp: string;
+        const family = (name: string) => path.join(tmp, `clarion-extension-${name}`);
+        setup(() => {
+            tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'ce879c-'));
+            for (const f of ['sdi', 'frg', 'iv']) {
+                fs.mkdirSync(family(f));
+                fs.writeFileSync(path.join(family(f), 'x.json'), '{}');
+            }
+        });
+        teardown(() => fs.rmSync(tmp, { recursive: true, force: true }));
+
+        test('the first run records the encoding and clears nothing', () => {
+            assert.strictEqual(invalidateCachesOnEncodingChange(tmp, 'windows1251'), false);
+            assert.ok(fs.existsSync(family('sdi')));
+        });
+
+        test('the same encoding next time clears nothing', () => {
+            invalidateCachesOnEncodingChange(tmp, 'windows1251');
+            assert.strictEqual(invalidateCachesOnEncodingChange(tmp, 'windows1251'), false);
+            assert.ok(fs.existsSync(family('sdi')) && fs.existsSync(family('iv')));
+        });
+
+        test('another encoding clears the caches built from source, and records the new one', () => {
+            invalidateCachesOnEncodingChange(tmp, 'windows1252');
+            assert.strictEqual(invalidateCachesOnEncodingChange(tmp, 'windows1251'), true);
+            for (const f of ['sdi', 'frg', 'iv']) assert.ok(!fs.existsSync(family(f)), f);
+            assert.strictEqual(invalidateCachesOnEncodingChange(tmp, 'windows1251'), false);
         });
     });
 
