@@ -675,6 +675,15 @@ export class ReferencesProvider {
             locations.push(...fileLocations);
         }
 
+        // A structure field: `.Field` was matched by name, whatever the receiver; drop the
+        // accesses whose receiver reaches another declaration.
+        if (symbolInfo.scope.type === 'field') {
+            const kept = await this.keepFieldAccessesOfDeclaration(locations, searchWord,
+                { file: symbolInfo.location.uri, line: symbolInfo.location.line }, document, token);
+            if (kept === null) return null;
+            locations.splice(0, locations.length, ...kept);
+        }
+
         logger.test(`[FAR] ✅ ${locations.length} reference(s) found for "${searchWord}"`);
         return locations.length > 0 ? locations : null;
     }
@@ -996,7 +1005,6 @@ export class ReferencesProvider {
         // class body): its declaration, from the class-body route or the resolved access.
         let structureTarget: { file: string; line: number } | undefined =
             structureFieldLine !== undefined ? { file: document.uri, line: structureFieldLine } : undefined;
-
         // --- Resolve the declaring class ---------------------------------
         const isSelfOrParent = /^(self|parent)$/i.test(beforeDot);
         // #654: the anchor is the declaration hover and F12 name - DottedAccessResolver (#651, #652),
@@ -1142,7 +1150,6 @@ export class ReferencesProvider {
                 return this.provideReferencesUnfiltered(document, { line: declarationLine, character: 0 }, context, token);
             }
         }
-
         // --- Determine files to search -----------------------------------
         // If we resolved a declarationFile (INC) and no classModuleFile was passed in,
         // extract the MODULE('xyz.clw') attribute from the CLASS declaration in that INC.
@@ -2424,7 +2431,7 @@ export class ReferencesProvider {
             const lines = text.split(/\r?\n/);
             const tokens = this.getTokensForUri(fileUri);
             const structure = this.tokenCache.getStructure(doc);
-            const verdicts = new Map<string, boolean>();
+            const verdicts = new Map<string, boolean | undefined>();
 
             for (let line = 0; line < lines.length; line++) {
                 const lineText = lines[line];
@@ -2435,26 +2442,14 @@ export class ReferencesProvider {
                     // Code only: the name sits in an access token, not a comment or a string.
                     const covering = tokens.find(t => t.line === line && t.start <= memberStart && memberStart < t.start + t.value.length);
                     if (!covering || covering.type === TokenType.Comment || covering.type === TokenType.String) continue;
-                    const receiver = ChainedPropertyResolver.extractChain(
-                        lineText.substring(0, m.index).replace(/\[[^\][]*\]/g, ''));
-                    if (!/^[A-Za-z_][\w:]*(\.[A-Za-z_][\w:]*)*$/.test(receiver)) continue;
+                    const receiver = ReferencesProvider.fieldAccessReceiver(lineText, m.index);
+                    if (!receiver) continue;
                     const lastSegment = receiver.substring(receiver.lastIndexOf('.') + 1).toLowerCase();
                     if (structureLabel && lastSegment !== structureLabel) continue;
 
-                    const scope = TokenHelper.getInnermostScopeAtLine(structure, line);
-                    const key = receiver.toLowerCase() + '@' + (scope ? scope.line : -1);
-                    let keep = verdicts.get(key);
-                    if (keep === undefined) {
-                        if (await this.yieldIfNeeded(steps++, token)) return null;
-                        try {
-                            const r = await this.dottedAccess.resolve(receiver, memberName, doc, line, undefined);
-                            keep = !!r?.structureField && r.member.line === target.line && sameFile(r.member.file, target.file);
-                        } catch {
-                            keep = false;
-                        }
-                        verdicts.set(key, keep);
-                    }
-                    if (keep) {
+                    if (await this.yieldIfNeeded(steps++, token)) return null;
+                    const keep = await this.fieldAccessVerdict(receiver, memberName, doc, structure, line, target, verdicts, true);
+                    if (keep === true) {
                         locations.push(Location.create(fileUri,
                             Range.create(line, memberStart, line, memberStart + memberName.length)));
                     }
@@ -2462,6 +2457,104 @@ export class ReferencesProvider {
             }
         }
         return locations.length > 0 ? locations : null;
+    }
+
+    /**
+     * #846 — the receiver of a `.Field` access whose dot is at `dotIndex` of `lineText` (`SELF.Grp`
+     * in `SELF.Grp.Field`), a subscript being no part of it (`SELF.Arr[1].Hits`). Undefined when
+     * what precedes the dot is not a plain dotted name.
+     */
+    private static fieldAccessReceiver(lineText: string, dotIndex: number): string | undefined {
+        const receiver = ChainedPropertyResolver.extractChain(
+            lineText.substring(0, dotIndex).replace(/\[[^\][]*\]/g, ''));
+        return /^[A-Za-z_][\w:]*(\.[A-Za-z_][\w:]*)*$/.test(receiver) ? receiver : undefined;
+    }
+
+    /**
+     * #846 — whether `receiver.memberName` on `line` of `doc` names the field declared at
+     * `target`, as hover and Go to Definition resolve it (DottedAccessResolver): true, false
+     * when it names another declaration, undefined when it does not resolve. With
+     * `ownFieldOnly`, only a field the structure declares itself counts (#846). One resolve per
+     * receiver per scope (procedure, method or routine), kept in `verdicts`; each caller decides
+     * what an unresolved access means for it.
+     */
+    private async fieldAccessVerdict(
+        receiver: string,
+        memberName: string,
+        doc: TextDocument,
+        structure: DocumentStructure,
+        line: number,
+        target: { file: string; line: number },
+        verdicts: Map<string, boolean | undefined>,
+        ownFieldOnly = false
+    ): Promise<boolean | undefined> {
+        const scope = TokenHelper.getInnermostScopeAtLine(structure, line);
+        const key = receiver.toLowerCase() + '@' + (scope ? scope.line : -1);
+        if (verdicts.has(key)) return verdicts.get(key);
+        let verdict: boolean | undefined;
+        try {
+            const r = await this.dottedAccess.resolve(receiver, memberName, doc, line, undefined);
+            verdict = r
+                ? (!ownFieldOnly || !!r.structureField) &&
+                  r.member.line === target.line &&
+                  toCanonicalUri(r.member.file).toLowerCase() === toCanonicalUri(target.file).toLowerCase()
+                : undefined;
+        } catch {
+            verdict = undefined;
+        }
+        verdicts.set(key, verdict);
+        return verdict;
+    }
+
+    /**
+     * The search from a structure field's declaration matches `.Field` by name, behind any
+     * receiver, so it listed `x.Field` of every structure with a field of that name. Drop an
+     * access whose receiver resolves to another declaration; keep one that does not resolve,
+     * as the other receiver checks here do (rename must not miss a use). Accesses without a
+     * dot (`PRE:Field`, the declaration) are kept. Null when the search is cancelled.
+     */
+    private async keepFieldAccessesOfDeclaration(
+        locations: Location[],
+        memberName: string,
+        target: { file: string; line: number },
+        cursorDocument: TextDocument,
+        token?: CancellationToken
+    ): Promise<Location[] | null> {
+        type FileContext = { doc: TextDocument; lines: string[]; structure: DocumentStructure; verdicts: Map<string, boolean | undefined> };
+        const files = new Map<string, FileContext | null>();
+        const kept: Location[] = [];
+        let steps = 0;
+        for (const loc of locations) {
+            const fileKey = toCanonicalUri(loc.uri).toLowerCase();
+            let ctx = files.get(fileKey);
+            if (ctx === undefined) {
+                const isCursorFile = fileKey === toCanonicalUri(cursorDocument.uri).toLowerCase();
+                const text = isCursorFile
+                    ? cursorDocument.getText()
+                    : this.tokenCache.getDocumentText(loc.uri) ?? this.readFileTextForUri(loc.uri);
+                if (text === null) {
+                    ctx = null;
+                } else {
+                    const doc = isCursorFile ? cursorDocument : TextDocument.create(loc.uri, 'clarion', 1, text);
+                    ctx = { doc, lines: text.split(/\r?\n/), structure: this.tokenCache.getStructure(doc), verdicts: new Map() };
+                }
+                files.set(fileKey, ctx);
+            }
+            const line = loc.range.start.line;
+            const dotIndex = loc.range.start.character - 1;
+            const lineText = ctx?.lines[line] ?? '';
+            const receiver = ctx && dotIndex >= 0 && lineText[dotIndex] === '.'
+                ? ReferencesProvider.fieldAccessReceiver(lineText, dotIndex)
+                : undefined;
+            if (!ctx || !receiver) {
+                kept.push(loc);
+                continue;
+            }
+            if (await this.yieldIfNeeded(steps++, token)) return null;
+            const verdict = await this.fieldAccessVerdict(receiver, memberName, ctx.doc, ctx.structure, line, target, ctx.verdicts);
+            if (verdict !== false) kept.push(loc);
+        }
+        return kept;
     }
 
     /**
