@@ -21,7 +21,7 @@ All notable changes to the Clarion Extension are documented here.
 - **A variable after a concatenation `&` is found by Find All References.** In code, `'Rows: ' & Num` was read as a reference declaration, so the use of Num was missed. [#870](https://github.com/msarson/Clarion-Extension/pull/870) @geircodes
 - **ERRORCODE returns a LONG and FILEERRORCODE a STRING.** The hover and signature help had the two return types swapped. [#871](https://github.com/msarson/Clarion-Extension/pull/871) @geircodes
 - **A CODE or DATA written at column 0 still starts the code or data section.** The outline read the code below such a CODE as declarations and listed code lines as variables. [#872](https://github.com/msarson/Clarion-Extension/pull/872) @geircodes
-- **The card on a QUEUE or GROUP declared with a parent counts the parent's fields.** `ExtQ QUEUE(BaseQ)` begins with BaseQ's fields, but its card counted only the fields written inside it. It now reads, for example, "4 fields (3 from `BaseQ`)", following a chain of parents and a parent declared in an INCLUDEd file. [#882](https://github.com/msarson/Clarion-Extension/issues/882)
+- **The card on a QUEUE or GROUP declared with a parent counts the parent's fields.** `ExtQ QUEUE(BaseQ)` begins with BaseQ's fields, but its card counted only the fields written inside it. It now reads, for example, "4 fields (3 from `BaseQ`)". [#882](https://github.com/msarson/Clarion-Extension/issues/882)
 - **An OF or ELSE inside an OMIT block is not a branch of the CASE or IF around it.** The CASE hover listed such a branch, and an omitted OF could stand in for the OF that a live OROF needs. [#873](https://github.com/msarson/Clarion-Extension/pull/873) @geircodes
 
 #### Diagnostics

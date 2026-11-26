@@ -105,6 +105,60 @@ suite('Structure card counts inherited fields (#882)', () => {
         assert.ok(!/ from /.test(text.split('\n').find(l => /fields/.test(l)) ?? ''), `no inherited note; got: ${text}`);
     });
 
+    suite('partial and unusual parents', () => {
+        const src = [
+            '  PROGRAM',                                   // 0
+            '  MAP',                                       // 1
+            '  END',                                       // 2
+            'MidQ                 QUEUE(GoneQ),TYPE',      // 3
+            'M1                     LONG',                 // 4
+            'M2                     LONG',                 // 5
+            '                     END',                    // 6
+            'TopQ                 QUEUE(MidQ)',            // 7
+            'T1                     LONG',                 // 8
+            '                     END',                    // 9
+            'LoopA                QUEUE(LoopB),TYPE',      // 10
+            'A1                     LONG',                 // 11
+            '                     END',                    // 12
+            'LoopB                QUEUE(LoopA),TYPE',      // 13
+            'B1                     LONG',                 // 14
+            '                     END',                    // 15
+            "Orders               FILE,DRIVER('TOPSPEED'),PRE(ORD)", // 16
+            'Record                 RECORD',               // 17
+            'Id                       LONG',               // 18
+            'Total                    DECIMAL(9,2)',       // 19
+            '                       END',                  // 20
+            '                     END',                    // 21
+            'CopyQ                QUEUE(ORD:Record)',      // 22
+            'Mark                   BYTE',                 // 23
+            '                     END',                    // 24
+            'UseLoop              LoopA',                  // 25
+            '  CODE',                                      // 26
+            '  FREE(TopQ)',                                // 27
+            '  FREE(CopyQ)',                               // 28
+        ].join('\n');
+        const factsOf = (text: string) => text.split('\n').find(l => l.startsWith('🗂️')) ?? '';
+
+        test('a grandparent that cannot be found is said so, not silently counted as none', async () => {
+            const facts = factsOf(await hoverIn(TextDocument.create('test://partial-882.clw', 'clarion', 1, src), 27, 8));
+            assert.ok(/\b3 fields\b/.test(facts) && /2 from `MidQ`/.test(facts), `MidQ's own 2 + T1; got: ${facts}`);
+            assert.ok(/GoneQ/.test(facts) && /not found/.test(facts), `names the grandparent it could not read; got: ${facts}`);
+        });
+
+        test('a FILE\'s RECORD named by its prefix is a parent', async () => {
+            const facts = factsOf(await hoverIn(TextDocument.create('test://partial-882.clw', 'clarion', 1, src), 28, 8));
+            assert.ok(/\b3 fields\b/.test(facts) && /2 from `ORD:Record`/.test(facts), `Id, Total + Mark; got: ${facts}`);
+        });
+
+        test('parents that loop are not followed round, and are not called missing', async () => {
+            const doc = TextDocument.create('test://partial-882.clw', 'clarion', 1, src);
+            const text = await hoverIn(doc, 10, 2); // LoopA's own label
+            const facts = factsOf(text);
+            assert.ok(!/not found/.test(facts), `the parent exists; got: ${facts}`);
+            assert.ok(/the parents loop/.test(facts), `says the parents loop; got: ${facts}`);
+        });
+    });
+
     suite('parent in an INCLUDEd file', () => {
         let dir: string;
         let savedSm: unknown;
