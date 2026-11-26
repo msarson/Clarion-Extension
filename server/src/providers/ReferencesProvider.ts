@@ -4298,16 +4298,6 @@ export class ReferencesProvider {
     }
 
     /**
-     * Collect all PRE prefixes that reference fields of the same structure as the given field.
-     *
-     * Strategy:
-     * 1. The field token itself may carry structurePrefix (from DocumentStructure).
-     * 2. Also find variables in the current file (and searched files) declared as the
-     *    same queue/group type (parent structure label) and collect their prefixes.
-     *
-     * Returns a Set of lowercase prefix strings (e.g. {"qdir", "qzipf"}).
-     */
-    /**
      * #845 — whether `tokens[index]`, a bare field name, is the tail of a qualified name: one of
      * the field's own prefixes split off by the tokenizer (`LONGPREFIX` `:` `Answer`), or a
      * `.` right before it (`Struct` `.` `Field`). Either way it is the field, not a namesake.
@@ -4325,6 +4315,16 @@ export class ReferencesProvider {
         return !!fieldPrefixes?.has(prefix);
     }
 
+    /**
+     * Collect all PRE prefixes that reference fields of the same structure as the given field.
+     *
+     * Strategy:
+     * 1. The field token itself may carry structurePrefix (from DocumentStructure).
+     * 2. Also find variables in the current file (and searched files) declared as the
+     *    same queue/group type (parent structure label) and collect their prefixes.
+     *
+     * Returns a Set of lowercase prefix strings (e.g. {"qdir", "qzipf"}).
+     */
     private collectFieldPrefixes(symbolInfo: SymbolInfo, document: TextDocument): Set<string> {
         const prefixes = new Set<string>();
 

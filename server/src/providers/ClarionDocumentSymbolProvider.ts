@@ -385,7 +385,9 @@ export class ClarionDocumentSymbolProvider {
             }
 
             // Check if current token is CODE execution marker - stop variable processing
-            if (type === TokenType.ExecutionMarker && value.toUpperCase() === "CODE") {
+            // #865 — only a CODE alone on its line; `code = 1` is a statement
+            if (type === TokenType.ExecutionMarker && value.toUpperCase() === "CODE" &&
+                isBareExecutionMarker(token, l => tokensOnLine(tokens, l))) {
                 pastCodeStatement = true;
                 
                 // For method implementations, clear currentProcedure AND pop from parent stack

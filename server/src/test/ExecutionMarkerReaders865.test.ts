@@ -84,6 +84,23 @@ suite('A CODE or DATA word that is not a section marker (#865)', () => {
         assert.ok(all.some(s => s.range.start.line === 10), 'the routine local Tmp is listed');
     });
 
+    test('Structure view: a parameter named code does not end a CLASS\'s method list', () => {
+        const lines = [
+            "  MEMBER('x')",                               // 0
+            'Settings       CLASS,TYPE',                   // 1
+            'SetCode          PROCEDURE(STRING code)',     // 2
+            'GetName          PROCEDURE(),STRING',         // 3
+            'SetName          PROCEDURE(STRING pName)',    // 4
+            '               END',                          // 5
+        ];
+        const tokens = new ClarionTokenizer(lines.join('\r\n')).tokenize();
+        const all = flatten(new ClarionDocumentSymbolProvider().provideDocumentSymbols(tokens, 'test://c865.clw'));
+        for (const line of [2, 3, 4]) {
+            assert.ok(all.some(s => s.range.start.line === line),
+                `method on line ${line} missing: ${JSON.stringify(all.map(s => `${s.name}@${s.range.start.line}`))}`);
+        }
+    });
+
     test('unreachable code: `data = 1` inside an IF in a routine does not reset the structure stack', () => {
         const code = [
             'Proc           PROCEDURE',    // 0
