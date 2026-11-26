@@ -560,10 +560,11 @@ export function validateReturnStatements(tokens: Token[], document: TextDocument
     // A MAP or CLASS prototype that returns a value (no PROC or DERIVED), read across its `|`
     // continuation lines (#853: the `)` closing its parameters was looked for on the first line
     // only, so a continued prototype was never recorded and its procedure never checked).
-    // Only one with a parameter list, as before.
+    // With or without a parameter list: `Foo PROCEDURE,LONG` declares a return too (the old walk
+    // took the first `(` for the parameters, so it recorded `Foo PROCEDURE,NAME('x'),LONG` but not that).
     const recordPrototype = (j: number, name: string, line: number): void => {
         const ret = declarationReturn(tokens, j);
-        if (!ret.hasParams || ret.proc || !ret.returnType) return;
+        if (ret.proc || !ret.returnType) return;
         declarationsWithReturnTypes.push({ name, returnType: ret.returnType, line, signature: logicalLine(docLines, tokens[j].line) });
     };
 

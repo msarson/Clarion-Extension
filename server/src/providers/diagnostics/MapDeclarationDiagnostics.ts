@@ -12,14 +12,13 @@ import { getLocalMapScope } from '../../utils/LocalMapScopeHelper';
 import { pathToCanonicalUri } from '../../utils/UriUtils';
 import { moduleTargetMatchesFile } from '../../utils/ClarionSourceNaming';
 import { makeTimeSlicer } from '../../utils/cooperativeScan';
-import { logicalLine } from '../../utils/ClassMemberScan'; // #853: shared, was local
+import { logicalLine } from '../../utils/ClassMemberScan';
 import * as fs from 'fs';
 import * as nodePath from 'path';
 import { resolveMemberHeaderTokenForUri } from '../../utils/MemberHeaderResolver';
 
 const logger = LoggerManager.getLogger('MapDeclarationDiagnostics');
 logger.setLevel('error');
-
 
 /** Resolve a bare CLW filename (as stored in MODULE token.referencedFile) to an
  *  absolute path using the solution's redirection parser.  Returns null if it

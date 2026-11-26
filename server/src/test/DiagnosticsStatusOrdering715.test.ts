@@ -89,7 +89,9 @@ suite('#715 diagnostics status ordering while the re-validation yields to hovers
         // sleep (the 500 ms debounce plus a margin): on a loaded machine v_b then arrived before
         // v_a's pass began, so v_a was never validated and never superseded. The pass publishes
         // its sync diagnostics (`partial`) before the async validators run, so that publish says
-        // the pass is under way, with the long async part still ahead of it.
+        // the pass is under way, with the long async part still ahead of it. That holds because
+        // the solution and index are ready (suiteSetup waits for v1 complete) and this client
+        // does not advertise pull diagnostics, so the server pushes publishDiagnostics.
         const a = edit(codeLine(0));
         await server.waitFor('textDocument/publishDiagnostics', p => p.uri === uri && p.version === a, 60000);
         const b = edit(codeLine(1));

@@ -75,6 +75,25 @@ suite('Signatures continued with | are read whole (#853)', () => {
              'Sum          PROCEDURE(LONG a, LONG b)', '  CODE', '  RETURN a + b'])), []);
     });
 
+    test('a prototype with no parameter list declares a return too, with or without attributes', () => {
+        assert.deepStrictEqual(returnChecks(program(
+            ['Bare         PROCEDURE,LONG', "Named        PROCEDURE,NAME('Named'),LONG"],
+            ['Bare         PROCEDURE', '  CODE', '  x# = 1', 'Named        PROCEDURE', '  CODE', '  x# = 1'])), ['Bare', 'Named']);
+    });
+
+    test('control: DERIVED on a continued CLASS prototype still exempts it', () => {
+        assert.deepStrictEqual(returnChecks([
+            '  PROGRAM', '  MAP', '  END',
+            'Cls          CLASS',
+            'Calc           PROCEDURE(LONG a, |',
+            '                         LONG b),LONG,|',
+            '                         DERIVED',
+            '             END',
+            '  CODE', '  RETURN',
+            'Cls.Calc     PROCEDURE(LONG a, LONG b)', '  CODE', '  a += b', '',
+        ]), []);
+    });
+
     suite('overload selection', () => {
         let tmpDir: string;
         const writeCrlf = (file: string, lines: string[]) =>
