@@ -18,6 +18,9 @@ import LoggerManager from '../../logger';
 import * as fs from 'fs';
 import * as path from 'path';
 
+/** #882 — the fields a QUEUE(parent) or GROUP(parent) inherits; `count` is undefined when the parent was not found. */
+interface InheritedFields { parent: string; count?: number }
+
 const logger = LoggerManager.getLogger("VariableHoverResolver");
 logger.setLevel("error");
 
@@ -151,7 +154,8 @@ export class VariableHoverResolver {
         if (scopeInfo) {
             markdown.push(structureKind ? `${scopeIcon} ${scopeWord} ${structureKind} structure` : `${scopeIcon} ${scopeWord} variable`);
             if (structureKind) {
-                const facts = this.describeStructure(symbolInfo.token, structureKind, tokens, document);
+                const inherited = await this.inheritedFields(symbolInfo.token, structureKind, tokens, document);
+                const facts = this.describeStructure(symbolInfo.token, structureKind, tokens, document, inherited);
                 if (facts) {
                     markdown.push(``);
                     markdown.push(facts);
@@ -341,10 +345,12 @@ export class VariableHoverResolver {
     /** #656: the global card with its LIKE resolution. */
     private async globalCard(globalVar: Token, tokens: Token[], document: TextDocument, hoverLine?: number): Promise<Hover> {
         const like = await this.like.resolve(document.uri, globalVar.line, document);
-        return this.buildGlobalVariableHover(globalVar, tokens, document, hoverLine, like ?? undefined);
+        const structureKind = this.structureKindOf(globalVar, tokens);
+        const inherited = structureKind ? await this.inheritedFields(globalVar, structureKind, tokens, document) : null;
+        return this.buildGlobalVariableHover(globalVar, tokens, document, hoverLine, like ?? undefined, inherited);
     }
 
-    private buildGlobalVariableHover(globalVar: Token, tokens: Token[], document: TextDocument, hoverLine?: number, like?: LikeResolution): Hover {
+    private buildGlobalVariableHover(globalVar: Token, tokens: Token[], document: TextDocument, hoverLine?: number, like?: LikeResolution, inherited?: InheritedFields | null): Hover {
         const typeInfo = SymbolFinderService.extractTypeInfo(globalVar, tokens);
 
         // Check if this variable is inside a CLASS or INTERFACE structure
@@ -419,7 +425,7 @@ export class VariableHoverResolver {
                         : `${scopeWord} variable`;
             markdown.push(`${scopeIcon} ${scopeLabel}`);
             if (structureKind) {
-                const facts = this.describeStructure(globalVar, structureKind, tokens, document);
+                const facts = this.describeStructure(globalVar, structureKind, tokens, document, inherited);
                 if (facts) {
                     markdown.push(``);
                     markdown.push(facts);
@@ -490,9 +496,10 @@ export class VariableHoverResolver {
     /**
      * #486 — one line of facts for a structure card, from the declaration the
      * tokenizer already parsed. FILE: driver, PRE prefix, keys, memos/blobs and
-     * record fields. QUEUE/GROUP: PRE prefix and field count. Nothing for the rest.
+     * record fields. QUEUE/GROUP: PRE prefix and field count, counting the fields a
+     * QUEUE(parent) or GROUP(parent) inherits (#882). Nothing for the rest.
      */
-    private describeStructure(labelToken: Token, kind: string, tokens: Token[], document: TextDocument): string {
+    private describeStructure(labelToken: Token, kind: string, tokens: Token[], document: TextDocument, inherited?: InheritedFields | null): string {
         const opener = tokens.find(t =>
             t.line === labelToken.line && t.start > labelToken.start &&
             t.type === TokenType.Structure && t.finishesAt !== undefined);
@@ -532,10 +539,74 @@ export class VariableHoverResolver {
             return parts.length ? `🗄️ ${parts.join(' · ')}` : '';
         }
         if (kind === 'QUEUE' || kind === 'GROUP') {
-            parts.push(plural(members.length, 'field'));
+            if (inherited?.count !== undefined) {
+                parts.push(`${plural(members.length + inherited.count, 'field')} (${inherited.count} from \`${inherited.parent}\`)`);
+            } else if (inherited) {
+                parts.push(`${plural(members.length, 'field')} + those of \`${inherited.parent}\` (not found)`);
+            } else {
+                parts.push(plural(members.length, 'field'));
+            }
             return `🗂️ ${parts.join(' · ')}`;
         }
         return parts.length ? `🗂️ ${parts.join(' · ')}` : '';
+    }
+
+    /** #882 — the column-0 field labels a structure declares itself, or undefined when the label opens no structure. */
+    private ownFieldCount(labelToken: Token, tokens: Token[]): number | undefined {
+        const opener = tokens.find(t =>
+            t.line === labelToken.line && t.start > labelToken.start &&
+            t.type === TokenType.Structure && t.finishesAt !== undefined);
+        if (!opener || opener.finishesAt === undefined) return undefined;
+        return tokens.filter(t =>
+            t.line > opener.line && t.line < opener.finishesAt! &&
+            t.start === 0 && t.type === TokenType.Label).length;
+    }
+
+    /**
+     * #882 — a QUEUE(parent) or GROUP(parent) begins with the parent's fields (Language Reference,
+     * QUEUE: the parent may be a GROUP, QUEUE or RECORD, TYPE or not). Returns the parent's name and
+     * how many fields come from it, counting the parent's own parent in turn; `count` is undefined
+     * when the parent cannot be found. Null when the structure names no parent.
+     */
+    private async inheritedFields(
+        labelToken: Token, kind: string, tokens: Token[], document: TextDocument,
+        visited: Set<string> = new Set(),
+    ): Promise<InheritedFields | null> {
+        if (kind !== 'QUEUE' && kind !== 'GROUP') return null;
+        const declLine = document.getText({ start: { line: labelToken.line, character: 0 }, end: { line: labelToken.line + 1, character: 0 } });
+        const m = /^[A-Za-z_][\w:]*\s+(?:QUEUE|GROUP)\s*\(\s*([A-Za-z_][\w:]*)\s*\)/i.exec(declLine);
+        if (!m) return null;
+        const parent = m[1];
+        const key = parent.toLowerCase();
+        if (visited.has(key) || visited.size >= 8) return { parent };
+        visited.add(key);
+
+        const found = await this.findStructureLabel(parent, tokens, document);
+        if (!found) return { parent };
+        const own = this.ownFieldCount(found.label, found.tokens);
+        if (own === undefined) return { parent };
+        const parentKind = this.structureKindOf(found.label, found.tokens) ?? '';
+        const deeper = await this.inheritedFields(found.label, parentKind, found.tokens, found.document, visited);
+        return { parent, count: own + (deeper?.count ?? 0) };
+    }
+
+    /** #882 — a structure's label token: in this file first, else through the structure index (the project, or the file's INCLUDE chain). */
+    private async findStructureLabel(
+        name: string, tokens: Token[], document: TextDocument,
+    ): Promise<{ label: Token; tokens: Token[]; document: TextDocument } | null> {
+        const lower = name.toLowerCase();
+        const isStructureLabel = (t: Token, ts: Token[]) =>
+            t.type === TokenType.Label && t.start === 0 && t.value.toLowerCase() === lower &&
+            this.ownFieldCount(t, ts) !== undefined;
+        const local = tokens.find(t => isStructureLabel(t, tokens));
+        if (local) return { label: local, tokens, document };
+
+        const info = await this.symbolFinder.findIndexedTypeDeclaration(name, document);
+        if (!info || !this.crossFileCache) return null;
+        const loaded = await this.crossFileCache.getOrLoadDocument(info.filePath);
+        if (!loaded) return null;
+        const label = loaded.tokens.find(t => t.line === info.line && isStructureLabel(t, loaded.tokens));
+        return label ? { label, tokens: loaded.tokens, document: loaded.document } : null;
     }
 
     private renderDeclaredValueSummary(name: string, type: string, value: string | undefined): string {
