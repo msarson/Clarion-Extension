@@ -17,6 +17,7 @@ import { Range } from 'vscode-languageserver/node';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Token, TokenType } from '../tokenizer/TokenTypes';
 import { TokenCache } from '../TokenCache';
+import { isBareExecutionMarker } from '../utils/ExecutionMarker';
 import LoggerManager from '../logger';
 
 const logger = LoggerManager.getLogger("UnreachableCodeProvider");
@@ -130,9 +131,11 @@ export class UnreachableCodeProvider {
 
                     if (containingRoutine) {
                         // Inside ROUTINE - check for DATA marker to reset
-                        const hasDataMarker = lineTokens.some(t => 
-                            t.type === TokenType.ExecutionMarker && 
-                            t.value.toUpperCase() === 'DATA'
+                        // #865 — only a DATA alone on its line: `data = 1` is a statement.
+                        const hasDataMarker = lineTokens.some(t =>
+                            t.type === TokenType.ExecutionMarker &&
+                            t.value.toUpperCase() === 'DATA' &&
+                            isBareExecutionMarker(t, l => tokensByLine.get(l) || [])
                         );
                         if (hasDataMarker) {
                             structureStack.length = 0;
