@@ -737,14 +737,26 @@ export class MapProcedureResolver {
     }
 
     /**
-     * The argument texts of the first call to `procName` on a line, an omitted argument as an
-     * empty text holding its position (#250); null when the line holds no complete call.
+     * The argument texts of a call to `procName` on a line, an omitted argument as an empty
+     * text holding its position (#250); null when the line holds no complete call. With
+     * `atCharacter`, the call whose name covers that column (#881: `Fmt(S) & Fmt(N)`);
+     * otherwise, or when none does, the first. A name inside a string is not a call.
+     * Only the one line is read: a call continued with `|` returns null.
      * Shared by the sync pick above and the hover's typed pick (#881).
      */
-    public static callArgumentTexts(procName: string, line: string): string[] | null {
-        const maybeCallLine = line;
+    public static callArgumentTexts(procName: string, maybeCallLine: string, atCharacter?: number): string[] | null {
         const escaped = procName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const callMatch = new RegExp(`\\b${escaped}\\s*\\(`, 'i').exec(maybeCallLine);
+        const callRe = new RegExp(`\\b${escaped}\\s*\\(`, 'ig');
+        const insideString = (index: number) => (maybeCallLine.slice(0, index).match(/'/g)?.length ?? 0) % 2 === 1;
+        let callMatch: RegExpExecArray | null = null;
+        for (let m = callRe.exec(maybeCallLine); m !== null; m = callRe.exec(maybeCallLine)) {
+            if (insideString(m.index)) continue;
+            callMatch ??= m;
+            if (atCharacter !== undefined && atCharacter >= m.index && atCharacter <= m.index + procName.length) {
+                callMatch = m;
+                break;
+            }
+        }
         if (!callMatch) return null;
 
         // Extract the balanced-paren argument text (Clarion strings are '...' with '' escapes).
@@ -794,15 +806,36 @@ export class MapProcedureResolver {
     public overloadedPrototypes(procName: string, declTokens: Token[], declDoc: TextDocument, declLine: number): Array<{ line: number; text: string }> {
         const lower = procName.toLowerCase();
         const named = (t: Token) => t.label?.toLowerCase() === lower || t.value.toLowerCase() === lower;
-        const kindOf = (t: Token) => t.subType === TokenType.MapProcedure ? 'map'
-            : t.type === TokenType.Function ? 'map'
-            : t.subType === TokenType.GlobalProcedure ? 'bare' : undefined;
-        const own = declTokens.find(t => t.line === declLine && named(t) && kindOf(t) !== undefined);
-        if (!own) return [];
-        const kind = kindOf(own);
-        const lines = new Set<number>();
-        for (const t of declTokens) if (named(t) && kindOf(t) === kind) lines.add(t.line);
-        return [...lines].sort((a, b) => a - b).map(line => ({
+        const ranges = (keyword: string) => declTokens
+            .filter(t => t.type === TokenType.Structure && t.value.toUpperCase() === keyword && t.finishesAt !== undefined)
+            .map(t => ({ start: t.line, end: t.finishesAt! }));
+        const maps = ranges('MAP');
+        const blocks = [...maps, ...ranges('MODULE')];
+        const inside = (line: number, r: { start: number; end: number }) => line > r.start && line < r.end;
+        // A prototype is a MapProcedure, or an indented `Name(...)` (a Function token) inside a
+        // MAP or MODULE block. The same Function token anywhere else is a call to the procedure.
+        const isPrototype = (t: Token) => named(t) &&
+            (t.subType === TokenType.MapProcedure || (t.type === TokenType.Function && blocks.some(r => inside(t.line, r))));
+
+        let lines: number[];
+        const own = declTokens.find(t => t.line === declLine && isPrototype(t));
+        if (own) {
+            // Overloads share a MAP (Language Reference, Procedure Overloading): a same-named
+            // prototype in another procedure's local MAP declares another procedure. An included
+            // file has no MAP of its own - its text is part of the MAP that includes it - so there
+            // the whole file is that MAP.
+            const map = maps.filter(r => inside(own.line, r)).sort((a, b) => (a.end - a.start) - (b.end - b.start))[0];
+            lines = declTokens
+                .filter(t => isPrototype(t) && (map ? inside(t.line, map) : !maps.some(r => inside(t.line, r))))
+                .map(t => t.line);
+        } else {
+            // A bare `Name PROCEDURE(...)` prototype in an included file tokenizes as a GlobalProcedure;
+            // in a file with a MAP of its own, the same token is an implementation.
+            const bare = declTokens.find(t => t.line === declLine && named(t) && t.subType === TokenType.GlobalProcedure);
+            if (!bare || maps.length > 0) return [];
+            lines = declTokens.filter(t => named(t) && t.subType === TokenType.GlobalProcedure).map(t => t.line);
+        }
+        return [...new Set(lines)].sort((a, b) => a - b).map(line => ({
             line,
             text: declDoc.getText({ start: { line, character: 0 }, end: { line, character: Number.MAX_SAFE_INTEGER } }).replace(/\r?\n$/, ''),
         }));
