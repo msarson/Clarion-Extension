@@ -398,11 +398,14 @@ export class ReferencesProvider {
                     word = anchorMatch[0] + '.' + word;
                     logger.info(`🔗 Reconstructed chained word: "${word}" from middle-segment cursor`);
                 } else {
-                    // Typed variable access: e.g. INIMgr.Init — pick the nearest identifier before the dot
-                    const varMatch = textBeforeDot.match(/\b([A-Za-z_][A-Za-z0-9_]*)$/);
-                    if (varMatch) {
-                        word = varMatch[1] + '.' + word;
-                        logger.info(`🔗 Reconstructed typed-variable word: "${word}" from before-dot identifier`);
+                    // Typed variable access: e.g. INIMgr.Init — the whole chain before the dot, as
+                    // the resolvers read a receiver. #846: taking only the nearest plain identifier
+                    // cut a colon-named root (`Glo:Obj.Grp.Field` became `Obj.Grp.Field`) and
+                    // named another variable, or none.
+                    const chain = ChainedPropertyResolver.extractChain(textBeforeDot);
+                    if (/^[A-Za-z_][\w:]*(?:\.[A-Za-z_][\w:]*)*$/.test(chain)) {
+                        word = chain + '.' + word;
+                        logger.info(`🔗 Reconstructed typed-variable word: "${word}" from the chain before the dot`);
                     }
                 }
             }
@@ -524,8 +527,15 @@ export class ReferencesProvider {
             const moduleMatch = classLine.match(/MODULE\s*\(\s*['"](.+?)['"]\s*\)/i);
             const classModuleFile = moduleMatch?.[1];
             logger.test(`🏛️ [FAR] Route: CLASS body (class=${enclosingClass.label ?? '?'}, module=${classModuleFile ?? 'none'}) → member-access path`);
-            this.trace({ route: 'class-body-member', word });
-            return this.provideMemberReferences(`SELF.${word}`, document, position, context, classModuleFile, enclosingClass.label, token);
+            // #846 — a label inside a GROUP nested in the class body is that structure's field, not
+            // a member of the class: searched as the field declared on this line.
+            const inNestedStructure = tokens.some(t =>
+                t.type === TokenType.Structure && ['GROUP', 'QUEUE', 'RECORD'].includes(t.value.toUpperCase()) &&
+                t.line > enclosingClass.line && t.line < position.line &&
+                t.finishesAt !== undefined && t.finishesAt > position.line);
+            this.trace({ route: inNestedStructure ? 'class-body-structure-field' : 'class-body-member', word });
+            return this.provideMemberReferences(`SELF.${word}`, document, position, context, classModuleFile, enclosingClass.label, token,
+                inNestedStructure ? position.line : undefined);
         }
 
         // Check if cursor is on a MethodImplementation line for a locally-declared class.
@@ -962,7 +972,8 @@ export class ReferencesProvider {
         context: { includeDeclaration: boolean },
         classModuleFile?: string,
         knownClassName?: string,
-        token?: CancellationToken
+        token?: CancellationToken,
+        structureFieldLine?: number
     ): Promise<Location[] | null> {
         const lastDot = word.lastIndexOf('.');
         const beforeDot = word.substring(0, lastDot);
@@ -981,6 +992,10 @@ export class ReferencesProvider {
         let declarationFile: string | null = null;
         let declarationLine: number = -1;
         let className: string | null = knownClassName ?? null;
+        // #846 — the target is a field a structure declares itself (an inline GROUP's field in a
+        // class body): its declaration, from the class-body route or the resolved access.
+        let structureTarget: { file: string; line: number } | undefined =
+            structureFieldLine !== undefined ? { file: document.uri, line: structureFieldLine } : undefined;
 
         // --- Resolve the declaring class ---------------------------------
         const isSelfOrParent = /^(self|parent)$/i.test(beforeDot);
@@ -990,7 +1005,12 @@ export class ReferencesProvider {
         const isCall = new RegExp(`\\b${escapedMember}\\s*\\(`, 'i').test(cursorLineText);
         const resolveAnchor = () => this.dottedAccess.resolve(beforeDot, memberName, document, position.line, isCall ? callArgCount : undefined);
 
-        if (isSelfOrParent) {
+        if (structureTarget) {
+            // The class-body route on a field of a GROUP nested in the class: the cursor's line IS
+            // the declaration. SELF.<field> would name the class's own member of that name.
+            declarationFile = structureTarget.file;
+            declarationLine = structureTarget.line;
+        } else if (isSelfOrParent) {
             // #637 / #654 — each receiver's own class, named the way hover and F12 name it (#626 for
             // SELF, #648 for PARENT), then the shared member lookup. SELF and PARENT both went
             // to ClassMemberResolver.findClassMemberInfo, which starts at SELF's class, so
@@ -1076,6 +1096,7 @@ export class ReferencesProvider {
                     declarationFile = access.member.file;
                     declarationLine = access.member.line;
                     className = access.member.className;
+                    if (access.structureField) structureTarget = { file: access.member.file, line: access.member.line };
                     logger.info(`✅ ${beforeDot}.${memberName} → class="${className}" at ${declarationFile}:${declarationLine}`);
                 }
             }
@@ -1168,6 +1189,13 @@ export class ReferencesProvider {
                 : this.getMemberSearchFiles(document, declarationFile, effectiveModuleFile);
         if (isProcedureLocalClass) {
             this.trace({ files_source: 'proc-local-current-doc' });
+        }
+
+        // #846 — a structure's own field is searched as that field, in the files its class's
+        // members are searched in, not as the class member of that name.
+        if (structureTarget) {
+            this.trace({ route: 'member-structure-own-field', word, files: filesToSearch.length });
+            return this.findStructureFieldReferences(structureTarget, memberName, filesToSearch, document, context.includeDeclaration, token);
         }
 
         this.trace({
@@ -2336,6 +2364,107 @@ export class ReferencesProvider {
     }
 
     /**
+     * #846 — the references of a field a structure declares itself (a field of an inline GROUP in
+     * a class body): its declaration, and every `receiver.Field` in `filesToSearch` whose receiver
+     * resolves, as hover and Go to Definition resolve it (DottedAccessResolver), to that same
+     * declaration. The class-member search matched `.Field` by the receiver's class, so it listed
+     * the class's own same-named member and missed the field's own accesses.
+     *
+     * Every `.Field` on a line counts, the middle of a chain too (`SELF.Grp.Sub.Deep` for `Sub`),
+     * and a subscript is no part of the receiver (`SELF.Arr[1].Hits`). Only a receiver ending in
+     * the structure's own label can reach one of its fields, so others are not resolved. One
+     * resolve per receiver per scope (procedure, method or routine). Null when nothing is found
+     * or the search is cancelled.
+     */
+    private async findStructureFieldReferences(
+        target: { file: string; line: number },
+        memberName: string,
+        filesToSearch: string[],
+        cursorDocument: TextDocument,
+        includeDeclaration: boolean,
+        token?: CancellationToken
+    ): Promise<Location[] | null> {
+        const sameFile = (a: string, b: string): boolean =>
+            toCanonicalUri(a).toLowerCase() === toCanonicalUri(b).toLowerCase();
+        const memberLower = memberName.toLowerCase();
+        const locations: Location[] = [];
+
+        const declUri = toCanonicalUri(target.file);
+        const declTokens = this.getTokensForUri(declUri) ?? [];
+        // The structure that declares the field: the innermost GROUP / QUEUE / RECORD around it.
+        const structureLabel = declTokens
+            .filter(t => t.type === TokenType.Structure && ['GROUP', 'QUEUE', 'RECORD'].includes(t.value.toUpperCase()) &&
+                t.line < target.line && t.finishesAt !== undefined && t.finishesAt > target.line)
+            .sort((a, b) => b.line - a.line)[0]?.label?.toLowerCase();
+        if (includeDeclaration) {
+            const declToken = declTokens.find(t => t.line === target.line && t.value.toLowerCase() === memberLower);
+            const col = declToken?.start ?? 0;
+            locations.push(Location.create(declUri, Range.create(target.line, col, target.line, col + memberName.length)));
+        }
+
+        // #315: one batched freshness pass, as the member path does, so the prune below stats nothing.
+        await ReferenceCountIndex.getInstance().verifyFilesFresh(filesToSearch);
+        const refIdx = ReferenceCountIndex.getInstance();
+        const escaped = memberName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const access = new RegExp(`\\.(${escaped})(?![\\w:])`, 'gi');
+        const seenFiles = new Set<string>();
+        let steps = 0;
+        for (const fileUri of filesToSearch) {
+            if (await this.yieldIfNeeded(steps++, token)) return null;
+            if (seenFiles.has(fileUri.toLowerCase())) continue;
+            seenFiles.add(fileUri.toLowerCase());
+            if (!refIdx.mayContain(fileUri, memberName)) continue;
+
+            const isCursorFile = sameFile(fileUri, cursorDocument.uri);
+            const text = isCursorFile
+                ? cursorDocument.getText()
+                : this.tokenCache.getDocumentText(fileUri) ?? this.readFileTextForUri(fileUri);
+            if (text === null) continue;
+            const doc = isCursorFile ? cursorDocument : TextDocument.create(fileUri, 'clarion', 1, text);
+            const lines = text.split(/\r?\n/);
+            const tokens = this.getTokensForUri(fileUri);
+            const structure = this.tokenCache.getStructure(doc);
+            const verdicts = new Map<string, boolean>();
+
+            for (let line = 0; line < lines.length; line++) {
+                const lineText = lines[line];
+                if (!lineText.toLowerCase().includes('.' + memberLower)) continue;
+                access.lastIndex = 0;
+                for (let m = access.exec(lineText); m; m = access.exec(lineText)) {
+                    const memberStart = m.index + 1;
+                    // Code only: the name sits in an access token, not a comment or a string.
+                    const covering = tokens.find(t => t.line === line && t.start <= memberStart && memberStart < t.start + t.value.length);
+                    if (!covering || covering.type === TokenType.Comment || covering.type === TokenType.String) continue;
+                    const receiver = ChainedPropertyResolver.extractChain(
+                        lineText.substring(0, m.index).replace(/\[[^\][]*\]/g, ''));
+                    if (!/^[A-Za-z_][\w:]*(\.[A-Za-z_][\w:]*)*$/.test(receiver)) continue;
+                    const lastSegment = receiver.substring(receiver.lastIndexOf('.') + 1).toLowerCase();
+                    if (structureLabel && lastSegment !== structureLabel) continue;
+
+                    const scope = TokenHelper.getInnermostScopeAtLine(structure, line);
+                    const key = receiver.toLowerCase() + '@' + (scope ? scope.line : -1);
+                    let keep = verdicts.get(key);
+                    if (keep === undefined) {
+                        if (await this.yieldIfNeeded(steps++, token)) return null;
+                        try {
+                            const r = await this.dottedAccess.resolve(receiver, memberName, doc, line, undefined);
+                            keep = !!r?.structureField && r.member.line === target.line && sameFile(r.member.file, target.file);
+                        } catch {
+                            keep = false;
+                        }
+                        verdicts.set(key, keep);
+                    }
+                    if (keep) {
+                        locations.push(Location.create(fileUri,
+                            Range.create(line, memberStart, line, memberStart + memberName.length)));
+                    }
+                }
+            }
+        }
+        return locations.length > 0 ? locations : null;
+    }
+
+    /**
      * The `SELF.Field.Member` hits of one scanned file (findMemberReferencesInFile's
      * pendingChains) whose receiver is of the target class family. The receiver is named the
      * way hover and F12 name it (DottedAccessResolver), so `SELF.Field` is the type `Field` is
@@ -2377,7 +2506,9 @@ export class ReferencesProvider {
                 if (await this.yieldIfNeeded(resolves++, token)) return null;
                 try {
                     const r = await this.dottedAccess.resolve(p.receiver, memberName, doc, p.line, undefined);
-                    keep = !r || inFamily(r.receiverClass) || inFamily(r.member.className);
+                    // #846: a structure's own field (`SELF.Grp.Hits`, Grp an inline GROUP) is no
+                    // class member, though the class whose body declares the GROUP owns it.
+                    keep = !r || (!r.structureField && (inFamily(r.receiverClass) || inFamily(r.member.className)));
                 } catch {
                     keep = true;
                 }
@@ -2706,9 +2837,19 @@ export class ReferencesProvider {
                     const firstDot = token.value.indexOf('.');
                     const firstSeg = token.value.substring(0, firstDot).toLowerCase();
                     if (firstSeg === memberLower && isInTargetClass(token.line)) {
-                        locations.push(Location.create(fileUri,
+                        const location = Location.create(fileUri,
                             Range.create(token.line, token.start,
-                                         token.line, token.start + firstDot)));
+                                         token.line, token.start + firstDot));
+                        // #846 — the continuation of a chain the tokenizer split (`SELF.Grp` +
+                        // `Sub.Deep`): the member hangs off that chain, which may be an inline
+                        // GROUP's field rather than the class's, so its receiver is checked.
+                        const prev = i > 0 ? tokens[i - 1] : null;
+                        if (prev && prev.type === TokenType.StructureField && prev.line === token.line &&
+                            prev.start + prev.value.length + 1 === token.start) {
+                            addChainHit(location, prev.value);
+                        } else {
+                            locations.push(location);
+                        }
                     }
                 }
                 continue;

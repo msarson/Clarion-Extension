@@ -42,6 +42,12 @@ export interface DottedMember {
     member: MemberInfo;
     /** The picked overload's prototype, when the argument types picked one. */
     pickedSignature?: string;
+    /**
+     * #846 — `member` is a field the structure declares itself (an inline GROUP's, or a typed
+     * structure's own): a member of no class, though `receiverClass` names the class whose body
+     * declares the structure.
+     */
+    structureField?: boolean;
 }
 
 /** A receiver the chain walk accepts: dot-separated identifiers, colons allowed in each. */
@@ -83,7 +89,9 @@ export class DottedAccessResolver {
                 const field = await this.chains.resolve(receiver, memberName, document, position, paramCount);
                 if (!field) return null;
                 const fromBase = owner.base !== undefined && field.className.toLowerCase() !== owner.className.toLowerCase();
-                return { receiverKind: kind, receiverClass: fromBase ? owner.base! : owner.className, member: field };
+                return fromBase
+                    ? { receiverKind: kind, receiverClass: owner.base!, member: field }
+                    : { receiverKind: kind, receiverClass: owner.className, member: field, structureField: true };
             }
             className = owner.name;
             // #779: `SELF.IFace` leads to the INTERFACE the class implements
