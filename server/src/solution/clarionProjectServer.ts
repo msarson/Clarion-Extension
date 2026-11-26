@@ -8,6 +8,10 @@ import { ClarionSourcerFileServer } from './clarionSourceFileServer';
 import { DirectoryFileIndex } from './DirectoryFileIndex';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { parseLegacyProject } from '../../../common/LegacyProject';
+import { addItem, listItems, removeItem } from '../../../common/CwprojItems';
+
+/** A Compile item's Include and a file name name the same file, in any case. */
+const sameFileName = (include: string, fileName: string) => include.toLowerCase() === fileName.toLowerCase();
 
 
 const logger = LoggerManager.getLogger("ClarionProjectServer");
@@ -785,62 +789,18 @@ export class ClarionProjectServer {
                 return false;
             }
 
-            // Read the project file
-            const xmlContent = fs.readFileSync(projectFile, 'utf-8');
-            const parsed = await xml2js.parseStringPromise(xmlContent);
-            
-            // Check if the file already exists in the project
-            let fileExists = false;
-            if (parsed?.Project?.ItemGroup) {
-                for (const group of parsed.Project.ItemGroup) {
-                    if (group.Compile) {
-                        for (const file of group.Compile) {
-                            if (file.$.Include.toLowerCase() === fileName.toLowerCase()) {
-                                fileExists = true;
-                                logger.warn(`⚠️ File ${fileName} already exists in project ${this.name}`);
-                                break;
-                            }
-                        }
-                    }
-                    if (fileExists) break;
-                }
-            }
-
-            if (fileExists) {
+            // #885 — edit the project's text, not a rebuilt XML tree: only the new item's line
+            // changes, and the file keeps its BOM, line endings and layout. A file the user adds
+            // is hand-written, so it gets no Generated mark (the IDE marks only what it generates).
+            const projectText = fs.readFileSync(projectFile, 'utf-8');
+            const compileItems = listItems(projectText).compile;
+            if (compileItems.some(i => sameFileName(i.include, fileName))) {
+                logger.warn(`⚠️ File ${fileName} already exists in project ${this.name}`);
                 return false;
             }
 
-            // Find an ItemGroup with Compile items or create a new one
-            let compileItemGroup = null;
-            if (parsed?.Project?.ItemGroup) {
-                for (const group of parsed.Project.ItemGroup) {
-                    if (group.Compile) {
-                        compileItemGroup = group;
-                        break;
-                    }
-                }
-            }
-
-            if (!compileItemGroup) {
-                // Create a new ItemGroup for Compile items
-                if (!parsed.Project.ItemGroup) {
-                    parsed.Project.ItemGroup = [];
-                }
-                compileItemGroup = { Compile: [] };
-                parsed.Project.ItemGroup.push(compileItemGroup);
-            }
-
-            // Add the new file to the ItemGroup
-            compileItemGroup.Compile.push({
-                $: { Include: fileName },
-                Generated: ['true']
-            });
-
-            // Write the updated project file
             try {
-                const builder = new xml2js.Builder();
-                const updatedXml = builder.buildObject(parsed);
-                fs.writeFileSync(projectFile, updatedXml);
+                fs.writeFileSync(projectFile, addItem(projectText, 'Compile', fileName), 'utf-8');
             } catch (writeError) {
                 logger.error(`❌ Error writing project file: ${writeError instanceof Error ? writeError.message : String(writeError)}`);
                 return false;
@@ -848,35 +808,14 @@ export class ClarionProjectServer {
 
             // Determine where to create the file on disk
             let fileCreated = false;
-            
+
             // Create a proper template for the new .clw file
             let template = '';
-            
+
             // Find the first .clw file in the project to reference in the MEMBER statement
             try {
-                const projectFile = path.join(this.path, `${this.name}.cwproj`);
-                const xmlContent = fs.readFileSync(projectFile, 'utf-8');
-                const projectData = await xml2js.parseStringPromise(xmlContent);
-                
-                let firstClwFile = '';
-                
-                // Search for the first .clw file in the project
-                if (projectData?.Project?.ItemGroup) {
-                    for (const group of projectData.Project.ItemGroup) {
-                        if (group.Compile) {
-                            for (const file of group.Compile) {
-                                const includeFile = file.$.Include;
-                                if (includeFile.toLowerCase().endsWith('.clw') &&
-                                    includeFile.toLowerCase() !== fileName.toLowerCase()) {
-                                    firstClwFile = includeFile;
-                                    break;
-                                }
-                            }
-                        }
-                        if (firstClwFile) break;
-                    }
-                }
-                
+                const firstClwFile = compileItems.find(i => i.include.toLowerCase().endsWith('.clw'))?.include ?? '';
+
                 if (firstClwFile) {
                     logger.info(`✅ Found first CLW file in project: ${firstClwFile}`);
                     template = `  MEMBER('${firstClwFile}')\n\n`;
@@ -1103,37 +1042,10 @@ export class ClarionProjectServer {
             // Register in .cwproj
             const projectFile = path.join(this.path, `${this.name}.cwproj`);
             if (fs.existsSync(projectFile)) {
-                const xmlContent = fs.readFileSync(projectFile, 'utf-8');
-                const parsed = await xml2js.parseStringPromise(xmlContent);
-
-                // Check if already registered
-                let alreadyExists = false;
-                if (parsed?.Project?.ItemGroup) {
-                    for (const group of parsed.Project.ItemGroup) {
-                        if (group.Compile) {
-                            for (const file of group.Compile) {
-                                if (file.$.Include.toLowerCase() === moduleName.toLowerCase()) {
-                                    alreadyExists = true;
-                                    break;
-                                }
-                            }
-                        }
-                        if (alreadyExists) break;
-                    }
-                }
-
-                if (!alreadyExists) {
-                    // Find or create Compile ItemGroup
-                    let compileGroup = parsed?.Project?.ItemGroup?.find((g: any) => g.Compile);
-                    if (!compileGroup) {
-                        if (!parsed.Project.ItemGroup) parsed.Project.ItemGroup = [];
-                        compileGroup = { Compile: [] };
-                        parsed.Project.ItemGroup.push(compileGroup);
-                    }
-                    compileGroup.Compile.push({ $: { Include: moduleName } });
-
-                    const builder = new xml2js.Builder();
-                    fs.writeFileSync(projectFile, builder.buildObject(parsed));
+                // #885 — an in-place edit: only the new item's line changes.
+                const projectText = fs.readFileSync(projectFile, 'utf-8');
+                if (!listItems(projectText).compile.some(i => sameFileName(i.include, moduleName))) {
+                    fs.writeFileSync(projectFile, addItem(projectText, 'Compile', moduleName), 'utf-8');
                     logger.info(`✅ Added ${moduleName} to ${projectFile}`);
                 }
 
@@ -1166,64 +1078,34 @@ export class ClarionProjectServer {
                 return false;
             }
 
-            // Read the project file
-            const xmlContent = fs.readFileSync(projectFile, 'utf-8');
-            const parsed = await xml2js.parseStringPromise(xmlContent);
-            
-            // Check if the file exists in the project
-            let fileExists = false;
-            let fileRemoved = false;
-            
-            if (parsed?.Project?.ItemGroup) {
-                for (const group of parsed.Project.ItemGroup) {
-                    if (group.Compile) {
-                        // Find the index of the file to remove
-                        const fileIndex = group.Compile.findIndex(
-                            (file: any) => file.$.Include.toLowerCase() === fileName.toLowerCase()
-                        );
-                        
-                        if (fileIndex !== -1) {
-                            fileExists = true;
-                            // Remove the file from the Compile items
-                            group.Compile.splice(fileIndex, 1);
-                            fileRemoved = true;
-                            logger.info(`✅ Removed file ${fileName} from project file`);
-                        }
-                    }
-                }
-            }
-
-            if (!fileExists) {
+            // #885 — an in-place edit: only the item's own lines (its children included) go.
+            const projectText = fs.readFileSync(projectFile, 'utf-8');
+            const listed = listItems(projectText).compile.find(i => sameFileName(i.include, fileName));
+            if (!listed) {
                 logger.warn(`⚠️ File ${fileName} not found in project ${this.name}`);
                 return false;
             }
 
-            if (fileRemoved) {
-                // Write the updated project file
-                try {
-                    const builder = new xml2js.Builder();
-                    const updatedXml = builder.buildObject(parsed);
-                    fs.writeFileSync(projectFile, updatedXml);
-                } catch (writeError) {
-                    logger.error(`❌ Error writing project file: ${writeError instanceof Error ? writeError.message : String(writeError)}`);
-                    return false;
-                }
-
-                // Remove the file from the sourceFiles collection
-                const fileIndex = this.sourceFiles.findIndex(
-                    file => file.name.toLowerCase() === fileName.toLowerCase()
-                );
-                
-                if (fileIndex !== -1) {
-                    this.sourceFiles.splice(fileIndex, 1);
-                    logger.info(`✅ Removed source file: ${fileName} from memory`);
-                }
-
-                logger.info(`✅ Successfully removed source file ${fileName} from project ${this.name}`);
-                return true;
+            try {
+                fs.writeFileSync(projectFile, removeItem(projectText, 'Compile', listed.include), 'utf-8');
+                logger.info(`✅ Removed file ${fileName} from project file`);
+            } catch (writeError) {
+                logger.error(`❌ Error writing project file: ${writeError instanceof Error ? writeError.message : String(writeError)}`);
+                return false;
             }
-            
-            return false;
+
+            // Remove the file from the sourceFiles collection
+            const fileIndex = this.sourceFiles.findIndex(
+                file => file.name.toLowerCase() === fileName.toLowerCase()
+            );
+
+            if (fileIndex !== -1) {
+                this.sourceFiles.splice(fileIndex, 1);
+                logger.info(`✅ Removed source file: ${fileName} from memory`);
+            }
+
+            logger.info(`✅ Successfully removed source file ${fileName} from project ${this.name}`);
+            return true;
         } catch (error) {
             logger.error(`❌ Error removing source file ${fileName} from project ${this.name}: ${error instanceof Error ? error.message : String(error)}`);
             return false;

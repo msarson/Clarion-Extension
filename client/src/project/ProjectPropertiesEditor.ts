@@ -3,9 +3,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from '../utils/LoggerManager';
 import { globalSettings } from '../globals';
-import { setProperty, setPropertyScope } from './CwprojProperties';
-import { PROJECT_PROPERTY_FIELDS, PROJECT_PROPERTY_TABS, SOURCE_PRAGMAS, targetsProperties } from './ProjectPropertyFields';
-import { addItem, includeFor } from './CwprojItems';
+import { setProperty, setPropertyScope } from '../../../common/CwprojProperties';
+import { PROJECT_PROPERTY_FIELDS, PROJECT_PROPERTY_TABS, SOURCE_PRAGMAS, targetsProperties } from '../../../common/ProjectPropertyFields';
+import { addItem, includeFor } from '../../../common/CwprojItems';
 import { buildPageState, editItems } from './ProjectPropertiesPage';
 import { minimalEdit, pageHtml as kitPage, scriptJson } from '../webview/PageKit';
 

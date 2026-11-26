@@ -1,6 +1,6 @@
-import { addItem, ITEM_KINDS, listItems, ProjectItems, removeItem, setItemMetadata } from './CwprojItems';
-import { configurationsOf, PropertyScope, readProperty } from './CwprojProperties';
-import { fieldAvailability, FILE_DRIVERS, PROJECT_PROPERTY_FIELDS, PROJECT_PROPERTY_TABS, SOURCE_PRAGMAS } from './ProjectPropertyFields';
+import { addItem, ITEM_KINDS, listItems, ProjectItems, removeItem, setItemMetadata } from '../../../common/CwprojItems';
+import { configurationsOf, PropertyScope, readProperty } from '../../../common/CwprojProperties';
+import { fieldAvailability, FILE_DRIVERS, PROJECT_PROPERTY_FIELDS, PROJECT_PROPERTY_TABS, SOURCE_PRAGMAS } from '../../../common/ProjectPropertyFields';
 
 /**
  * #792 — what the Project Properties page shows for one configuration: each IDE page's groups

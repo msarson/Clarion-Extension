@@ -34,6 +34,7 @@ All notable changes to the Clarion Extension are documented here.
 
 #### Configuration and build
 
+- **Add Source File, Add Module and Remove Source File in the Solution view change only the file's own line in the .cwproj.** They rewrote the whole project file, dropping its BOM, changing its line endings and adding an XML declaration, and Add Source File marked the new hand-written file as generated. [#885](https://github.com/msarson/Clarion-Extension/issues/885)
 - **The build compiles with the Clarion version chosen for the solution.** It named the settings folder and the version's bin but not the version itself, so with two versions registered on one bin, MSBuild could build with a different one from the version used for navigation and diagnostics. The chosen version is now passed when the properties file registers it for the bin being built with. [#863](https://github.com/msarson/Clarion-Extension/issues/863)
 
 ---

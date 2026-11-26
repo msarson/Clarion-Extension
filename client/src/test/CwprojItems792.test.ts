@@ -1,7 +1,7 @@
 import * as assert from 'assert';
 import * as fs from 'fs';
 import * as path from 'path';
-import { addItem, includeFor, ItemKind, listItems, removeItem } from '../project/CwprojItems';
+import { addItem, includeFor, ItemKind, listItems, removeItem } from '../../../common/CwprojItems';
 
 /**
  * #792 stage 2 — the Sources tab reads and edits a .cwproj's items: the compiled sources, the

@@ -1,7 +1,7 @@
 import * as assert from 'assert';
-import { listItems, setItemMetadata } from '../project/CwprojItems';
+import { listItems, setItemMetadata } from '../../../common/CwprojItems';
 import { buildPageState, editItems } from '../project/ProjectPropertiesPage';
-import { SOURCE_PRAGMAS } from '../project/ProjectPropertyFields';
+import { SOURCE_PRAGMAS } from '../../../common/ProjectPropertyFields';
 
 /**
  * #816 — a source's own pragmas. The Clarion IDE stores them as metadata on the source's Compile

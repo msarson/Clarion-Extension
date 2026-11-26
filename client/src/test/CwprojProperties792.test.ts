@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { configurationsOf, readProperty, setProperty, setPropertyScope } from '../project/CwprojProperties';
+import { configurationsOf, readProperty, setProperty, setPropertyScope } from '../../../common/CwprojProperties';
 
 /**
  * #792 stage 1 — the Project Properties page reads and writes a .cwproj's properties the way the

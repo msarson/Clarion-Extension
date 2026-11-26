@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { addItem, includeFor, ItemKind, listItems } from '../project/CwprojItems';
+import { addItem, includeFor, ItemKind, listItems } from '../../../common/CwprojItems';
 import { parseLegacyProject } from '../../../common/LegacyProject';
 
 /**
