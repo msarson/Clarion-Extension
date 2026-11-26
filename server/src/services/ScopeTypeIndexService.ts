@@ -411,13 +411,15 @@ export class ScopeTypeIndexService {
      * references scan from an accessory's implementation (a bare MEMBER(), no program)
      * loaded the cursor's — empty — scope for every file, so a call on an object declared
      * in the program (`TemplateHelper.Method()` in a generated module) never resolved.
-     * Null when the file has no program and is not one itself.
+     * A module headed by an INCLUDEd shim (`INCLUDE('member.clw')` in place of its own
+     * MEMBER) belongs to the shim's program (#867). Null when the file has no program and is
+     * not one itself.
      */
     public loadGlobalScopeForFileUri(fileUri: string): Map<string, string> | null {
         const graph = FileRelationshipGraph.getInstance();
         if (!graph.isBuilt) return null;
         const fsPath = decodeURIComponent(fileUri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
-        const programFsPath = graph.getProgramFile(fsPath);
+        const programFsPath = graph.getProgramFile(fsPath) ?? graph.programViaIncludedShim(fsPath);
         if (programFsPath) {
             const programUri = 'file:///' + programFsPath.replace(/\\/g, '/');
             if (programUri.toLowerCase() !== fileUri.toLowerCase()) return this.loadGlobalScopeFromProgramFile(programUri);
@@ -452,7 +454,8 @@ export class ScopeTypeIndexService {
         const docFsPath = decodeURIComponent(document.uri.replace(/^file:\/\/\//i, ''))
             .replace(/\//g, '\\');
 
-        const programFsPath = graph.getProgramFile(docFsPath);
+        // A shim-headed module's program is the shim's (#867), as for a scanned file.
+        const programFsPath = graph.getProgramFile(docFsPath) ?? graph.programViaIncludedShim(docFsPath);
         if (programFsPath) {
             const programUri = 'file:///' + programFsPath.replace(/\\/g, '/');
             // Self-MEMBER edge case (cursor file MEMBERs itself) — fall back to

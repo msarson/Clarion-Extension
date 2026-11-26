@@ -2398,6 +2398,7 @@ export class ReferencesProvider {
      *   2. StructureField  "SELF.Sort.Thumb"  — 3+ segments; filtered by chainPrefix when known
      *   3. StructureField  "Order.Something"  — first segment matches (chain continuation token)
      *   4. Variable        "Order"            — terminal access preceded by Delimiter '.' or StructureField
+     *   4b. Variable / Function "Order"       — after StructurePrefix "Glo:Obj" (`Glo:Obj.Order`, no '.' token)
      *   5. Label (col 0)   "Order"            — declaration inside a CLASS body of the right class
      *
      * @param chainPrefix  The full expression before the final member (e.g. "SELF.Sort" for SELF.Sort.Thumb).
@@ -2544,6 +2545,56 @@ export class ReferencesProvider {
             else locations.push(location);
         };
 
+        /**
+         * P2b track-(b) + #269: `receiver.Member` with a variable as receiver - the receiver's
+         * declared type, resolved via the tier index at any tier (routine-local, parameter,
+         * procedure-local, module, global), is in the class family. Pre-#269 the cursor-on-call-site
+         * path matched receivers TEXTUALLY against the cursor's chainPrefix name: a routine-shadowed
+         * same-name receiver of a DIFFERENT class leaked in (rename rewrote the wrong class's
+         * method) and a same-class receiver under another name (`minst.Check()`) was missed.
+         * Conservative fallback: an UNRESOLVABLE receiver that matches the cursor's receiver name
+         * stays included (rename safety - same bias as the ambiguous-call-site rule). With no
+         * class context, the legacy textual receiver-name match (e.g. INIMgr.Init where
+         * chainPrefix is the variable name and the class could not be resolved).
+         */
+        const isTargetVariableReceiver = (receiverLower: string, line: number): boolean => {
+            if (classLower) {
+                const varType = this.scopeTypeIndex.lookupVarTypeAtLine(
+                    fileVarIndex, effectiveGlobalScope, line, receiverLower);
+                // #315: an inline instance (`ThisGPF Class(Parent)`) declares an
+                // anonymous class whose name IS the label — its methods are
+                // implemented as Label.Method, so the receiver's own name is the
+                // class name, not the raw type base 'class'.
+                const varTypeBase = inlineInstanceAwareTypeBase(varType, receiverLower);
+                const matchesFamily = varTypeBase !== undefined &&
+                    (classFamily ? classFamily.has(varTypeBase) : varTypeBase === classLower);
+                const unresolvedNameMatch = varType === undefined &&
+                    !!chainPrefixLower && receiverLower === chainPrefixLower;
+                return matchesFamily || unresolvedNameMatch;
+            }
+            return !!chainPrefixLower && receiverLower === chainPrefixLower;
+        };
+
+        // The text of a line of this file, read once and only when asked (a colon-named
+        // receiver's dot is checked in the text: no token stands for it).
+        let textLines: string[] | null | undefined;
+        const lineTextOf = (line: number): string => {
+            if (textLines === undefined) {
+                textLines = fileLines
+                    ?? (currentDocument && currentDocument.uri.toLowerCase() === fileUriNorm
+                        ? currentDocument.getText().split(/\r?\n/) : null)
+                    ?? this.tokenCache.getDocumentTextByUriCaseInsensitive(fileUri)?.split(/\r?\n/)
+                    ?? null;
+                if (!textLines) {
+                    try {
+                        const filePath = decodeURIComponent(fileUri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+                        textLines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
+                    } catch { textLines = null; }
+                }
+            }
+            return textLines?.[line] ?? '';
+        };
+
         for (let i = 0; i < tokens.length; i++) {
             const token = tokens[i];
             if (token.type === TokenType.Comment || token.type === TokenType.String) continue;
@@ -2610,49 +2661,24 @@ export class ReferencesProvider {
                                         receiver.substring(0, receiver.lastIndexOf('.')));
                                 }
                             }
-                        } else if (parts.length === 2 && classLower) {
-                            // P2b track-(b) + #269: var.member call — resolve the RECEIVER's
-                            // declared type via the tier index and gate on class family, for
-                            // BOTH cursor sides. Pre-#269 the cursor-on-call-site path matched
-                            // receivers TEXTUALLY against the cursor's chainPrefix name: a
-                            // routine-shadowed same-name receiver of a DIFFERENT class leaked
-                            // in (rename rewrote the wrong class's method) and a same-class
-                            // receiver under another name (`minst.Check()`) was missed.
-                            // Resolves receivers declared at any tier: routine-local /
-                            // parameter / procedure-local / module / global.
-                            const varNameLower = parts[0].toLowerCase();
-                            const varType = this.scopeTypeIndex.lookupVarTypeAtLine(
-                                fileVarIndex, effectiveGlobalScope, token.line, varNameLower);
-                            // #315: an inline instance (`ThisGPF Class(Parent)`) declares an
-                            // anonymous class whose name IS the label — its methods are
-                            // implemented as Label.Method, so the receiver's own name is the
-                            // class name, not the raw type base 'class'.
-                            const varTypeBase = inlineInstanceAwareTypeBase(varType, varNameLower);
-                            const matchesFamily = varTypeBase !== undefined &&
-                                (classFamily ? classFamily.has(varTypeBase) : varTypeBase === classLower);
-                            // Conservative fallback: an UNRESOLVABLE receiver that matches the
-                            // cursor's receiver name stays included (rename safety — same bias
-                            // as the ambiguous-call-site rule).
-                            const unresolvedNameMatch = varType === undefined &&
-                                !!chainPrefixLower && varNameLower === chainPrefixLower;
-                            if (matchesFamily || unresolvedNameMatch) {
-                                if (!includeDeclaration && implHeaderLines.has(token.line)) continue;
+                        } else if (parts.length === 2 && (classLower || chainPrefixLower)) {
+                            // var.member — the receiver is a variable of the target class family,
+                            // for BOTH cursor sides (isTargetVariableReceiver). A colon chain in
+                            // front of it belongs to the receiver: a prefix longer than the
+                            // tokenizer's PREFIX:Field pattern (`CommonLib:Obj.Hits`), or a second
+                            // colon (`reg:WIN:Obj.Hits`), arrives as `<link> ':'` + "Obj.Hits",
+                            // and reading the receiver as `Obj` typed another variable.
+                            const sep = tokens[i - 1];
+                            const receiver = i >= 2 && sep.value === ':' && sep.line === token.line && sep.start + 1 === token.start
+                                ? resolvePrefixedName(tokens, i - 2).name + ':' + parts[0]
+                                : parts[0];
+                            if (isTargetVariableReceiver(receiver.toLowerCase(), token.line)) {
+                                if (!includeDeclaration && implHeaderLines.has(token.line)) continue; // impl header line
                                 if (isCompatibleCallSite(i)) {
                                     locations.push(Location.create(fileUri,
                                         Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
                                                      token.line, token.start + token.value.length)));
                                 }
-                            }
-                        } else if (parts.length === 2 && chainPrefixLower &&
-                                   parts[0].toLowerCase() === chainPrefixLower) {
-                            // No class context available — retain the legacy textual
-                            // receiver-name match (e.g. INIMgr.Init where chainPrefix is
-                            // the variable name and the class could not be resolved).
-                            if (!includeDeclaration && implHeaderLines.has(token.line)) continue; // impl header line
-                            if (isCompatibleCallSite(i)) {
-                                locations.push(Location.create(fileUri,
-                                    Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
-                                                 token.line, token.start + token.value.length)));
                             }
                         } else if (parts.length === 3 && !chainPrefixLower && classLower &&
                                    parts[0].toLowerCase() === 'self') {
@@ -2686,6 +2712,29 @@ export class ReferencesProvider {
                     }
                 }
                 continue;
+            }
+
+            // A colon-named variable as receiver (`Glo:Obj.Hits`, `Loc:Obj.Bump()`) tokenizes as
+            // StructurePrefix("Glo:Obj") + Variable / Function("Hits"), with no token for the dot
+            // between them, so neither the StructureField branch above nor the explicit-dot one
+            // below saw it: such an access was never a reference, from any start point. Its
+            // receiver is the variable, read as `Obj.Hits`'s is, with the whole colon chain
+            // (`Glo:A:B:Obj` arrives as several tokens, see PrefixChain).
+            if ((token.type === TokenType.Variable || token.type === TokenType.Function) &&
+                token.value.toLowerCase() === memberLower) {
+                const prev = i > 0 ? tokens[i - 1] : null;
+                if (prev && prev.type === TokenType.StructurePrefix && prev.line === token.line &&
+                    prev.start + prev.value.length + 1 === token.start &&
+                    lineTextOf(token.line).charAt(token.start - 1) === '.') {
+                    const receiver = resolvePrefixedName(tokens, i - 1).name;
+                    if (isTargetVariableReceiver(receiver.toLowerCase(), token.line) &&
+                        (includeDeclaration || !implHeaderLines.has(token.line)) &&
+                        isCompatibleCallSite(i)) {
+                        locations.push(Location.create(fileUri,
+                            Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                    }
+                    continue;
+                }
             }
 
             // Phase B+ Tier 4 — SELF.field.method receiver tokenizes as
