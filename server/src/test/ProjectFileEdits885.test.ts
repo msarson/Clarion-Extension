@@ -98,4 +98,49 @@ suite('Project file edits keep the file as written (#885)', () => {
         assert.strictEqual(await project.removeSourceFile('nope.clw'), false);
         assert.strictEqual(after(), BEFORE);
     });
+
+    test('Remove Source File matches the name in any case', async () => {
+        assert.strictEqual(await project.removeSourceFile('HAND.CLW'), true);
+        assert.strictEqual(after(), BEFORE.replace('    <Compile Include="hand.clw" />\r\n', ''));
+    });
+
+    test('the new source is a MEMBER of the project\'s first source', async () => {
+        await project.addSourceFile('newfile.clw');
+        assert.ok(fs.readFileSync(path.join(dir, 'newfile.clw'), 'utf8').includes("MEMBER('main.clw')"));
+    });
+
+    test('a name XML must escape is written escaped and read back for the duplicate check', async () => {
+        assert.strictEqual(await project.addSourceFile('a&b.clw'), true);
+        assert.ok(after().includes('<Compile Include="a&amp;b.clw" />'), `got: ${after()}`);
+        assert.strictEqual(await project.addSourceFile('A&B.clw'), false);
+    });
+
+    suite('a project file with LF line endings and no BOM', () => {
+        const LF = BEFORE.slice(1).replace(/\r\n/g, '\n');
+        setup(() => fs.writeFileSync(cwproj, LF, 'utf8'));
+
+        test('add keeps LF and gains no BOM', async () => {
+            await project.addSourceFile('newfile.clw');
+            const text = after();
+            assert.ok(!text.startsWith('﻿') && !text.includes('\r'), 'no BOM, no CR');
+            const anchor = '<Compile Include="hand.clw" />\n';
+            const i = LF.indexOf(anchor) + anchor.length;
+            assert.strictEqual(text, LF.slice(0, i) + '    <Compile Include="newfile.clw" />\n' + LF.slice(i));
+        });
+
+        test('remove keeps LF and gains no BOM', async () => {
+            await project.removeSourceFile('hand.clw');
+            assert.strictEqual(after(), LF.replace('    <Compile Include="hand.clw" />\n', ''));
+        });
+    });
+
+    test('a project with no Compile items gets one new ItemGroup and nothing else changes', async () => {
+        const bare = BEFORE.replace(/  <ItemGroup>[\s\S]*?<\/ItemGroup>\r\n/, '');
+        fs.writeFileSync(cwproj, bare, 'utf8');
+        assert.strictEqual(await project.addSourceFile('first.clw'), true);
+        // CwprojItems.addItem's rule: with no ItemGroup, a new one goes before </Project>.
+        const block = '  <ItemGroup>\r\n    <Compile Include="first.clw" />\r\n  </ItemGroup>\r\n';
+        const at = bare.indexOf('</Project>');
+        assert.strictEqual(after(), bare.slice(0, at) + block + bare.slice(at), `got: ${after()}`);
+    });
 });
