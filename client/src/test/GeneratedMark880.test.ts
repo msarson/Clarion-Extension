@@ -61,6 +61,17 @@ suite('Project Properties: a source\'s Generated mark (#880)', () => {
         assert.strictEqual(set(PROJECT, 'Hand.clw', false), PROJECT);
     });
 
+    test('a mark written True, as the IDE writes some, is cleared too', () => {
+        const capital = PROJECT.replace('<Generated>true</Generated>', '<Generated>True</Generated>');
+        assert.strictEqual(set(capital, 'Main.clw', false), PROJECT.replace(
+            '    <Compile Include="Main.clw">\r\n      <Generated>true</Generated>\r\n    </Compile>',
+            '    <Compile Include="Main.clw" />'));
+    });
+
+    test('a message without a true or false setting changes nothing', () => {
+        assert.strictEqual(editItems(PROJECT, { type: 'setGenerated', kind: 'Compile', value: 'Main.clw' }), PROJECT);
+    });
+
     test('only a Compile item takes the mark, and only a file the project lists', () => {
         assert.strictEqual(set(PROJECT, 'Readme.txt', true, 'None'), PROJECT);
         assert.strictEqual(set(PROJECT, 'Missing.clw', false), PROJECT);

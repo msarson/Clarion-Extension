@@ -298,7 +298,7 @@ function pageHtml(webview: vscode.Webview): string {
   // #880: a source's Generated mark, which Rename and the generated-code checks go by.
   function generatedBox(i) {
     const box = el('input', { type: 'checkbox', 'aria-label': 'Generated: ' + i.include,
-      title: 'Generated: the Clarion IDE writes this module from an app, and Rename leaves it alone. Clear it for a module you write yourself. Generating from the app marks its modules again.',
+      title: 'The Clarion IDE generates this module from an app, so Rename leaves it alone. Clear it for a module you write yourself; it takes effect when the project is saved.',
       onchange: e => vscode.postMessage({ type: 'setGenerated', kind: 'Compile', value: i.include, generated: e.target.checked }) });
     box.checked = i.generated;
     return box;
@@ -314,7 +314,6 @@ function pageHtml(webview: vscode.Webview): string {
           const summary = pragmaSummary(i.pragmas);
           const row = el('tr', {},
             el('td', { class: 'file' }, i.include),
-            // #880: the IDE's Generated mark, which Rename and the generated-code checks go by.
             el('td', {}, generatedBox(i)),
             el('td', {}, el('button', { type: 'button', class: 'secondary', 'aria-expanded': open ? 'true' : 'false',
               title: 'This source’s own pragmas, as the Clarion IDE’s File Options',
