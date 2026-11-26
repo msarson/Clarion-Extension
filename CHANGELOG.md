@@ -41,6 +41,10 @@ All notable changes to the Clarion Extension are documented here.
 - **A COMPILE or OMIT block ends where the compiler ends it.** A terminator in a comment, such as `!'*Debug*'`, did not close the block, so with the switch off every later INCLUDE counted as not compiled and its classes were reported missing. A block that is skipped now ends at any line containing its terminator. A block that is compiled ends at one outside a string, as Clarion 11.1 and 12 read it. [#860](https://github.com/msarson/Clarion-Extension/pull/860) @geircodes
 - **Code inside a COMPILE or OMIT block that does not compile is not checked.** With a project switch off, a module's code under that switch was still warned about, for example for a class whose INCLUDE sits under the same switch. A block whose condition cannot be decided is still checked. [#866](https://github.com/msarson/Clarion-Extension/pull/866) @geircodes
 
+#### Performance
+
+- **Find All References on a field of a structure is about twice as fast.** Each module it searched read the same INCLUDE files from disk again, and each searched file was tokenized twice. An access whose owner cannot be resolved is now listed from the field's uses as well as from its declaration, so a rename misses no use. [#890](https://github.com/msarson/Clarion-Extension/issues/890)
+
 #### Configuration and build
 
 - **The project page sets or clears a source's Generated mark.** The Sources tab's Generated column is now a checkbox. A hand-written module left marked as generated, which Rename refuses, no longer needs the .cwproj edited by hand. [#880](https://github.com/msarson/Clarion-Extension/issues/880)

@@ -2,7 +2,7 @@ import * as assert from 'assert';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { MemberLocatorService } from '../services/MemberLocatorService';
+import { MemberLocatorService, resetMemberLocatorMemosForTests } from '../services/MemberLocatorService';
 import { bumpCrossFileEpoch } from '../utils/crossFileEpoch';
 import { SolutionManager } from '../solution/solutionManager';
 import { ClarionTokenizer, Token } from '../ClarionTokenizer';
@@ -20,7 +20,7 @@ suite('MemberLocatorService remembers where an INCLUDE resolves (#890)', () => {
     const svc = new MemberLocatorService() as unknown as {
         resolveFilePath(filename: string, fromDir: string, fromFile?: string): string | null;
     };
-    setup(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce890-')); bumpCrossFileEpoch(); });
+    setup(() => { resetMemberLocatorMemosForTests(); dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce890-')); bumpCrossFileEpoch(); });
     teardown(() => { fs.rmSync(dir, { recursive: true, force: true }); bumpCrossFileEpoch(); });
 
     test('a repeated lookup does not touch the disk again', () => {
@@ -67,7 +67,7 @@ suite('An INCLUDEd file is read and searched once per change (#890)', () => {
     let dir = '';
     type Svc = { findInIncludeChain(c: string, m: string, t: Token[], d: string, p: number | undefined, v: Set<string>, f?: string): Promise<{ line: number } | null> };
     const svc = new MemberLocatorService() as unknown as Svc;
-    setup(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce890i-')); bumpCrossFileEpoch(); });
+    setup(() => { resetMemberLocatorMemosForTests(); dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce890i-')); bumpCrossFileEpoch(); });
     teardown(() => { fs.rmSync(dir, { recursive: true, force: true }); bumpCrossFileEpoch(); });
 
     const host = (name: string): Token[] => {

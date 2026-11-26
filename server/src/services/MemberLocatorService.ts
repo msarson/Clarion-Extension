@@ -70,17 +70,31 @@ interface LabelScan { labels: Set<string>; includes: string[] }
 interface InterfaceDeclaredMembers { methods: Array<{ name: string; paramCount: number }>; parentName?: string }
 const labelScanCache = new Map<string, LabelScan | null>();
 let labelScanEpoch = -1;
-// #890: resolveFilePath answers (path or null), per cross-file epoch.
+// #890: resolveFilePath answers (path or null), per cross-file epoch, projects generation and
+// solution presence. Its key holds the asking file, so it is capped (cleared whole when full).
 const fileResolveCache = new Map<string, string | null>();
-let fileResolveEpoch = "";
+let fileResolveEpoch = { epoch: -1, generation: -1, hasSolution: false };
+const FILE_RESOLVE_CACHE_MAX = 50000;
 // #890: loadDocument's text of a closed file, by lowercased path, valid while its mtime is.
-// Bounded like TokenCache's closed-file cache (oldest first out).
+// Bounded by count like TokenCache's closed-file cache, and by total size (oldest first out).
 const loadedTextCache = new Map<string, { content: string; mtimeMs: number }>();
 const LOADED_TEXT_CACHE_MAX = 512;
+const LOADED_TEXT_CACHE_MAX_CHARS = 32 * 1024 * 1024;
+let loadedTextChars = 0;
 // #890: what one INCLUDE'd file declares itself for className.memberName (findInIncludeChain's
 // per-file step), by path + mtime + names; never for a file open in the editor.
 const includeMemberCache = new Map<string, MemberInfo | null>();
 let includeMemberEpoch = -1;
+
+/** #890 — empties the memos above, for tests that rewrite a fixture at the same path. */
+export function resetMemberLocatorMemosForTests(): void {
+    fileResolveCache.clear();
+    fileResolveEpoch = { epoch: -1, generation: -1, hasSolution: false };
+    loadedTextCache.clear();
+    loadedTextChars = 0;
+    includeMemberCache.clear();
+    includeMemberEpoch = -1;
+}
 
 export class MemberLocatorService {
     private sdi = StructureDeclarationIndexer.getInstance();
@@ -1913,6 +1927,9 @@ export class MemberLocatorService {
             if (data) {
                 // #890: this file's own answer is the same for every module that includes it while
                 // its text on disk is, and an open file's buffer is the same text (else no memo).
+                // `loaded` may be from an earlier loadDocument (CrossFileCache supplies `data`
+                // without reading it): a disk change it has not seen is a watched-file change,
+                // whose epoch bump empties this memo.
                 const diskUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
                 const liveContent = this.tokenCache.getDocumentText(diskUri) ?? undefined;
                 const loaded = loadedTextCache.get(resolvedPath.toLowerCase());
@@ -2387,16 +2404,19 @@ export class MemberLocatorService {
     private resolveFilePath(filename: string, fromDir: string, fromFile?: string): string | null {
         // Loading the solution assigns its projects without bumping the epoch, and an answer
         // worked out before it (no-solution mode) or for other projects must not outlive that.
-        const sm = SolutionManager.getInstance();
-        const epoch = `${getCrossFileEpoch()}|${getProjectsGeneration()}|${sm?.solution ? 1 : 0}`;
-        if (epoch !== fileResolveEpoch) {
+        const epoch = getCrossFileEpoch();
+        const generation = getProjectsGeneration();
+        const hasSolution = !!SolutionManager.getInstance()?.solution;
+        if (epoch !== fileResolveEpoch.epoch || generation !== fileResolveEpoch.generation ||
+            hasSolution !== fileResolveEpoch.hasSolution) {
             fileResolveCache.clear();
-            fileResolveEpoch = epoch;
+            fileResolveEpoch = { epoch, generation, hasSolution };
         }
         const key = `${filename.toLowerCase()}|${fromDir.toLowerCase()}|${(fromFile ?? '').toLowerCase()}`;
         const known = fileResolveCache.get(key);
         if (known !== undefined) return known;
         const resolved = this.resolveFilePathUncached(filename, fromDir, fromFile);
+        if (fileResolveCache.size >= FILE_RESOLVE_CACHE_MAX) fileResolveCache.clear();
         fileResolveCache.set(key, resolved);
         return resolved;
     }
@@ -2509,10 +2529,14 @@ export class MemberLocatorService {
             const known = loadedTextCache.get(key);
             const content = known && known.mtimeMs === mtimeMs ? known.content : await readSourceTextAsync(filePath);
             if (!known || known.mtimeMs !== mtimeMs) {
+                if (known) loadedTextChars -= known.content.length;
+                loadedTextCache.delete(key);
                 loadedTextCache.set(key, { content, mtimeMs });
-                while (loadedTextCache.size > LOADED_TEXT_CACHE_MAX) {
+                loadedTextChars += content.length;
+                while (loadedTextCache.size > LOADED_TEXT_CACHE_MAX || loadedTextChars > LOADED_TEXT_CACHE_MAX_CHARS) {
                     const oldest = loadedTextCache.keys().next().value;
-                    if (oldest === undefined) break;
+                    if (oldest === undefined || oldest === key) break;
+                    loadedTextChars -= loadedTextCache.get(oldest)!.content.length;
                     loadedTextCache.delete(oldest);
                 }
             }
