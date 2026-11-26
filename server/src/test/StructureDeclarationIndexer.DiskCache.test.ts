@@ -15,6 +15,13 @@ suite('#290 SDI disk cache', () => {
     let tmpDir: string;
     let savedLibsrc: string[] = [];
     const indexer = StructureDeclarationIndexer.getInstance();
+    // The project's cache file in the shared SDI temp dir; its name also carries the
+    // libsrc/redirection settings, so take it under the settings the build ran with.
+    const diskCachePath = (projectPath: string) =>
+        (indexer as unknown as { diskCachePath(p: string): string }).diskCachePath(projectPath);
+    const removeDiskCache = (projectPath: string) => {
+        try { fs.rmSync(diskCachePath(projectPath), { force: true }); } catch { /* ignore */ }
+    };
 
     setup(() => {
         tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'sdi-cache-290-'));
@@ -35,6 +42,7 @@ suite('#290 SDI disk cache', () => {
         // fixture down — a straggler would otherwise mutate stats mid-next-test.
         await (indexer as unknown as { whenValidated(p: string): Promise<void> }).whenValidated(tmpDir);
         (indexer as unknown as { deferBackgroundValidation: boolean }).deferBackgroundValidation = false;
+        removeDiskCache(tmpDir);
         serverSettings.libsrcPaths = savedLibsrc;
         indexer.clearCache();
         try { fs.rmSync(tmpDir, { recursive: true, force: true }); } catch { /* ignore */ }
@@ -157,6 +165,8 @@ suite('#290 SDI disk cache', () => {
 
             ext.statScanFiles = original;
         } finally {
+            serverSettings.libsrcPaths = [tmpDir2]; // the libsrc set tmpDir2 was built with
+            removeDiskCache(tmpDir2);
             serverSettings.libsrcPaths = savedLib;
             try { fs.rmSync(tmpDir2, { recursive: true, force: true }); } catch { /* ignore */ }
         }
@@ -183,6 +193,7 @@ suite('#290 SDI disk cache', () => {
             assert.ok(indexer.find('MyClass', otherDir).length > 0, 'find falls back across indexes');
         } finally {
             smSlot.instance = savedSm;
+            removeDiskCache(tmpDir); // built under this test's redirection file
             serverSettings.redirectionFile = savedRedFile;
         }
     });
@@ -273,16 +284,12 @@ suite('#290 SDI disk cache', () => {
 
     test('a corrupt disk cache degrades to a full scan (no crash)', async () => {
         await indexer.buildIndex(tmpDir);
-        // Locate and corrupt the cache file for this project (hash-named in the SDI temp dir).
-        const cacheDir = path.join(os.tmpdir(), 'clarion-extension-sdi');
-        for (const f of fs.readdirSync(cacheDir)) {
-            const p = path.join(cacheDir, f);
-            const content = fs.readFileSync(p, 'utf8');
-            if (content.includes(tmpDir.replace(/\\/g, '\\\\')) || content.toLowerCase().includes(tmpDir.toLowerCase().replace(/\\/g, '\\\\'))) {
-                fs.writeFileSync(p, '{ not valid json');
-            }
-        }
+        // Corrupt the cache file this project's rebuild will read.
+        const cacheFile = diskCachePath(tmpDir);
+        assert.ok(fs.existsSync(cacheFile), 'cold build wrote the disk cache');
+        fs.writeFileSync(cacheFile, '{ not valid json');
         const rebuilt = await indexer.buildIndex(tmpDir);
+        assert.strictEqual(indexer.lastBuildStats!.reusedFromDisk, 0, 'the corrupt cache was not used');
         assert.ok(rebuilt.byName.has('myclass'), 'full rescan still succeeds');
     });
 });
