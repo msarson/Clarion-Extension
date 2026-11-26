@@ -243,6 +243,45 @@ export class MemberLocatorService {
             }
             return null;
         }
+        return this.typeOfDeclaration(found, scopeLine, provenance);
+    }
+
+    /**
+     * resolveVariableType for a receiver word that may also be a GROUP or QUEUE label declared
+     * with a type argument (`Totals QUEUE(TotalType)` followed by fields of its own), from one
+     * declaration walk. Such a structure's fields are the type's AND its own, so reading it as a
+     * variable of the type loses the own ones: it answers with the declaration instead.
+     */
+    public async resolveVariableOrTypedStructure(
+        varName: string,
+        tokens: Token[],
+        document: TextDocument,
+        scopeLine?: number
+    ): Promise<
+        | { structure: { file: string; line: number; base: string } }
+        | { type: { typeName: string; isClass: boolean; isReference: boolean } }
+        | null
+    > {
+        const found = await this.findVariableTokenCrossFile(varName, tokens, document, scopeLine);
+        if (!found) {
+            const parameter = scopeLine !== undefined ? this.resolveParameterType(varName, document, scopeLine) : null;
+            return parameter ? { type: parameter } : null;
+        }
+        const line = found.token.line;
+        const isTypedStructure = found.tokens.some(t =>
+            t.line === line && t.type === TokenType.Structure && ['GROUP', 'QUEUE'].includes(t.value.toUpperCase()));
+        const base = isTypedStructure ? extractParentName(lineText(found.doc, line), ['GROUP', 'QUEUE']) : null;
+        if (base) return { structure: { file: found.doc.uri, line, base } };
+        const type = await this.typeOfDeclaration(found, scopeLine);
+        return type ? { type } : null;
+    }
+
+    /** The declared type of a variable token resolveVariableType found, with LIKE aliases followed. */
+    private async typeOfDeclaration(
+        found: { token: Token; tokens: Token[]; doc: TextDocument },
+        scopeLine: number | undefined,
+        provenance?: Set<string>
+    ): Promise<{ typeName: string; isClass: boolean; isReference: boolean } | null> {
         // The file that declares the variable is the primary dependency of this resolution.
         provenance?.add(this.uriToFsPath(found.doc.uri));
         const extracted = this.extractTypeFromToken(found.token, found.tokens);
@@ -2040,6 +2079,23 @@ export class MemberLocatorService {
             ? declarations[0]
             : this.visibleDeclaration(declarations, doc, atLine);
         if (!classToken || classToken.finishesAt === undefined) return [];
+        return this.membersOfStructureToken(tokens, doc, classToken, filePath, structureType, className);
+    }
+
+    /**
+     * The members declared directly in the structure `classToken` opens: the body of
+     * extractMembersFromTokens, also used for a structure named by its declaration line
+     * rather than its label (enumerateStructureFields).
+     */
+    private membersOfStructureToken(
+        tokens: Token[],
+        doc: TextDocument,
+        classToken: Token,
+        filePath: string,
+        structureType: 'CLASS' | 'QUEUE' | 'GROUP' | 'FILE',
+        className: string
+    ): MemberEnumItem[] {
+        if (classToken.finishesAt === undefined) return [];
         const classEnd = classToken.finishesAt;
 
         // A FILE keeps its fields inside its own RECORD, so for a FILE the RECORD is transparent:
@@ -2324,6 +2380,66 @@ export class MemberLocatorService {
     /** #552 — the loader, for the chained resolver's inline-structure lookup. */
     public loadDocumentForPath(filePath: string): Promise<{ doc: TextDocument; tokens: Token[] } | null> {
         return this.loadDocument(filePath);
+    }
+
+    /**
+     * The fields of the GROUP / QUEUE / RECORD declared on `line` of `file` (a uri): a structure
+     * reached through a chain (`SELF.Totals.`, an inline GROUP in a class body) or a typed root
+     * (`Totals.`). The members of its type argument `base` come first, read from `document`'s
+     * view of the solution at `atLine` (a TYPE may be declared in each procedure, #829), then its
+     * own; its own win on a name both have. The fields of a structure nested inside it belong to
+     * that structure, not to this one.
+     */
+    public async enumerateStructureFields(
+        file: string,
+        line: number,
+        fromClass: string,
+        document: TextDocument,
+        base?: string,
+        callerClass?: string,
+        atLine?: number
+    ): Promise<MemberEnumItem[]> {
+        const own: MemberEnumItem[] = [];
+        const filePath = decodeURIComponent(file.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+        const loaded = await this.loadDocument(filePath);
+        if (loaded) {
+            const structure = loaded.tokens.find(t =>
+                t.line === line && t.type === TokenType.Structure && t.finishesAt !== undefined &&
+                ['GROUP', 'QUEUE', 'RECORD'].includes(t.value.toUpperCase()));
+            if (structure) {
+                const kind = structure.value.toUpperCase() === 'QUEUE' ? 'QUEUE' : 'GROUP';
+                own.push(...this.membersOfStructureToken(loaded.tokens, loaded.doc, structure, filePath, kind, fromClass));
+            }
+        }
+        if (!base) return own;
+        const ownNames = new Set(own.map(m => m.name.toUpperCase()));
+        const inherited = await this.enumerateMembersInClass(base, document, callerClass, { atLine });
+        return [...inherited.filter(m => !ownNames.has(m.name.toUpperCase())), ...own];
+    }
+
+    /**
+     * #773 — the interfaces `className` and its ancestors name in IMPLEMENTS, as members:
+     * `SELF.IFace` is the class's implementation of IFace, typed `INTERFACE`. Each points at the
+     * class declaration that names it; the interface itself is not looked up here, because a
+     * completion list asks this on every keystroke and only shows the name.
+     */
+    public async enumerateImplementedInterfaces(className: string, document: TextDocument): Promise<MemberEnumItem[]> {
+        const items: MemberEnumItem[] = [];
+        const seen = new Set<string>();
+        for await (const { info } of ancestorChain(className, n => this.resolveClassDeclarationInfo(n, document))) {
+            if (!info || info.structureType !== 'CLASS') break;
+            const header = this.declarationHeader(info);
+            for (const m of header.matchAll(/\bIMPLEMENTS\s*\(\s*([A-Za-z_][\w:]*)\s*\)/gi)) {
+                const iface = m[1];
+                if (seen.has(iface.toLowerCase())) continue;
+                seen.add(iface.toLowerCase());
+                items.push({
+                    name: iface, kind: 'property', type: 'INTERFACE', access: 'public', fromClass: info.name,
+                    signature: `IMPLEMENTS(${iface})`, line: info.line, file: info.filePath,
+                });
+            }
+        }
+        return items;
     }
 
     private async loadDocument(filePath: string): Promise<{ doc: TextDocument; tokens: Token[] } | null> {

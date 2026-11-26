@@ -24,8 +24,8 @@ import { TextDocument } from 'vscode-languageserver-textdocument';
 import { TokenCache } from '../TokenCache';
 import { MemberLocatorService } from './MemberLocatorService';
 import { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
-import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
-import type { MemberInfo } from '../utils/ClassMemberScan';
+import { ChainedPropertyResolver, Owner } from '../utils/ChainedPropertyResolver';
+import type { MemberEnumItem, MemberInfo } from '../utils/ClassMemberScan';
 
 export type ReceiverKind = 'self' | 'parent' | 'object' | 'chain' | 'structure' | 'interface';
 
@@ -76,10 +76,14 @@ export class DottedAccessResolver {
             const owner = await this.chains.resolveFinalOwner(receiver, document, position);
             if (!owner) return null;
             kind = 'chain';
-            if (owner.kind === 'inline') {
-                // #552: a field of an inline structure in a class body - no class, no overloads.
+            if (owner.kind === 'structure') {
+                // #552: a field of a structure - no class, no overloads. A field it takes from its
+                // type argument answers as a member of that type, as it did before its own fields
+                // were read.
                 const field = await this.chains.resolve(receiver, memberName, document, position, paramCount);
-                return field ? { receiverKind: kind, receiverClass: owner.className, member: field } : null;
+                if (!field) return null;
+                const fromBase = owner.base !== undefined && field.className.toLowerCase() !== owner.className.toLowerCase();
+                return { receiverKind: kind, receiverClass: fromBase ? owner.base! : owner.className, member: field };
             }
             className = owner.name;
             // #779: `SELF.IFace` leads to the INTERFACE the class implements
@@ -119,6 +123,41 @@ export class DottedAccessResolver {
             }
         }
         return member ? { receiverKind: kind, receiverClass: className, member, pickedSignature } : null;
+    }
+
+    /**
+     * The owner of the members `prefix.` offers at `line`: a chain's final owner, walked as
+     * resolve() walks it, or the owner a single receiver word names (SELF, PARENT, an object, a
+     * typed GROUP / QUEUE label, a variable, parameter or structure label of a type). Null when
+     * it names nothing; the colon forms (#653) are left to the caller.
+     */
+    async resolveOwner(prefix: string, document: TextDocument, line: number): Promise<Owner | null> {
+        if (CHAIN.test(prefix)) return this.chains.resolveFinalOwner(prefix, document, { line, character: 0 });
+        if (!/^[A-Za-z_][\w:]*$/.test(prefix)) return null;
+        return this.chains.resolveRootOwner(prefix, document, line);
+    }
+
+    /**
+     * The members an owner offers after a dot, access-filtered for `callerClass`:
+     *  - a structure: its type argument's members, then its own fields;
+     *  - a class, GROUP / QUEUE type or INTERFACE (`SELF.IFace.`): its members with the inherited
+     *    ones, and for a class the interfaces it implements (#773).
+     * `atLine` picks among same-named local declarations (#829).
+     */
+    async enumerateMembers(
+        owner: Owner,
+        document: TextDocument,
+        options: { callerClass?: string; atLine?: number } = {}
+    ): Promise<MemberEnumItem[]> {
+        if (owner.kind === 'structure') {
+            return this.memberLocator.enumerateStructureFields(
+                owner.file, owner.line, owner.className, document, owner.base, options.callerClass, owner.atLine);
+        }
+        const members = await this.memberLocator.enumerateMembersInClass(
+            owner.name, document, options.callerClass, { atLine: options.atLine });
+        const names = new Set(members.map(m => m.name.toUpperCase()));
+        const interfaces = await this.memberLocator.enumerateImplementedInterfaces(owner.name, document);
+        return [...members, ...interfaces.filter(i => !names.has(i.name.toUpperCase()))];
     }
 
     /**
