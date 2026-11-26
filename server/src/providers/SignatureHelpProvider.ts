@@ -22,6 +22,7 @@ import { ControlService, ControlDefinition } from '../utils/ControlService';
 import { DataTypeService } from '../utils/DataTypeService';
 import * as fs from 'fs';
 import * as path from 'path';
+import { readSourceText } from '../utils/SourceText'; // #879
 
 const logger = LoggerManager.getLogger("SignatureHelpProvider");
 logger.setLevel("error");
@@ -611,7 +612,7 @@ export class SignatureHelpProvider {
             }
             
             if (resolvedPath) {
-                const includeContent = fs.readFileSync(resolvedPath, 'utf8');
+                const includeContent = readSourceText(resolvedPath);
                 const includeLines = includeContent.split('\n');
                 
                 // Find the class
@@ -724,7 +725,7 @@ export class SignatureHelpProvider {
 
         try {
             if (!fs.existsSync(programPath)) return null;
-            const content = fs.readFileSync(programPath, 'utf-8');
+            const content = readSourceText(programPath);
             return TextDocument.create(uri, 'clarion', 1, content);
         } catch {
             return null;

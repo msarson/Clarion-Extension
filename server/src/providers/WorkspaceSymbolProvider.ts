@@ -10,6 +10,7 @@ import { CancellationToken } from 'vscode-languageserver';
 import { cooperativeCheckpoint } from '../utils/cooperativeScan';
 import { pathToCanonicalUri } from '../utils/UriUtils';
 import LoggerManager from '../logger';
+import { readSourceText } from '../utils/SourceText'; // #879
 
 const logger = LoggerManager.getLogger("WorkspaceSymbolProvider");
 logger.setLevel("error");
@@ -74,7 +75,7 @@ export class WorkspaceSymbolProvider {
 
                     try {
                         if (!fs.existsSync(fullPath)) continue;
-                        const content = fs.readFileSync(fullPath, 'utf8');
+                        const content = readSourceText(fullPath);
                         const doc = TextDocument.create(uri, 'clarion', 1, content);
                         const tokens = this.tokenCache.getTokens(doc);
                         this.collectSymbols(tokens, uri, queryLower, results);

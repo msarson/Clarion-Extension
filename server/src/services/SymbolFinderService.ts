@@ -42,6 +42,7 @@ import * as crypto from 'crypto';
 import { loadIncludeIndex, saveIncludeIndex, includeIndexFresh } from './IncludeIndexDiskCache';
 import { findLabelQualifiedMember } from '../utils/LabelQualifiedMember';
 import { resolveMemberHeaderToken } from '../utils/MemberHeaderResolver';
+import { readSourceText, readSourceTextAsync } from '../utils/SourceText'; // #879
 
 const logger = LoggerManager.getLogger("SymbolFinderService");
 const perfLogger = LoggerManager.getLogger("SymbolFinderService.Perf", "perf");
@@ -1071,7 +1072,7 @@ export class SymbolFinderService {
                 `file:///${memberPath.replace(/\\/g, '/')}`);
             if (raw === null || raw === undefined) {
                 try {
-                    raw = fs.readFileSync(memberPath, 'utf-8');
+                    raw = readSourceText(memberPath);
                 } catch {
                     continue;
                 }
@@ -1174,7 +1175,7 @@ export class SymbolFinderService {
                     }
                 }
                 if (!parentTokens || !parentDoc) {
-                    const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
+                    const parentContents = await readSourceTextAsync(resolvedPath);
                     parentDoc = TextDocument.create(parentUri, 'clarion', 1, parentContents);
                     parentTokens = this.tokenCache.getTokens(parentDoc);
                 }
@@ -1525,7 +1526,7 @@ export class SymbolFinderService {
                 }
             }
             if (!parentTokens || !parentDoc) {
-                const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
+                const parentContents = await readSourceTextAsync(resolvedPath);
                 parentDoc = TextDocument.create(parentUri, 'clarion', 1, parentContents);
                 parentTokens = this.tokenCache.getTokens(parentDoc);
             }
@@ -1826,7 +1827,7 @@ export class SymbolFinderService {
                 if (!fs.existsSync(filePath)) {
                     return null;
                 }
-                const contents = fs.readFileSync(filePath, 'utf-8');
+                const contents = readSourceText(filePath);
                 doc = TextDocument.create(uri, 'clarion', 1, contents);
                 tokens = this.tokenCache.getTokens(doc);
             }
@@ -2426,7 +2427,7 @@ export class SymbolFinderService {
             if (!resolved || visited.has(resolved.toLowerCase())) continue;
 
             let incSource: string;
-            try { incSource = fs.readFileSync(resolved, 'utf-8'); } catch { continue; }
+            try { incSource = readSourceText(resolved); } catch { continue; }
             const nested = await this.findTypeViaIncludeChain(word, resolved, incSource, visited);
             if (nested) return nested;
         }

@@ -19,6 +19,7 @@ import { MemberOwnerKind } from '../../utils/ClassMemberScan'; // #668
 import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from '../../logger';
+import { readSourceText } from '../../utils/SourceText'; // #879
 
 /** #668 — a field's declaration: its document and tokens, the label token, and the structure that owns it. */
 interface FieldDeclaration {
@@ -529,7 +530,7 @@ export class StructureFieldResolver {
         let text = this.tokenCache.getDocumentText(uri) ?? undefined;
         if (text === undefined) {
             try {
-                text = fs.readFileSync(decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\'), 'utf8');
+                text = readSourceText(decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\'));
             } catch {
                 return undefined;
             }
@@ -613,7 +614,7 @@ export class StructureFieldResolver {
         visited.add(fromPath.toLowerCase());
 
         let content: string;
-        try { content = fs.readFileSync(fromPath, 'utf8'); } catch { return null; }
+        try { content = readSourceText(fromPath); } catch { return null; }
 
         const includePattern = /INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/gi;
         const compiled = compiledIncludeTest(fromPath, content); // #807
@@ -636,7 +637,7 @@ export class StructureFieldResolver {
             let incTokens = this.tokenCache.getTokensByUri(uri);
             if (!incTokens || incTokens.length === 0) {
                 try {
-                    const incContent = fs.readFileSync(resolvedPath, 'utf8');
+                    const incContent = readSourceText(resolvedPath);
                     incTokens = new ClarionTokenizer(incContent).tokenize();
                 } catch { incTokens = null; }
             }
@@ -692,7 +693,7 @@ export class StructureFieldResolver {
         visited.add(fromPath.toLowerCase());
 
         let content: string;
-        try { content = fs.readFileSync(fromPath, 'utf8'); } catch { return null; }
+        try { content = readSourceText(fromPath); } catch { return null; }
 
         const includePattern = /INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/gi;
         const compiled = compiledIncludeTest(fromPath, content); // #807
@@ -717,7 +718,7 @@ export class StructureFieldResolver {
             // On-demand tokenization if the file hasn't been opened in VS Code yet
             if (!incTokens || incTokens.length === 0) {
                 try {
-                    const incContent = fs.readFileSync(resolvedPath, 'utf8');
+                    const incContent = readSourceText(resolvedPath);
                     const tokenizer = new ClarionTokenizer(incContent);
                     incTokens = tokenizer.tokenize();
                     logger.info(`🔍 On-demand tokenized ${path.basename(resolvedPath)}: ${incTokens.length} tokens`);

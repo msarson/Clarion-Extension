@@ -29,6 +29,7 @@ import LoggerManager from '../logger';
 import * as fsSync from 'fs';
 import * as pathUtil from 'path';
 import { resolveMemberHeader } from './MemberHeaderResolver';
+import { readSourceText } from './SourceText'; // #879
 
 /**
  * #711 — a module source as the server sees it: the open buffer's text as the token cache last
@@ -942,7 +943,7 @@ export class MapProcedureResolver {
                         // Read the INCLUDE file to get the signature
                         try {
                             const fs = require('fs');
-                            const content = fs.readFileSync(t.sourceFile, 'utf8');
+                            const content = readSourceText(t.sourceFile);
                             const lines = content.split('\n');
                             lineText = lines[t.line]?.replace(/\r$/, '');
                             signature = lines[t.line]?.trim() || '';
@@ -1487,10 +1488,10 @@ export class MapProcedureResolver {
                 if (cached) {
                     content = cached.document.getText();
                 } else {
-                    content = fs.readFileSync(resolvedPath, 'utf8');
+                    content = readSourceText(resolvedPath);
                 }
             } else {
-                content = fs.readFileSync(resolvedPath, 'utf8');
+                content = readSourceText(resolvedPath);
             }
             
             // 🚀 PERFORMANCE: Try fast extraction first - only tokenize the MODULE block we need

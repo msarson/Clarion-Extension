@@ -15,6 +15,7 @@ import { resolveMemberHeaderTokenForUri } from '../../utils/MemberHeaderResolver
 import { CallSiteArgumentClassifier } from '../../utils/CallSiteArgumentClassifier';
 import { MethodOverloadResolver } from '../../utils/MethodOverloadResolver';
 import { ArgumentTypeResolver } from '../../utils/ArgumentTypeResolver';
+import { readSourceText } from '../../utils/SourceText'; // #879
 
 /** #881 — which of a procedure's overloaded prototypes a call picks; see chooseOverload. */
 type Prototype = { line: number; text: string };
@@ -149,7 +150,7 @@ export class ProcedureHoverResolver {
                 // Load the INCLUDE file and its tokens
                 try {
                     const decodedPath = decodeURIComponent(mapDeclUri.replace('file:///', ''));
-                    const includeContent = fs.readFileSync(decodedPath, 'utf-8');
+                    const includeContent = readSourceText(decodedPath);
                     const includeDoc = TextDocument.create(mapDeclUri, 'clarion', 1, includeContent);
                     const includeTokens = this.tokenCache.getTokens(includeDoc);
 

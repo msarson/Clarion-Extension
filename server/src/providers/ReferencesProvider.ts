@@ -48,6 +48,7 @@ import { resolveFieldEquate } from '../utils/FieldEquateResolver';
 import { onDiskSpelling, pathToCanonicalUri, toCanonicalUri } from '../utils/UriUtils';
 import LoggerManager from '../logger';
 import { resolveMemberHeaderTokenForUri } from '../utils/MemberHeaderResolver';
+import { readSourceText } from '../utils/SourceText'; // #879
 
 const logger = LoggerManager.getLogger("ReferencesProvider");
 logger.setLevel("error");
@@ -331,7 +332,7 @@ export class ReferencesProvider {
     private readFileTextForUri(uri: string): string | null {
         try {
             const filePath = decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
-            return fs.readFileSync(filePath, 'utf-8');
+            return readSourceText(filePath);
         } catch {
             return null;
         }
@@ -737,7 +738,7 @@ export class ReferencesProvider {
                 const incPath = path.join(dir, fname);
                 const incUri = `file:///${incPath.replace(/\\/g, '/')}`;
                 let incContent: string;
-                try { incContent = fs.readFileSync(incPath, 'utf8'); } catch { continue; }
+                try { incContent = readSourceText(incPath); } catch { continue; }
 
                 // (a) IMPLEMENTS — add the MODULE CLW file
                 if (implementsRe.test(incContent)) {
@@ -912,7 +913,7 @@ export class ReferencesProvider {
                     if (fileUri === document.uri) {
                         fileContent = document.getText();
                     } else {
-                        try { fileContent = fs.readFileSync(decodeURIComponent(fileUri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\'), 'utf8'); } catch { fileContent = ''; }
+                        try { fileContent = readSourceText(decodeURIComponent(fileUri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\')); } catch { fileContent = ''; }
                     }
                 }
                 return fileContent!.split('\n');
@@ -1980,7 +1981,7 @@ export class ReferencesProvider {
             } else {
                 // Not cached — scan the raw file for the class name
                 try {
-                    const incContent = fs.readFileSync(resolvedPath, 'utf8');
+                    const incContent = readSourceText(resolvedPath);
                     const rx = new RegExp(`^\\s*${className}\\s+CLASS\\b`, 'im');
                     if (rx.test(incContent)) return incUri;
                 } catch { /* ignore */ }
@@ -2016,7 +2017,7 @@ export class ReferencesProvider {
     private getFileContent(fileUri: string): string | null {
         try {
             const path = decodeURIComponent(fileUri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-            return fs.readFileSync(path, 'utf8');
+            return readSourceText(path);
         } catch {
             return null;
         }
@@ -2482,7 +2483,7 @@ export class ReferencesProvider {
             if (!fileLines) {
                 try {
                     const filePath = decodeURIComponent(fileUri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-                    fileLines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
+                    fileLines = readSourceText(filePath).split(/\r?\n/);
                 } catch { fileLines = null; }
             }
         }
@@ -3656,7 +3657,7 @@ export class ReferencesProvider {
                 }
                 try {
                     const filePath = decodeURIComponent(fileUri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
-                    candidateFileLines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
+                    candidateFileLines = readSourceText(filePath).split(/\r?\n/);
                 } catch {
                     candidateFileLines = null;
                 }
@@ -4491,7 +4492,7 @@ export class ReferencesProvider {
     private readIncludeWalkSource(fromPath: string): string | null {
         const live = this.tokenCache.getDocumentTextByUriCaseInsensitive(fsPathToUri(fromPath));
         if (live !== null) return live;
-        try { return fs.readFileSync(fromPath, 'utf-8'); } catch { return null; }
+        try { return readSourceText(fromPath); } catch { return null; }
     }
 
     /**

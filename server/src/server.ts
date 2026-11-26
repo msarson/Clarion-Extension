@@ -118,6 +118,7 @@ import { yieldToRequests } from './utils/cooperativeScan';
 import { beginInteractive, runAsBackground } from './utils/interactivePriority';
 import { readClientFeatures } from './utils/ClientFeatures';
 import { resolveMemberHeaderTokenForUri } from './utils/MemberHeaderResolver';
+import { setSourceEncoding, sourceEncoding } from './utils/SourceText';
 
 /**
  * #715 item 1 — a request handler that background validation waits for while it runs (hover,
@@ -290,7 +291,7 @@ async function precomputeCodeLensReferenceCounts(solution: ClarionSolutionInfo):
 
         const uri = pathToCanonicalUri(absPath);
         const openDoc = documents.get(uri);
-        const doc = openDoc ?? TextDocument.create(uri, 'clarion', 1, fs.readFileSync(absPath, 'utf8'));
+        const doc = openDoc ?? TextDocument.create(uri, 'clarion', 1, readSourceText(absPath));
         const lenses = codeLensProvider.provideCodeLenses(doc);
 
         for (const lens of lenses) {
@@ -461,6 +462,9 @@ connection.onInitialize((params) => {
         
         // Store initialization options
         globalClarionSettings = params.initializationOptions || {};
+        // #879: the encoding VS Code decodes Clarion files with, for the sources read from disk.
+        setSourceEncoding((params.initializationOptions as { sourceEncoding?: string } | undefined)?.sourceEncoding);
+        logger.info(`📥 Source encoding for files read from disk: valid UTF-8, else ${sourceEncoding()}`);
         // Optional client features under capabilities.experimental (attribute edit links on control cards).
         readClientFeatures(params.capabilities);
 
@@ -699,6 +703,7 @@ const lastValidatedVersions = new Map<string, number>();
 // change pipeline — including revalidateRelatedDocuments, which otherwise
 // re-validated a MEMBER file's 68k-token parent PROGRAM on every member open.
 import { ContentChangeGuard } from './utils/ContentChangeGuard';
+import { readSourceText } from './utils/SourceText'; // #879
 const contentChangeGuard = new ContentChangeGuard();
 
 // ✅ Diagnostic validation function
@@ -2754,6 +2759,18 @@ const projectConstantsCoalescer = new TrailingCoalescer(500, async () => {
 // #541 — a clarion.diagnostics.* setting changed in the editor. Apply the flags and
 // re-check every open document so the warnings appear or clear without a reload.
 // One document at a time, the same discipline as the startup re-validation chain.
+// #879: `files.encoding` for Clarion files changed. The text of every file read from disk was
+// decoded with the old encoding, so the closed-file tokens go and the cross-file caches restart.
+connection.onNotification('clarion/updateSourceEncoding', (params: { encoding?: string }) => {
+    const before = sourceEncoding();
+    setSourceEncoding(params?.encoding);
+    logger.info(`📥 clarion/updateSourceEncoding — ${before} → ${sourceEncoding()}`);
+    if (sourceEncoding() === before) return;
+    TokenCache.getInstance().clearAllTokens();
+    bumpCrossFileEpoch();
+    lastValidatedVersions.clear();
+});
+
 connection.onNotification('clarion/updateDiagnosticSettings', async (params: FeatureFlagParams) => {
     const changed = applyFeatureFlags(params ?? {});
     logger.info(`📥 clarion/updateDiagnosticSettings — changed: ${changed.length ? changed.join(', ') : '(nothing)'}`);
@@ -3238,7 +3255,7 @@ connection.onRequest('clarion/documentSymbols', async (params: { uri: string }) 
                 const result = await solutionManager.findFileWithExtension(fileName, fromFsPath);
 
                 if (result.path && fs.existsSync(result.path)) {
-                    const fileContent = fs.readFileSync(result.path, 'utf8');
+                    const fileContent = readSourceText(result.path);
                     document = TextDocument.create(params.uri, 'clarion', 1, fileContent);
                     logger.info(`✅ Successfully loaded file from disk: ${result.path} (source: ${result.source})`);
                 } else {

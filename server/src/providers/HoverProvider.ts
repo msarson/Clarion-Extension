@@ -43,6 +43,7 @@ import { tokensOnLine } from '../utils/TokenLineIndex';
 import * as fs from 'fs';
 import * as path from 'path';
 import { resolveMemberHeaderTokenForUri } from '../utils/MemberHeaderResolver';
+import { readSourceText } from '../utils/SourceText'; // #879
 
 const logger = LoggerManager.getLogger("HoverProvider");
 logger.setLevel("error");
@@ -1367,7 +1368,7 @@ export class HoverProvider {
                 let incTokens = this.tokenCache.getTokensByUri(uri);
                 if (!incTokens) {
                     try {
-                        const incContent = fs.readFileSync(ifaceInfo.filePath, 'utf8');
+                        const incContent = readSourceText(ifaceInfo.filePath);
                         const incDoc = TextDocument.create(uri, 'clarion', 1, incContent);
                         incTokens = this.tokenCache.getTokens(incDoc);
                     } catch { /* fall through */ }
@@ -1400,7 +1401,7 @@ export class HoverProvider {
         visited.add(fromPath.toLowerCase());
 
         let content: string;
-        try { content = fs.readFileSync(fromPath, 'utf8'); } catch { return null; }
+        try { content = readSourceText(fromPath); } catch { return null; }
 
         const includePattern = /INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/gi;
         const compiled = compiledIncludeTest(fromPath, content); // #807
@@ -1423,7 +1424,7 @@ export class HoverProvider {
             let incTokens = this.tokenCache.getTokensByUri(uri);
             if (!incTokens) {
                 try {
-                    const incContent = fs.readFileSync(resolvedPath, 'utf8');
+                    const incContent = readSourceText(resolvedPath);
                     const incDoc = TextDocument.create(uri, 'clarion', 1, incContent);
                     incTokens = this.tokenCache.getTokens(incDoc);
                 } catch { continue; }

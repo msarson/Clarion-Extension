@@ -9,6 +9,7 @@ import { DirectoryFileIndex } from './DirectoryFileIndex';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { parseLegacyProject } from '../../../common/LegacyProject';
 import { addItem, listItems, removeItem } from '../../../common/CwprojItems';
+import { readSourceText } from '../utils/SourceText'; // #879
 
 /** A Compile item's Include and a file name name the same file, in any case. */
 const sameFileName = (include: string, fileName: string) => include.toLowerCase() === fileName.toLowerCase();
@@ -508,7 +509,7 @@ export class ClarionProjectServer {
     public async readFileContents(filePath: string): Promise<string | null> {
         try {
             if (fs.existsSync(filePath)) {
-                return fs.readFileSync(filePath, 'utf-8');
+                return readSourceText(filePath);
             }
         } catch (e) {
             logger.error(`Failed to read file: ${filePath}`, e);
@@ -517,7 +518,7 @@ export class ClarionProjectServer {
     }
     public getTextDocumentByPath(filePath: string): TextDocument | null {
         try {
-            const content = fs.readFileSync(filePath, 'utf-8');
+            const content = readSourceText(filePath);
             const uri = `file:///${filePath.replace(/\\/g, '/')}`;
             return TextDocument.create(uri, 'clarion', 1, content);
         } catch (e) {

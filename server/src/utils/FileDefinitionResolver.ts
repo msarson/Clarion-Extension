@@ -12,6 +12,7 @@ import * as fs from 'fs';
 import { resolveFileInNoSolutionMode } from '../solution/findFileNoSolution';
 import { resolveViaProjectRedirection } from './RedirectionResolution';
 import LoggerManager from '../logger';
+import { readSourceText } from './SourceText'; // #879
 
 const logger = LoggerManager.getLogger("FileDefinitionResolver");
 logger.setLevel("error");
@@ -184,7 +185,7 @@ export class FileDefinitionResolver {
             return null;
         }
 
-        const content = fs.readFileSync(fromPath, 'utf8');
+        const content = readSourceText(fromPath);
         const lines = content.split('\n');
         const compiled = compiledIncludeTest(fromPath, content); // #807
 
@@ -224,7 +225,7 @@ export class FileDefinitionResolver {
                 logger.info(`Resolved INCLUDE to: ${resolvedPath}`);
 
                 // Search in the included file
-                const includeContent = fs.readFileSync(resolvedPath, 'utf8');
+                const includeContent = readSourceText(resolvedPath);
                 const includeLines = includeContent.split('\n');
 
                 for (let j = 0; j < includeLines.length; j++) {

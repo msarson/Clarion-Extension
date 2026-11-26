@@ -19,6 +19,7 @@ import { DirectiveService } from '../utils/DirectiveService';
 import { resolveViaProjectRedirection } from '../utils/RedirectionResolution';
 import LoggerManager from '../logger';
 import { resolveMemberHeader } from '../utils/MemberHeaderResolver';
+import { readSourceText } from '../utils/SourceText'; // #879
 
 const logger = LoggerManager.getLogger("WordCompletionProvider");
 // Completion timing breakdown — emitted only for a slow request, so it stays readable in a user's log.
@@ -430,7 +431,7 @@ export class WordCompletionProvider {
 
         try {
             if (!fs.existsSync(filePath)) return null;
-            const content = fs.readFileSync(filePath, 'utf-8');
+            const content = readSourceText(filePath);
             const doc = TextDocument.create(uri, 'clarion', 1, content);
             return { tokens: this.tokenCache.getTokens(doc), doc };
         } catch {

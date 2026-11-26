@@ -14,9 +14,10 @@ import * as path from 'path';
 import * as os from 'os';
 import { inactiveIncludeLines, recordedDependencies } from './ConditionalIncludes';
 import { resolveMemberHeaderToken } from './MemberHeaderResolver';
+import { readSourceTextAsync } from './SourceText'; // #879
 
 /** iv-includes.json format: 2 since #807 (an INCLUDE in a block that does not compile is not listed); 3 since #812 (project defines decide blocks). */
-const IV_LIST_VERSION = 3;
+const IV_LIST_VERSION = 4; // #879 — sources decoded as the editor decodes them
 
 const logger = LoggerManager.getLogger('IncludeVerifier');
 logger.setLevel('error');
@@ -275,7 +276,7 @@ export class IncludeVerifier {
             const includerPath = includer.replace(/\//g, '\\');
             let contents: string;
             try {
-                contents = await fs.promises.readFile(includerPath, 'utf-8');
+                contents = await readSourceTextAsync(includerPath);
             } catch {
                 continue;
             }
@@ -554,7 +555,7 @@ export class IncludeVerifier {
         const includes: IncludeStatement[] = [];
         try {
             IncludeVerifier.fileParseCount++;
-            const contents = await fs.promises.readFile(filePath, 'utf-8');
+            const contents = await readSourceTextAsync(filePath);
             const lines = contents.split('\n');
             const inactive = inactiveIncludeLines(filePath, contents); // #807
             for (let i = 0; i < lines.length; i++) {
@@ -846,7 +847,7 @@ export class IncludeVerifier {
 
             // Read and create document
             const t0 = Date.now();
-            const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
+            const parentContents = await readSourceTextAsync(resolvedPath);
             logger.debug(`⏱️ [IV] readFile "${path.basename(resolvedPath)}" took ${Date.now() - t0}ms (${parentContents.length} chars)`);
             const parentDoc = TextDocument.create(
                 pathToCanonicalUri(resolvedPath),

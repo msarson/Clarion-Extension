@@ -1,5 +1,6 @@
 import * as fs from 'fs';
 import LoggerManager from '../logger';
+import { readSourceTextAsync } from './SourceText'; // #879
 
 const logger = LoggerManager.getLogger('ClassConstantParser');
 logger.setLevel('error');
@@ -65,7 +66,7 @@ export class ClassConstantParser {
         }
 
         try {
-            const content = await fs.promises.readFile(filePath, 'utf-8');
+            const content = await readSourceTextAsync(filePath);
             const result = this.parseContent(content);
             if (mtimeMs !== null) ClassConstantParser.parseCache.set(key, { mtimeMs, result });
             return result;

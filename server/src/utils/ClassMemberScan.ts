@@ -17,6 +17,7 @@ import { ClarionPatterns } from './ClarionPatterns';
 import { ProcedureUtils } from './ProcedureUtils';
 import { pathToCanonicalUri } from './UriUtils';
 import { ClarionTokenizer } from '../ClarionTokenizer';
+import { readSourceText } from './SourceText'; // #879
 
 /**
  * A member's declaration with its `|` continuation lines joined in (the `|` dropped), so a
@@ -100,7 +101,7 @@ export function scanClassBodyForAllMembers(
 ): MemberEnumItem[] {
     const results: MemberEnumItem[] = [];
     try {
-        const content = contentOverride ?? fs.readFileSync(filePath, 'utf8');
+        const content = contentOverride ?? readSourceText(filePath);
         const lines = content.split(/\r?\n/);
         const headerPattern = new RegExp(`^${className}\\s+(CLASS|QUEUE|GROUP|INTERFACE)`, 'i');
 
@@ -191,7 +192,7 @@ export function scanClassBodyForMember(
     contentOverride?: string
 ): MemberInfo | null {
     try {
-        const content = contentOverride ?? fs.readFileSync(filePath, 'utf8');
+        const content = contentOverride ?? readSourceText(filePath);
         const lines = content.split(/\r?\n/);
         const headerPattern = new RegExp(`^${className}\\s+(CLASS|QUEUE|GROUP|INTERFACE)`, 'i');
 
@@ -380,7 +381,7 @@ export function getDeclarationLineText(fileUri: string, line: number): string | 
         if (filePath.startsWith('file:///')) {
             filePath = decodeURIComponent(filePath.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         }
-        const content = fs.readFileSync(filePath, 'utf8');
+        const content = readSourceText(filePath);
         const lines = content.split(/\r?\n/);
         return lines[line] ?? null;
     } catch {

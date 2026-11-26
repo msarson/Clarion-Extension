@@ -4,6 +4,7 @@ import { conditionalDependencies, dependenciesUnchanged, inactiveIncludeLines } 
 import { DocumentStructure, SourceLines } from './DocumentStructure';
 import LoggerManager from './logger';
 import * as fs from 'fs';
+import { readSourceText } from './utils/SourceText'; // #879
 
 const logger = LoggerManager.getLogger("TokenCache");
 logger.setLevel("error");
@@ -375,7 +376,7 @@ export class TokenCache {
         }
 
         try {
-            const content = fs.readFileSync(filePath, 'utf-8');
+            const content = readSourceText(filePath);
             // tokenize() builds + runs DocumentStructure.process() internally; a
             // second process() here would be redundant (and double-push children).
             const tokens = new ClarionTokenizer(content).tokenize();

@@ -16,6 +16,7 @@ import { ImplementationProvider } from './ImplementationProvider';
 import { ReferencesProvider } from './ReferencesProvider';
 import { isCall } from './diagnostics/UnresolvedProcedureCallDiagnostics';
 import LoggerManager from '../logger';
+import { readSourceText } from '../utils/SourceText'; // #879
 
 const logger = LoggerManager.getLogger('CallHierarchyProvider');
 logger.setLevel('error');
@@ -311,7 +312,7 @@ export class CallHierarchyProvider {
         }
         const filePath = decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).replace(/\//g, path.sep);
         try {
-            const text = fs.readFileSync(filePath, 'utf8');
+            const text = readSourceText(filePath);
             const document = TextDocument.create(uri, 'clarion', 1, text);
             return { document, tokens: this.tokenCache.getTokens(document) };
         } catch (err) {

@@ -9,6 +9,7 @@ import { ScopeKind } from '../scope/ScopeTypes';
 import { SolutionManager } from '../solution/solutionManager';
 import { pathToCanonicalUri } from '../utils/UriUtils';
 import LoggerManager from '../logger';
+import { readSourceText } from '../utils/SourceText'; // #879
 
 const logger = LoggerManager.getLogger('IntroduceEquateCodeActionProvider');
 logger.setLevel('error');
@@ -263,7 +264,7 @@ export class IntroduceEquateCodeActionProvider {
             const programPath = this.resolveProgramFile(programName, currentPath);
             if (!programPath) return null;
 
-            const content = fs.readFileSync(programPath, 'utf8');
+            const content = readSourceText(programPath);
             const programUri = pathToCanonicalUri(programPath);
             const programDoc = TextDocument.create(programUri, 'clarion', 1, content);
             const programTokens = TokenCache.getInstance().getTokens(programDoc);

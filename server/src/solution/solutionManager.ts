@@ -8,6 +8,7 @@ import { Token, ClarionTokenizer } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { solutionOperationInProgress } from '../server';
 import { DirectoryFileIndex } from './DirectoryFileIndex';
+import { readSourceText } from '../utils/SourceText'; // #879
 
 const logger = LoggerManager.getLogger("SolutionManager");
 logger.setLevel("error");
@@ -486,7 +487,7 @@ export class SolutionManager {
 
     private loadEquatesFrom(filePath: string): boolean {
         try {
-            const content = fs.readFileSync(filePath, 'utf8');
+            const content = readSourceText(filePath);
             this.equatesTokens = new ClarionTokenizer(content).tokenize();
             this.equatesPath = filePath;
             logger.info(`✅ equates.clw resolved at ${filePath} (${this.equatesTokens.length} tokens)`);

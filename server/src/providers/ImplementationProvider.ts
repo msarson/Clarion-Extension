@@ -40,6 +40,7 @@ import { cooperativeCheckpoint } from '../utils/cooperativeScan';
 import * as fs from 'fs';
 import * as path from 'path';
 import { resolveMemberHeaderTokenForUri } from '../utils/MemberHeaderResolver';
+import { readSourceText } from '../utils/SourceText'; // #879
 
 const logger = LoggerManager.getLogger("ImplementationProvider");
 logger.setLevel("error"); // Production: Only log errors
@@ -968,7 +969,7 @@ export class ImplementationProvider {
 
         // Disk fallback (also used when file not in cache, or multi-overload needing signatures)
         try {
-            const content = fs.readFileSync(fullPath, 'utf8');
+            const content = readSourceText(fullPath);
             const lines = content.split(/\r?\n/);
 
             // Collect all matching candidates

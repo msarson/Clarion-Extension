@@ -17,6 +17,7 @@ import { SolutionManager } from '../../solution/solutionManager';
 import LoggerManager from '../../logger';
 import * as fs from 'fs';
 import * as path from 'path';
+import { readSourceText } from '../../utils/SourceText'; // #879
 
 /** #882 — the fields a QUEUE(parent) or GROUP(parent) inherits; `count` is undefined when the parent was not found. */
 interface InheritedFields {
@@ -686,7 +687,7 @@ export class VariableHoverResolver {
         if (!equatesPath || !fs.existsSync(equatesPath)) return null;
 
         try {
-            const content = fs.readFileSync(equatesPath, 'utf-8');
+            const content = readSourceText(equatesPath);
             const uri = `file:///${equatesPath.replace(/\\/g, '/')}`;
             let doc: TextDocument;
             let equatesTokens: Token[];

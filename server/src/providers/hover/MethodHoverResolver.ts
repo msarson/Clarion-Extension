@@ -20,6 +20,7 @@ import { pickDeclaration } from '../../utils/ClassAncestry';
 import { ClassDeclarationSite } from '../../utils/SelfParentClassResolver';
 import * as fs from 'fs';
 import * as path from 'path';
+import { readSourceText } from '../../utils/SourceText'; // #879
 
 const logger = LoggerManager.getLogger("MethodHoverResolver");
 logger.setLevel("error");
@@ -715,7 +716,7 @@ export class MethodHoverResolver {
         declarationLine?: number // #650: the member's declaration line, when it is in this file
     ): number | null {
         try {
-            const content = text ?? fs.readFileSync(filePath, 'utf8');
+            const content = text ?? readSourceText(filePath);
             const lines = content.split(/\r?\n/);
 
             // Search for method implementation: ClassName.MethodName PROCEDURE

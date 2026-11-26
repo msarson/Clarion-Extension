@@ -39,6 +39,7 @@ import { inactiveIncludeLines } from '../utils/ConditionalIncludes';
 import { resolveEnclosingClassName } from '../utils/EnclosingClassResolver';
 import { ScopeKind } from '../scope/ScopeTypes';
 import { resolveMemberHeaderToken } from '../utils/MemberHeaderResolver';
+import { readSourceText, readSourceTextAsync } from '../utils/SourceText'; // #879
 
 const logger = LoggerManager.getLogger("MemberLocatorService");
 const dotAccessTraceEnabled = process.env.CLARION_TRACE_DOT_ACCESS === '1';
@@ -972,7 +973,7 @@ export class MemberLocatorService {
         if (cached !== undefined) return cached;
         let text: string;
         try {
-            text = await fs.promises.readFile(filePath, 'utf-8');
+            text = await readSourceTextAsync(filePath);
         } catch {
             labelScanCache.set(key, null);
             return null;
@@ -1564,7 +1565,7 @@ export class MemberLocatorService {
         // every miss asks: read the file only when the first line can lead to an IMPLEMENTS
         if (!ClarionTokenizer.endsWithContinuation(info.lineContent)) return info.lineContent;
         let lines: string[];
-        try { lines = fs.readFileSync(info.filePath, 'utf-8').split(/\r?\n/); } catch { return info.lineContent; }
+        try { lines = readSourceText(info.filePath).split(/\r?\n/); } catch { return info.lineContent; }
         const parts: string[] = [];
         for (let i = info.line; i < lines.length; i++) {
             parts.push(lines[i]);
@@ -1577,7 +1578,7 @@ export class MemberLocatorService {
     private interfaceDeclarationIn(name: string, filePath: string, text?: string): { filePath: string; line: number; lineContent: string } | null {
         let content = text;
         if (content === undefined) {
-            try { content = fs.readFileSync(filePath, 'utf-8'); } catch { return null; }
+            try { content = readSourceText(filePath); } catch { return null; }
         }
         const pattern = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+INTERFACE\\b`, 'i');
         const lines = content.split(/\r?\n/);
@@ -2332,7 +2333,7 @@ export class MemberLocatorService {
         }
         if (!fs.existsSync(filePath)) return null;
         try {
-            const content = await fs.promises.readFile(filePath, 'utf-8');
+            const content = await readSourceTextAsync(filePath);
             const uri = `file:///${filePath.replace(/\\/g, '/')}`;
             const doc = TextDocument.create(uri, 'clarion', 1, content);
             // 🚀 Prefer tokens already in the cache (e.g. file open in editor) to avoid

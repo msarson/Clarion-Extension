@@ -12,6 +12,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { onDiskSpelling, pathToCanonicalUri } from './UriUtils';
 import LoggerManager from '../logger';
+import { readSourceText } from './SourceText'; // #879
 
 const logger = LoggerManager.getLogger("MethodOverloadResolver");
 logger.setLevel("error");
@@ -297,7 +298,7 @@ export class MethodOverloadResolver {
     ): MethodDeclarationInfo[] {
         let content: string;
         try {
-            content = fs.readFileSync(filePath, 'utf8');
+            content = readSourceText(filePath);
         } catch {
             return [];
         }
@@ -418,7 +419,7 @@ export class MethodOverloadResolver {
         visited.add(fromPath.toLowerCase());
 
         let content: string;
-        try { content = fs.readFileSync(fromPath, 'utf8'); } catch { return null; }
+        try { content = readSourceText(fromPath); } catch { return null; }
 
         const lines = content.split('\n');
         const candidates: MethodDeclarationInfo[] = [];
@@ -451,7 +452,7 @@ export class MethodOverloadResolver {
 
             logger.info(`Searching INCLUDE for interface method: ${resolvedPath}`);
             let includeContent: string;
-            try { includeContent = fs.readFileSync(resolvedPath, 'utf8'); } catch { continue; }
+            try { includeContent = readSourceText(resolvedPath); } catch { continue; }
 
             const includeLines = includeContent.split('\n');
             let foundInThis = false;
@@ -549,7 +550,7 @@ export class MethodOverloadResolver {
 
             if (!resolvedPath) continue;
 
-            const includeContent = fs.readFileSync(resolvedPath, 'utf8');
+            const includeContent = readSourceText(resolvedPath);
             // Split on both line-ending styles — a bare '\n' split leaves a trailing '\r' on
             // every line of a CRLF file, which silently breaks the comment-strip regex below
             // (its '$' anchor can never reach past a leftover '\r').

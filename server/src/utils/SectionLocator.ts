@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { resolveViaProjectRedirectionFromUri } from './RedirectionResolution';
+import { readSourceText } from './SourceText'; // #879
 
 /**
  * #343 — locate a `SECTION('name')` line inside an INCLUDE target.
@@ -27,7 +28,7 @@ export function findSectionLocation(
 
     let content: string;
     try {
-        content = fs.readFileSync(resolved, 'utf8');
+        content = readSourceText(resolved);
     } catch {
         return null;
     }

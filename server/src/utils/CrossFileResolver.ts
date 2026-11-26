@@ -19,6 +19,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { clarionSourceCandidates, moduleTargetMatchesFile } from './ClarionSourceNaming';
 import { ScopeAnalyzer } from './ScopeAnalyzer';
+import { readSourceText } from './SourceText'; // #879
 
 const logger = LoggerManager.getLogger("CrossFileResolver");
 logger.setLevel("error");
@@ -79,7 +80,7 @@ export class CrossFileResolver {
             // cache (onDidChangeContent) → without this tier the loader read stale disk.
             return getLiveText?.(fsPath)
                 ?? (uri ? tokenCache.getDocumentText(uri) : undefined)
-                ?? fs.readFileSync(fsPath, 'utf8');
+                ?? readSourceText(fsPath);
         } catch {
             return undefined;
         }
@@ -207,7 +208,7 @@ export class CrossFileResolver {
                 return uriPath === normalizedResolved;
             });
             const content = (liveUri && this.tokenCache.getDocumentText(liveUri))
-                ?? fs.readFileSync(resolvedPath, 'utf8');
+                ?? readSourceText(resolvedPath);
             const parentDoc = TextDocument.create(liveUri ?? resolvedUri, 'clarion', 1, content);
             const parentTokens = await this.tokenCache.getTokens(parentDoc);
 
@@ -445,7 +446,7 @@ export class CrossFileResolver {
                 return uriPath === normalizedResolved2;
             });
             const content = (liveUri2 && this.tokenCache.getDocumentText(liveUri2))
-                ?? fs.readFileSync(resolvedPath, 'utf8');
+                ?? readSourceText(resolvedPath);
             const parentDoc = TextDocument.create(liveUri2 ?? resolvedUri2, 'clarion', 1, content);
             const parentTokens = await this.tokenCache.getTokens(parentDoc);
 
@@ -515,7 +516,7 @@ export class CrossFileResolver {
             if (!liveUri && !fs.existsSync(osDiskPath)) return null;
 
             const content = (liveUri && this.tokenCache.getDocumentText(liveUri))
-                ?? fs.readFileSync(osDiskPath, 'utf8');
+                ?? readSourceText(osDiskPath);
             const docUri = liveUri ?? resolvedUri;
             const doc = TextDocument.create(docUri, 'clarion', 1, content);
             const tokens = await this.tokenCache.getTokens(doc);

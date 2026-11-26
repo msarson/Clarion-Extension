@@ -2,6 +2,7 @@ import * as path from 'path';
 import * as fs from 'fs';
 import { ClarionProjectServer } from './clarionProjectServer';
 import { ClarionSourcerFileInfo } from 'common/types';
+import { readSourceText } from '../utils/SourceText'; // #879
 
 
 
@@ -87,7 +88,7 @@ export class ClarionSourcerFileServer {
         if (!absolutePath) return null;
 
         try {
-            this.fileContent = fs.readFileSync(absolutePath, 'utf-8');
+            this.fileContent = readSourceText(absolutePath);
             return this.fileContent;
         } catch (error) {
             console.error(`Error reading file ${absolutePath}:`, error);

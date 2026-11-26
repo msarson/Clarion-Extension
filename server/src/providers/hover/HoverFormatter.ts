@@ -17,7 +17,7 @@ function readCachedOrDiskFile(fileUri: string): string {
         ?? TokenCache.getInstance().getDocumentTextByUriCaseInsensitive(fileUri);
     if (cached !== null && cached !== undefined) return cached;
     const diskPath = decodeURIComponent(fileUri.replace('file:///', ''));
-    return fs.readFileSync(diskPath, 'utf-8');
+    return readSourceText(diskPath);
 }
 import LoggerManager from '../../logger';
 import { DocCommentReader, DocComment } from '../../utils/DocCommentReader';
@@ -27,6 +27,7 @@ import { DirectiveEntry } from '../../utils/DirectiveService';
 import { KeywordEntry } from '../../utils/KeywordService';
 import { ProcedureSignatureUtils } from '../../utils/ProcedureSignatureUtils';
 import { DeclaredValueParser } from '../../tokenizer/DeclaredValueParser';
+import { readSourceText } from '../../utils/SourceText'; // #879
 
 const logger = LoggerManager.getLogger("HoverFormatter");
 logger.setLevel("error");
@@ -262,7 +263,7 @@ export class HoverFormatter {
         const sameFile = (uri: string) => !!document &&
             decodeURIComponent(uri).toLowerCase() === decodeURIComponent(document.uri).toLowerCase();
         const readLines = (uri: string, path: string) =>
-            sameFile(uri) ? document!.getText().split('\n') : fs.readFileSync(path, 'utf-8').split('\n');
+            sameFile(uri) ? document!.getText().split('\n') : readSourceText(path).split('\n');
         const { category: memberCategory } =
             describeMemberOwner(declarationInfo.structureType, declarationInfo.isInterface, true);
         const header = this.buildMethodHeader(name, declarationInfo.type, memberCategory, 'Method', declarationInfo.className, true);
@@ -349,7 +350,7 @@ export class HoverFormatter {
         let docComment: DocComment | null = null;
         try {
             const declUri = decodeURIComponent(declInfo.file.replace('file:///', ''));
-            const declContent = fs.readFileSync(declUri, 'utf-8');
+            const declContent = readSourceText(declUri);
             docComment = DocCommentReader.read(declContent.split('\n'), declInfo.line);
         } catch { }
         if (implLocation) {
@@ -450,7 +451,7 @@ export class HoverFormatter {
                     mapContent = currentDocument.getText();
                 } else if (!mapDecl.uri.startsWith('test://')) {
                     const mapUri = decodeURIComponent(mapDecl.uri.replace('file:///', ''));
-                    mapContent = fs.readFileSync(mapUri, 'utf-8');
+                    mapContent = readSourceText(mapUri);
                 } else {
                     mapContent = '';
                 }
@@ -470,7 +471,7 @@ export class HoverFormatter {
                     implContent = currentDocument.getText();
                 } else if (!procImpl.uri.startsWith('test://')) {
                     const implUri = decodeURIComponent(procImpl.uri.replace('file:///', ''));
-                    implContent = fs.readFileSync(implUri, 'utf-8');
+                    implContent = readSourceText(implUri);
                 } else {
                     implContent = '';
                 }
@@ -591,7 +592,7 @@ export class HoverFormatter {
                     throw new Error('Cannot read test:// URI from filesystem');
                 } else {
                     mapUri = decodeURIComponent(mapDecl.uri.replace('file:///', ''));
-                    mapContent = fs.readFileSync(mapUri, 'utf-8');
+                    mapContent = readSourceText(mapUri);
                 }
 
                 const mapLines = mapContent.split('\n');

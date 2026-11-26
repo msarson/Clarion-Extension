@@ -40,6 +40,7 @@ import { getLocalMapScope } from '../utils/LocalMapScopeHelper';
 import { DefinitionTrace } from './utils/DefinitionTrace';
 import { getCrossFileEpoch } from '../utils/crossFileEpoch';
 import { resolveMemberHeaderTokenForUri } from '../utils/MemberHeaderResolver';
+import { readSourceText } from '../utils/SourceText'; // #879
 
 const logger = LoggerManager.getLogger("DefinitionProvider");
 logger.setLevel("error");
@@ -1214,7 +1215,7 @@ export class DefinitionProvider {
             if (location.uri !== document.uri && symbolInfo.scope.type === 'global') {
                 const declPath = decodeURIComponent(location.uri.replace('file:///', '')).replace(/\//g, '\\');
                 if (fs.existsSync(declPath)) {
-                    const declContents = fs.readFileSync(declPath, 'utf-8');
+                    const declContents = readSourceText(declPath);
                     const declDoc = TextDocument.create(location.uri, 'clarion', 1, declContents);
                     const canAccess = this.scopeAnalyzer.canAccess(position, location.range.start, document, declDoc);
                     if (!canAccess) {
@@ -1395,7 +1396,7 @@ export class DefinitionProvider {
             // getTokensByUri first so the empty content will never be tokenized
             const equatesDoc = TextDocument.create(
                 equatesUri, 'clarion', 1,
-                this.tokenCache.getTokensByUri(equatesUri) ? '' : fs.readFileSync(equatesPath, 'utf8')
+                this.tokenCache.getTokensByUri(equatesUri) ? '' : readSourceText(equatesPath)
             );
             const equatesInfo = await this.memberLocator.findMemberInClass(className, memberName, equatesDoc, paramCount);
             if (equatesInfo) {
@@ -1495,7 +1496,7 @@ export class DefinitionProvider {
         visited.add(fromPath.toLowerCase());
 
         let content: string;
-        try { content = fs.readFileSync(fromPath, 'utf8'); } catch { return null; }
+        try { content = readSourceText(fromPath); } catch { return null; }
 
         const includePattern = /INCLUDE\s*\(\s*['"](.+?)['"]\s*\)/gi;
         const compiled = compiledIncludeTest(fromPath, content); // #807
@@ -1519,7 +1520,7 @@ export class DefinitionProvider {
             if (!incTokens || incTokens.length === 0) {
                 try {
                     const { TextDocument: TD } = await import('vscode-languageserver-textdocument');
-                    const incContent = fs.readFileSync(resolvedPath, 'utf8');
+                    const incContent = readSourceText(resolvedPath);
                     const incDoc = TD.create(uri, 'clarion', 1, incContent);
                     incTokens = this.tokenCache.getTokens(incDoc);
                 } catch { incTokens = null; }
