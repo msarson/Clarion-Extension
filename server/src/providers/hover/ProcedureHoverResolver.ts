@@ -12,6 +12,16 @@ import LoggerManager from '../../logger';
 import { getLocalMapScope } from '../../utils/LocalMapScopeHelper';
 import * as fs from 'fs';
 import { resolveMemberHeaderTokenForUri } from '../../utils/MemberHeaderResolver';
+import { CallSiteArgumentClassifier } from '../../utils/CallSiteArgumentClassifier';
+import { MethodOverloadResolver } from '../../utils/MethodOverloadResolver';
+import { ArgumentTypeResolver } from '../../utils/ArgumentTypeResolver';
+
+/** #881 — which of a procedure's overloaded prototypes a call picks; see chooseOverload. */
+interface OverloadChoice {
+    line?: number;
+    text?: string;
+    list: Array<{ line: number; text: string }>;
+}
 
 const logger = LoggerManager.getLogger("ProcedureHoverResolver");
 logger.setLevel("error");
@@ -25,6 +35,7 @@ export class ProcedureHoverResolver {
     private mapResolver: MapProcedureResolver;
     private crossFileResolver: CrossFileResolver;
     private formatter: HoverFormatter;
+    private argTypes = new ArgumentTypeResolver();
 
     constructor(
         mapResolver: MapProcedureResolver,
@@ -112,26 +123,20 @@ export class ProcedureHoverResolver {
             const hit = await this.mapResolver.findDeclarationInMapIncludes(word, document, tokens, true);
             mk('walkIncludes');
             if (hit) {
-                const declLineText = hit.doc.getText({
-                    start: { line: hit.declLine, character: 0 },
-                    end: { line: hit.declLine, character: Number.MAX_SAFE_INTEGER }
-                });
-                mapDecl = {
-                    uri: hit.doc.uri,
-                    range: {
-                        start: { line: hit.declLine, character: 0 },
-                        end: { line: hit.declLine, character: declLineText.length }
-                    }
-                };
-                const includeImpl = await this.mapResolver.findImplementationForMapInclude(word, hit);
+                // #881 — the walk answers with the first prototype of the name; the call's
+                // arguments pick among its overloads.
+                const choice = await this.chooseOverload(word, hit.doc, hit.tokens, hit.declLine, document, position, line, tokens);
+                const declLine = choice?.line ?? hit.declLine;
+                mapDecl = this.lineLocation(hit.doc, declLine);
+                const includeImpl = await this.mapResolver.findImplementationForMapInclude(word, { ...hit, declLine });
                 mk('implFromWalk');
-                if (mapDecl || includeImpl) {
-                    return this.formatter.formatProcedure(word, mapDecl, includeImpl, document, position);
-                }
+                return this.withOverloadList(
+                    await this.formatter.formatProcedure(word, mapDecl, includeImpl, document, position), choice);
             }
         }
 
         let procImpl = null;
+        let choice: OverloadChoice | null = null;
         if (mapDecl) {
             // Check if MAP declaration is from an INCLUDE file
             const mapDeclUri = mapDecl.uri;
@@ -147,7 +152,11 @@ export class ProcedureHoverResolver {
                     const includeContent = fs.readFileSync(decodedPath, 'utf-8');
                     const includeDoc = TextDocument.create(mapDeclUri, 'clarion', 1, includeContent);
                     const includeTokens = this.tokenCache.getTokens(includeDoc);
-                    
+
+                    // #881 — the declaration found may be the first of several overloads.
+                    choice = await this.chooseOverload(word, includeDoc, includeTokens, mapDecl.range.start.line, document, position, line, tokens);
+                    if (choice?.line !== undefined) mapDecl = this.lineLocation(includeDoc, choice.line);
+
                     // Find implementation using INCLUDE file's document and tokens
                     const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
                     procImpl = await this.mapResolver.findProcedureImplementation(
@@ -155,7 +164,7 @@ export class ProcedureHoverResolver {
                         includeTokens,
                         includeDoc,
                         mapPosition,
-                        line
+                        choice?.line !== undefined ? choice.text! : line
                     );
                 } catch (error) {
                     logger.info(`Error loading INCLUDE file: ${error}`);
@@ -163,13 +172,17 @@ export class ProcedureHoverResolver {
             } else {
                 // Find implementation using MAP declaration position in current document
                 logger.info(`Looking for implementation in current document at MAP line ${mapDecl.range.start.line}`);
+                // #881 — findMapDeclaration picks by argument kinds only; a variable argument
+                // needs its declared type to tell the overloads apart.
+                choice = await this.chooseOverload(word, document, tokens, mapDecl.range.start.line, document, position, line, tokens);
+                if (choice?.line !== undefined) mapDecl = this.lineLocation(document, choice.line);
                 const mapPosition: Position = { line: mapDecl.range.start.line, character: 0 };
                 procImpl = await this.mapResolver.findProcedureImplementation(
                     word,
                     tokens,
                     document,
                     mapPosition,
-                    line,
+                    choice?.line !== undefined ? choice.text! : line,
                     this.tokenCache.getStructure(document) // #258: reuse cached structure
                 );
                 logger.info(`Implementation found in current document: ${!!procImpl}`);
@@ -180,13 +193,58 @@ export class ProcedureHoverResolver {
         logger.info(`Final result: mapDecl=${!!mapDecl}, procImpl=${!!procImpl}`);
 
         if (mapDecl || procImpl) {
-            return this.formatter.formatProcedure(word, mapDecl, procImpl, document, position);
+            return this.withOverloadList(await this.formatter.formatProcedure(word, mapDecl, procImpl, document, position), choice);
         }
 
         return null;
         } finally {
             emit();
         }
+    }
+
+    /**
+     * #881 — of a procedure's overloaded prototypes, the one a call's arguments pick, typing
+     * variable arguments through the shared ArgumentTypeResolver as signature help and F12 do.
+     * `line` is set (with its prototype `text`) when one is picked; otherwise `list` holds the
+     * prototypes the arguments leave open, every one when nothing can be read from the call.
+     * Null when the name has a single prototype.
+     */
+    private async chooseOverload(
+        word: string, declDoc: TextDocument, declTokens: Token[], declLine: number,
+        document: TextDocument, position: Position, callLine: string, tokens: Token[],
+    ): Promise<OverloadChoice | null> {
+        const protos = this.mapResolver.overloadedPrototypes(word, declTokens, declDoc, declLine);
+        if (protos.length < 2) return null;
+        const texts = MapProcedureResolver.callArgumentTexts(word, callLine);
+        if (!texts) return { list: protos };
+
+        const classifier = new CallSiteArgumentClassifier();
+        const args = texts.map(s => classifier.classifyArgumentText(s, tokens));
+        await this.argTypes.enrichArgs(args, tokens, document, position);
+        const signatures = protos.map(p => p.text.trim());
+        const overloads = new MethodOverloadResolver();
+        const picked = overloads.findOverloadByArgClassifications(args, signatures);
+        if (!picked.matchedAll && picked.matchedIndex >= 0) {
+            return { line: protos[picked.matchedIndex].line, text: protos[picked.matchedIndex].text, list: [] };
+        }
+        const compatible = overloads.filterOverloadsByArgClassifications(args, signatures);
+        if (compatible.length === 1) return { line: protos[compatible[0]].line, text: protos[compatible[0]].text, list: [] };
+        return { list: compatible.length > 1 ? compatible.map(i => protos[i]) : protos };
+    }
+
+    /** #881 — a card for an undecided call lists every prototype left open. */
+    private withOverloadList(hover: Hover | null, choice: OverloadChoice | null): Hover | null {
+        if (!hover || !choice || choice.list.length < 2) return hover;
+        const contents = hover.contents as { kind?: string; value?: string };
+        if (typeof contents?.value !== 'string') return hover;
+        const prototypes = choice.list.map(p => p.text.trim()).join('\n');
+        contents.value += `\n\n---\n\n${choice.list.length} overloads, and the arguments do not pick one:\n\n\`\`\`clarion\n${prototypes}\n\`\`\``;
+        return hover;
+    }
+
+    private lineLocation(doc: TextDocument, line: number): Location {
+        const text = doc.getText({ start: { line, character: 0 }, end: { line, character: Number.MAX_SAFE_INTEGER } }).replace(/\r?\n$/, '');
+        return { uri: doc.uri, range: { start: { line, character: 0 }, end: { line, character: text.length } } };
     }
 
     /**

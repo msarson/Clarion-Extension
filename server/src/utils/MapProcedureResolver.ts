@@ -726,9 +726,26 @@ export class MapProcedureResolver {
         if (ProcedureUtils.containsProcedureKeyword(maybeCallLine)) return -1;
         if (candidateSignatures.length < 2) return -1;
 
+        const segments = MapProcedureResolver.callArgumentTexts(procName, maybeCallLine);
+        if (!segments) return -1;
+
+        const classifier = new CallSiteArgumentClassifier();
+        const args = segments.map(s => classifier.classifyArgumentText(s, tokens));
+        const result = new MethodOverloadResolver().findOverloadByArgClassifications(
+            args, candidateSignatures);
+        return (!result.matchedAll && result.matchedIndex >= 0) ? result.matchedIndex : -1;
+    }
+
+    /**
+     * The argument texts of the first call to `procName` on a line, an omitted argument as an
+     * empty text holding its position (#250); null when the line holds no complete call.
+     * Shared by the sync pick above and the hover's typed pick (#881).
+     */
+    public static callArgumentTexts(procName: string, line: string): string[] | null {
+        const maybeCallLine = line;
         const escaped = procName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
         const callMatch = new RegExp(`\\b${escaped}\\s*\\(`, 'i').exec(maybeCallLine);
-        if (!callMatch) return -1;
+        if (!callMatch) return null;
 
         // Extract the balanced-paren argument text (Clarion strings are '...' with '' escapes).
         const openIdx = callMatch.index + callMatch[0].length - 1;
@@ -746,7 +763,7 @@ export class MapProcedureResolver {
                 if (depth === 0) { closeIdx = i; break; }
             }
         }
-        if (closeIdx < 0) return -1;
+        if (closeIdx < 0) return null;
         const argText = maybeCallLine.substring(openIdx + 1, closeIdx);
 
         // Split top-level commas (depth- and string-aware); keep empty segments —
@@ -766,12 +783,29 @@ export class MapProcedureResolver {
             current += ch;
         }
         if (current.trim() !== '' || segments.length > 0) segments.push(current);
+        return segments;
+    }
 
-        const classifier = new CallSiteArgumentClassifier();
-        const args = segments.map(s => classifier.classifyArgumentText(s, tokens));
-        const result = new MethodOverloadResolver().findOverloadByArgClassifications(
-            args, candidateSignatures);
-        return (!result.matchedAll && result.matchedIndex >= 0) ? result.matchedIndex : -1;
+    /**
+     * #881 — the prototypes in a declaring file that overload the one on `declLine`: the same
+     * name, written as the same kind of prototype (a MAP/MODULE entry, or a bare one in an
+     * included file), each with its line text. The one on `declLine` is included, in order.
+     */
+    public overloadedPrototypes(procName: string, declTokens: Token[], declDoc: TextDocument, declLine: number): Array<{ line: number; text: string }> {
+        const lower = procName.toLowerCase();
+        const named = (t: Token) => t.label?.toLowerCase() === lower || t.value.toLowerCase() === lower;
+        const kindOf = (t: Token) => t.subType === TokenType.MapProcedure ? 'map'
+            : t.type === TokenType.Function ? 'map'
+            : t.subType === TokenType.GlobalProcedure ? 'bare' : undefined;
+        const own = declTokens.find(t => t.line === declLine && named(t) && kindOf(t) !== undefined);
+        if (!own) return [];
+        const kind = kindOf(own);
+        const lines = new Set<number>();
+        for (const t of declTokens) if (named(t) && kindOf(t) === kind) lines.add(t.line);
+        return [...lines].sort((a, b) => a - b).map(line => ({
+            line,
+            text: declDoc.getText({ start: { line, character: 0 }, end: { line, character: Number.MAX_SAFE_INTEGER } }).replace(/\r?\n$/, ''),
+        }));
     }
 
     /**
