@@ -74,10 +74,29 @@ const MEMBER = [
     '  Glo:Obj.Bump()',                             // 7 Bump
 ];
 
+// A module whose MEMBER statement lives in an INCLUDEd shim (`INCLUDE('member.clw')` in place of
+// `MEMBER('prog')`, as generated projects have it): the program's globals reach it through the shim.
+const SHIM = [
+    "  MEMBER('prog.clw')",                         // 0
+];
+
+const MODULE = [
+    "  INCLUDE('shim.clw')",                        // 0
+    "  INCLUDE('cls.inc'),ONCE",                    // 1
+    '  MAP',                                        // 2
+    '  END',                                        // 3
+    'Helper2 PROCEDURE',                            // 4
+    '  CODE',                                       // 5
+    '  Glo:Obj.Hits = 10',                          // 6 IN
+    '  Glo:Other.Hits = 11',                        // 7 OUT (Other)
+    '  Glo:Obj.Bump()',                             // 8 Bump
+    '  Obj2.Hits = 12',                             // 9 IN (a plain program global, same route)
+];
+
 const MYCLS_HITS = ['cls.inc:1', 'prog.clw:13', 'prog.clw:14', 'prog.clw:15', 'prog.clw:21', 'prog.clw:22',
-    'prog.clw:24', 'prog.clw:30', 'prog.clw:31', 'member.clw:5'];
-const OTHER_HITS = ['cls.inc:5', 'prog.clw:16', 'prog.clw:32', 'member.clw:6'];
-const BUMP = ['cls.inc:2', 'prog.clw:17', 'prog.clw:23', 'member.clw:7'];
+    'prog.clw:24', 'prog.clw:30', 'prog.clw:31', 'member.clw:5', 'module.clw:6', 'module.clw:9'];
+const OTHER_HITS = ['cls.inc:5', 'prog.clw:16', 'prog.clw:32', 'member.clw:6', 'module.clw:7'];
+const BUMP = ['cls.inc:2', 'prog.clw:17', 'prog.clw:23', 'member.clw:7', 'module.clw:8'];
 
 suite('Find All References through a colon-named object', () => {
     let fx: DiskSolution;
@@ -86,15 +105,19 @@ suite('Find All References through a colon-named object', () => {
 
     suiteSetup(() => {
         setServerInitialized(true);
-        fx = createDiskSolution({ 'cls.inc': INC, 'prog.clw': PRG, 'member.clw': MEMBER });
+        fx = createDiskSolution({ 'cls.inc': INC, 'prog.clw': PRG, 'member.clw': MEMBER, 'shim.clw': SHIM, 'module.clw': MODULE });
         inc = fx.open('cls.inc');
         prg = fx.open('prog.clw');
         fx.open('member.clw');
-        // The module's program, as the solution's file graph records it: a MEMBER module sees
-        // the program's global data through it.
+        fx.open('module.clw');
+        // The modules' program, as the solution's file graph records it: a MEMBER module sees
+        // the program's global data through it, directly or through the shim it INCLUDEs.
+        const at = (f: string) => path.join(fx.root, f);
         FileRelationshipGraph.getInstance().reset();
         FileRelationshipGraph.getInstance().seedEdgesForTest([
-            { type: 'MEMBER', fromFile: path.join(fx.root, 'member.clw'), toFile: path.join(fx.root, 'prog.clw'), fromLine: 0 },
+            { type: 'MEMBER', fromFile: at('member.clw'), toFile: at('prog.clw'), fromLine: 0 },
+            { type: 'MEMBER', fromFile: at('shim.clw'), toFile: at('prog.clw'), fromLine: 0 },
+            { type: 'INCLUDE', fromFile: at('module.clw'), toFile: at('shim.clw'), fromLine: 0 },
         ]);
     });
     suiteTeardown(() => {
