@@ -40,9 +40,10 @@ function configurationChoices(text: string, current: string): string[] {
 
 /**
  * A Sources tab message: add or remove an item of a kind; or (#816) set a source's own pragma,
- * `name` on the Compile item `value`, an empty `pragma` meaning Default (none).
+ * `name` on the Compile item `value`, an empty `pragma` meaning Default (none); or (#880) set or
+ * clear the Compile item `value`'s Generated mark.
  */
-export interface ItemMessage { type: string; kind?: string; value?: string; name?: string; pragma?: string }
+export interface ItemMessage { type: string; kind?: string; value?: string; name?: string; pragma?: string; generated?: boolean }
 
 /** The text after a Sources tab message; unchanged for one it does not take. */
 export function editItems(text: string, msg: ItemMessage): string {
@@ -55,6 +56,14 @@ export function editItems(text: string, msg: ItemMessage): string {
         const setting = (msg.pragma ?? '').trim();
         if (kind !== 'Compile' || !pragma || (setting && pragma.options && !pragma.options.includes(setting))) return text;
         return setItemMetadata(text, kind, value, pragma.name, setting || null);
+    }
+    if (msg.type === 'setGenerated') {
+        // #880: the mark the IDE writes on a module it generates, `<Generated>true</Generated>`;
+        // cleared, the item has no Generated child at all, as a hand-written one is listed.
+        if (kind !== 'Compile' || typeof msg.generated !== 'boolean') return text;
+        const item = listItems(text).compile.find(i => i.include.toLowerCase() === value.toLowerCase());
+        if (!item || item.generated === msg.generated) return text;
+        return setItemMetadata(text, kind, value, 'Generated', msg.generated ? 'true' : null);
     }
     if (msg.type === 'removeItem') return removeItem(text, kind, value);
     // A reference needs the project's GUID and name, which the page does not ask for.
