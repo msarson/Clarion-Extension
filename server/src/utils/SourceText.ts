@@ -72,6 +72,15 @@ export function invalidateCachesOnEncodingChange(tempDir: string, encoding = ans
     return last !== undefined;
 }
 
+/**
+ * #879 — after a live encoding change: the running server still holds indexes read with the old
+ * encoding and may save them, so the next start must clear the caches whatever they say. The
+ * marker is set to a value no encoding has.
+ */
+export function markCachesStale(tempDir: string): void {
+    try { fs.writeFileSync(`${tempDir}/${ENCODING_MARKER}`, '(changed while running)', 'utf8'); } catch { /* best effort */ }
+}
+
 /** The async form of readSourceText. */
 export async function readSourceTextAsync(filePath: string): Promise<string> {
     return decodeSource(await fs.promises.readFile(filePath));

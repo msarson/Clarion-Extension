@@ -118,7 +118,7 @@ import { yieldToRequests } from './utils/cooperativeScan';
 import { beginInteractive, runAsBackground } from './utils/interactivePriority';
 import { readClientFeatures } from './utils/ClientFeatures';
 import { resolveMemberHeaderTokenForUri } from './utils/MemberHeaderResolver';
-import { invalidateCachesOnEncodingChange, readSourceText, setSourceEncoding, sourceEncoding } from './utils/SourceText'; // #879
+import { invalidateCachesOnEncodingChange, markCachesStale, readSourceText, setSourceEncoding, sourceEncoding } from './utils/SourceText'; // #879
 import * as os from 'os'; // #879
 
 /**
@@ -2770,9 +2770,9 @@ connection.onNotification('clarion/updateSourceEncoding', (params: { encoding?: 
     logger.info(`📥 clarion/updateSourceEncoding — ${before} → ${sourceEncoding()}`);
     if (sourceEncoding() === before) return;
     // Files read from now on use the new encoding. The indexes this server built hold names and
-    // lines read with the old one, so the client offers a reload; the persisted caches are cleared
-    // now so that reload rebuilds them.
-    invalidateCachesOnEncodingChange(os.tmpdir());
+    // lines read with the old one, and it may still save them, so the client offers a reload and
+    // the next start clears the persisted caches whatever they hold.
+    markCachesStale(os.tmpdir());
     TokenCache.getInstance().clearAllTokens();
     bumpCrossFileEpoch();
     lastValidatedVersions.clear();

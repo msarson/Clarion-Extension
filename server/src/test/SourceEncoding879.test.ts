@@ -14,7 +14,7 @@ import * as os from 'os';
 import * as path from 'path';
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Position } from 'vscode-languageserver-protocol';
-import { decodeSource, invalidateCachesOnEncodingChange, readSourceText, setSourceEncoding } from '../utils/SourceText';
+import { decodeSource, invalidateCachesOnEncodingChange, markCachesStale, readSourceText, setSourceEncoding } from '../utils/SourceText';
 import { HoverProvider } from '../providers/HoverProvider';
 import { TokenCache } from '../TokenCache';
 import { SolutionManager } from '../solution/solutionManager';
@@ -114,6 +114,14 @@ suite('Clarion sources read from disk keep their encoding (#879)', () => {
             assert.strictEqual(invalidateCachesOnEncodingChange(tmp, 'windows1251'), true);
             for (const f of ['sdi', 'frg', 'iv']) assert.ok(!fs.existsSync(family(f)), f);
             assert.strictEqual(invalidateCachesOnEncodingChange(tmp, 'windows1251'), false);
+        });
+
+        test('after a change while running, the next start clears the caches even under the same encoding', () => {
+            invalidateCachesOnEncodingChange(tmp, 'windows1251');
+            markCachesStale(tmp); // the running server may still save indexes read the old way
+            fs.mkdirSync(family('sdi'), { recursive: true });
+            assert.strictEqual(invalidateCachesOnEncodingChange(tmp, 'windows1251'), true);
+            assert.ok(!fs.existsSync(family('sdi')));
         });
     });
 
