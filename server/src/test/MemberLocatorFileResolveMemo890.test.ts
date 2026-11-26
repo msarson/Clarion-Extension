@@ -5,6 +5,8 @@ import * as path from 'path';
 import { MemberLocatorService } from '../services/MemberLocatorService';
 import { bumpCrossFileEpoch } from '../utils/crossFileEpoch';
 import { SolutionManager } from '../solution/solutionManager';
+import { ClarionTokenizer, Token } from '../ClarionTokenizer';
+import { TokenCache } from '../TokenCache';
 
 /**
  * #890 — Find All References on a structure field resolves each `.Field` access's receiver, and
@@ -58,6 +60,45 @@ suite('MemberLocatorService remembers where an INCLUDE resolves (#890)', () => {
         assert.strictEqual(svc.resolveFilePath('b.inc', dir), null);
         const inSub = svc.resolveFilePath('b.inc', sub);
         assert.ok(inSub && inSub.toLowerCase().endsWith(path.join('sub', 'b.inc').toLowerCase()), String(inSub));
+    });
+});
+
+suite('An INCLUDEd file is read and searched once per change (#890)', () => {
+    let dir = '';
+    type Svc = { findInIncludeChain(c: string, m: string, t: Token[], d: string, p: number | undefined, v: Set<string>, f?: string): Promise<{ line: number } | null> };
+    const svc = new MemberLocatorService() as unknown as Svc;
+    setup(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), 'ce890i-')); bumpCrossFileEpoch(); });
+    teardown(() => { fs.rmSync(dir, { recursive: true, force: true }); bumpCrossFileEpoch(); });
+
+    const host = (name: string): Token[] => {
+        const text = `  MEMBER('main.clw')\r\n  INCLUDE('types.inc'),ONCE\r\n`;
+        fs.writeFileSync(path.join(dir, name), text);
+        return new ClarionTokenizer(text).tokenize();
+    };
+    const types = (body: string) => fs.writeFileSync(path.join(dir, 'types.inc'),
+        `Totals  GROUP,TYPE\r\n${body}        END\r\n`);
+    const find = (tokens: Token[], member: string) =>
+        svc.findInIncludeChain('Totals', member, tokens, dir, undefined, new Set(), path.join(dir, 'a.clw'));
+
+    test('every module that includes the file gets the same answer', async () => {
+        types('Amount    DECIMAL(9,2)\r\n');
+        const a = host('a.clw'), b = host('b.clw');
+        assert.strictEqual((await find(a, 'Amount'))?.line, 1);
+        assert.strictEqual((await find(b, 'Amount'))?.line, 1);
+        assert.strictEqual(await find(b, 'Missing'), null);
+    });
+
+    test('a change to the file is seen once the watcher reports it', async () => {
+        types('Amount    DECIMAL(9,2)\r\n');
+        const a = host('a.clw');
+        assert.strictEqual(await find(a, 'Count'), null);
+        types('Amount    DECIMAL(9,2)\r\nCount     LONG\r\n');
+        const later = new Date(Date.now() + 5000);
+        fs.utimesSync(path.join(dir, 'types.inc'), later, later);
+        // What onDidChangeWatchedFiles does for the changed file.
+        TokenCache.getInstance().clearTokens('file:///' + path.join(dir, 'types.inc').replace(/\\/g, '/'));
+        bumpCrossFileEpoch();
+        assert.strictEqual((await find(a, 'Count'))?.line, 2);
     });
 });
 

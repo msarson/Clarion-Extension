@@ -73,6 +73,14 @@ let labelScanEpoch = -1;
 // #890: resolveFilePath answers (path or null), per cross-file epoch.
 const fileResolveCache = new Map<string, string | null>();
 let fileResolveEpoch = "";
+// #890: loadDocument's text of a closed file, by lowercased path, valid while its mtime is.
+// Bounded like TokenCache's closed-file cache (oldest first out).
+const loadedTextCache = new Map<string, { content: string; mtimeMs: number }>();
+const LOADED_TEXT_CACHE_MAX = 512;
+// #890: what one INCLUDE'd file declares itself for className.memberName (findInIncludeChain's
+// per-file step), by path + mtime + names; never for a file open in the editor.
+const includeMemberCache = new Map<string, MemberInfo | null>();
+let includeMemberEpoch = -1;
 
 export class MemberLocatorService {
     private sdi = StructureDeclarationIndexer.getInstance();
@@ -1903,34 +1911,25 @@ export class MemberLocatorService {
             // 🚀 Load once — use tokens for member lookup, then recurse into nested INCLUDEs
             const data = await this.loadDocument(resolvedPath);
             if (data) {
-                const result =
-                    this.findMemberFromTokens(data.tokens, data.doc, resolvedPath, className, memberName, paramCount, 'CLASS') ??
-                    this.findMemberFromTokens(data.tokens, data.doc, resolvedPath, className, memberName, paramCount, 'GROUP') ??
-                    this.findMemberFromTokens(data.tokens, data.doc, resolvedPath, className, memberName, paramCount, 'QUEUE');
-                if (result) return result;
-                // Fallback to disk scan for edge cases — prefer live editor text if file is open
+                // #890: this file's own answer is the same for every module that includes it while
+                // its text on disk is, and an open file's buffer is the same text (else no memo).
                 const diskUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
                 const liveContent = this.tokenCache.getDocumentText(diskUri) ?? undefined;
-                const diskResult =
-                    scanClassBodyForMember(
-                        resolvedPath, className, memberName, paramCount, 'CLASS',
-                        (line) => countParametersInDeclaration(line),
-                        (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc),
-                        liveContent
-                    ) ??
-                    scanClassBodyForMember(
-                        resolvedPath, className, memberName, paramCount, 'GROUP',
-                        (line) => countParametersInDeclaration(line),
-                        (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc),
-                        liveContent
-                    ) ??
-                    scanClassBodyForMember(
-                        resolvedPath, className, memberName, paramCount, 'QUEUE',
-                        (line) => countParametersInDeclaration(line),
-                        (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc),
-                        liveContent
-                    );
-                if (diskResult) return diskResult;
+                const loaded = loadedTextCache.get(resolvedPath.toLowerCase());
+                const memoKey = loaded && (liveContent === undefined || liveContent === loaded.content)
+                    ? `${resolvedPath.toLowerCase()}|${loaded.mtimeMs}|${className.toLowerCase()}|${memberName.toLowerCase()}|${paramCount ?? ''}`
+                    : undefined;
+                if (getCrossFileEpoch() !== includeMemberEpoch) {
+                    includeMemberCache.clear();
+                    includeMemberEpoch = getCrossFileEpoch();
+                }
+                const known = memoKey !== undefined ? includeMemberCache.get(memoKey) : undefined;
+                const own = known !== undefined ? known : this.findOwnMemberInInclude(data, resolvedPath, className, memberName, paramCount, liveContent);
+                if (memoKey !== undefined && known === undefined) {
+                    includeMemberCache.set(memoKey, own);
+                    if (includeMemberCache.size > 20000) includeMemberCache.clear();
+                }
+                if (own) return own;
 
                 const nested = await this.findInIncludeChain(
                     className, memberName, data.tokens, path.dirname(resolvedPath), paramCount, visited, fromFile
@@ -1939,6 +1938,32 @@ export class MemberLocatorService {
             }
         }
         return null;
+    }
+
+    /** findInIncludeChain's step for one INCLUDE'd file: what it declares itself, tokens first, then its text. */
+    private findOwnMemberInInclude(
+        data: { doc: TextDocument; tokens: Token[] },
+        resolvedPath: string,
+        className: string,
+        memberName: string,
+        paramCount: number | undefined,
+        liveContent: string | undefined
+    ): MemberInfo | null {
+        const result =
+            this.findMemberFromTokens(data.tokens, data.doc, resolvedPath, className, memberName, paramCount, 'CLASS') ??
+            this.findMemberFromTokens(data.tokens, data.doc, resolvedPath, className, memberName, paramCount, 'GROUP') ??
+            this.findMemberFromTokens(data.tokens, data.doc, resolvedPath, className, memberName, paramCount, 'QUEUE');
+        if (result) return result;
+        // Fallback text scan for edge cases: the live editor text if the file is open, else the
+        // text loadDocument just read (#890: the scan read the file from disk again, three times).
+        const text = liveContent ?? data.doc.getText();
+        const scan = (kind: 'CLASS' | 'GROUP' | 'QUEUE') => scanClassBodyForMember(
+            resolvedPath, className, memberName, paramCount, kind,
+            (line) => countParametersInDeclaration(line),
+            (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc),
+            text
+        );
+        return scan('CLASS') ?? scan('GROUP') ?? scan('QUEUE');
     }
 
     /** Walks the CLASS(Parent) inheritance chain via the class index. */
@@ -2474,9 +2499,23 @@ export class MemberLocatorService {
             const cached = await this.crossFileCache.getOrLoadDocument(filePath);
             if (cached) return { doc: cached.document, tokens: cached.tokens };
         }
-        if (!fs.existsSync(filePath)) return null;
+        // #890: a closed file's text, read once per change on disk. A dotted-access resolve
+        // loads the same INCLUDE'd files for every receiver, so a Find All References over
+        // hundreds of modules re-read and re-decoded each one hundreds of times.
+        let mtimeMs: number;
+        try { mtimeMs = fs.statSync(filePath).mtimeMs; } catch { return null; }
         try {
-            const content = await readSourceTextAsync(filePath);
+            const key = filePath.toLowerCase();
+            const known = loadedTextCache.get(key);
+            const content = known && known.mtimeMs === mtimeMs ? known.content : await readSourceTextAsync(filePath);
+            if (!known || known.mtimeMs !== mtimeMs) {
+                loadedTextCache.set(key, { content, mtimeMs });
+                while (loadedTextCache.size > LOADED_TEXT_CACHE_MAX) {
+                    const oldest = loadedTextCache.keys().next().value;
+                    if (oldest === undefined) break;
+                    loadedTextCache.delete(oldest);
+                }
+            }
             const uri = `file:///${filePath.replace(/\\/g, '/')}`;
             const doc = TextDocument.create(uri, 'clarion', 1, content);
             // 🚀 Prefer tokens already in the cache (e.g. file open in editor) to avoid

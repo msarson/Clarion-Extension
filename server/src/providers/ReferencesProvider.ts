@@ -2429,8 +2429,10 @@ export class ReferencesProvider {
             if (text === null) continue;
             const doc = isCursorFile ? cursorDocument : TextDocument.create(fileUri, 'clarion', 1, text);
             const lines = text.split(/\r?\n/);
-            const tokens = this.getTokensForUri(fileUri);
+            // #890: one tokenize per file. getStructure caches the tokens with the structure it
+            // builds; asking the closed-file cache first tokenized the same text a second time.
             const structure = this.tokenCache.getStructure(doc);
+            const tokens = this.tokenCache.getTokens(doc);
             const verdicts = new Map<string, boolean | undefined>();
 
             for (let line = 0; line < lines.length; line++) {
