@@ -18,6 +18,7 @@ import { PropertyService, PropTarget } from '../../utils/PropertyService';
 import { EventService } from '../../utils/EventService';
 import { DirectiveService } from '../../utils/DirectiveService';
 import { KeywordService } from '../../utils/KeywordService';
+import { RESERVED_WORDS } from '../../utils/ReservedWords';
 import { CallSiteArgumentClassifier } from '../../utils/CallSiteArgumentClassifier';
 import { ArgumentTypeResolver } from '../../utils/ArgumentTypeResolver';
 import { MethodOverloadResolver } from '../../utils/MethodOverloadResolver';
@@ -192,7 +193,7 @@ export class HoverRouter {
             // moved to clarion-keywords.json. Routing intentionally sits next to
             // directives and ahead of builtins so a misclassified entry can't be
             // shadowed by an unrelated function with the same name.
-            const languageKeywordHover = this.handleKeyword(word);
+            const languageKeywordHover = this.handleKeyword(word, tokens, position);
             if (languageKeywordHover) return languageKeywordHover;
 
             // 10. Handle built-in functions (AFTER method declarations to avoid shadowing)
@@ -1414,8 +1415,15 @@ export class HoverRouter {
     /**
      * Handle language keywords (IF, CASE, PROCEDURE, SELF, NEW, etc.).
      */
-    private handleKeyword(word: string): Hover | null {
+    private handleKeyword(word: string, tokens: Token[], position: { line: number; character: number }): Hover | null {
         if (HANDLED_BY_SPECIAL_KEYWORDS.has(word.toUpperCase())) return null;
+        // A declaration label is the name being declared, not the keyword it is spelled
+        // like: CODE, MAP, SELF and PARENT may label data (`Code  STRING(128)`). Same guard
+        // as handleAttribute/handleBuiltin; variable resolution gives the label its card.
+        // A reserved word is never a label: at column 0 it starts a statement (`RETURN`,
+        // `IF X = 1`) and keeps its card. A bare column-0 CODE is an ExecutionMarker token.
+        if (!RESERVED_WORDS.has(word.toUpperCase()) &&
+            isDeclarationLabel(tokens, position.line, position.character)) return null;
         const entry = this.keywordService.getKeyword(word);
         if (!entry) return null;
         logger.info(`Found language keyword: ${word}`);
