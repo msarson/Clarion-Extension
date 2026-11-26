@@ -6,8 +6,8 @@ import { ScopeAnalyzer } from '../utils/ScopeAnalyzer';
 import { WordCompletionProvider } from './WordCompletionProvider';
 import { MemberLocatorService } from '../services/MemberLocatorService';
 import { MemberEnumItem } from '../utils/ClassMemberScan';
-import { extractClassName } from '../utils/ClassNameUtils';
-import { ChainedPropertyResolver } from '../utils/ChainedPropertyResolver';
+import { ChainedPropertyResolver, Owner } from '../utils/ChainedPropertyResolver';
+import { DottedAccessResolver } from '../services/DottedAccessResolver';
 import { PropertyService } from '../utils/PropertyService';
 import { EventService } from '../utils/EventService';
 import { Token } from '../ClarionTokenizer';
@@ -37,6 +37,7 @@ export class CompletionProvider {
     private tokenCache = TokenCache.getInstance();
     private memberLocator = new MemberLocatorService();
     private chainedResolver = new ChainedPropertyResolver();
+    private dottedAccess = new DottedAccessResolver(this.memberLocator);
     private propertyService = PropertyService.getInstance();
     private eventService = EventService.getInstance();
     private wordCompletion: WordCompletionProvider;
@@ -469,17 +470,21 @@ export class CompletionProvider {
         const structurePrefixItems = await this.completePrefixedStructureDot(chain, partial, document, position, tokens);
         if (structurePrefixItems) return structurePrefixItems;
 
-        const resolved = await this.resolveChainToClassName(chain, document, position, tokens);
-        if (!resolved) {
+        const owner = await this.resolveChainOwner(chain, document, position, tokens);
+        if (!owner) {
             logger.info(`CompletionProvider: could not resolve chain "${chain}"`);
             return null;
         }
 
-        const { className, callerClass } = resolved;
-        logger.info(`CompletionProvider: "${chain}" → class="${className}", caller="${callerClass ?? 'external'}"`);
+        // The class the cursor is inside, for access filtering
+        const callerClass = this.chainedResolver.resolveCurrentClassName(document, position, tokens) ?? undefined;
+        const className = owner.kind === 'class' ? owner.name : owner.className;
+        logger.info(`CompletionProvider: "${chain}" → ${owner.kind} "${className}", caller="${callerClass ?? 'external'}"`);
 
-        // Enumerate all members (with inheritance + access filtering)
-        const members = await this.memberLocator.enumerateMembersInClass(className, document, callerClass, { atLine: position.line });
+        // Enumerate all members (with inheritance + access filtering), through the owner hover and
+        // Go to Definition walk to: an inline GROUP, a typed GROUP with fields of its own, an
+        // implemented interface.
+        const members = await this.dottedAccess.enumerateMembers(owner, document, { callerClass, atLine: position.line });
         if (members.length === 0) {
             logger.info(`CompletionProvider: no members found for "${className}"`);
             return [];
@@ -578,134 +583,33 @@ export class CompletionProvider {
     }
 
     // -------------------------------------------------------------------------
-    // Chain → class name resolution
+    // Chain → owner resolution
     // -------------------------------------------------------------------------
 
     /**
-     * Resolves a chain string to a class name.
-     * Returns { className, callerClass } where callerClass is the class the
-     * cursor is currently inside (used for access filtering).
+     * The owner whose members `chain.` offers - the owner hover and Go to Definition resolve the
+     * same access to (DottedAccessResolver.resolveOwner): a chain walked through classes, inline
+     * GROUPs and typed GROUPs with fields of their own, or a single receiver word read as they
+     * read it (#654). A single word that names nothing there may still be a prefixed field
+     * (`TGLO:Pictionary`), or a class named directly (`ThisWindow.` used outside any method).
      */
-    private async resolveChainToClassName(
+    private async resolveChainOwner(
         chain: string,
         document: TextDocument,
         position: { line: number; character: number },
         tokens: Token[]
-    ): Promise<{ className: string; callerClass?: string } | null> {
-        const chainUpper = chain.toUpperCase();
-
-        // Determine the caller's class (for access filtering)
-        const callerClass = this.chainedResolver.resolveCurrentClassName(document, position, tokens) ?? undefined;
-
-        // --- SELF or PARENT (single segment) ---
-        if (chainUpper === 'SELF') {
-            if (!callerClass) return null;
-            return { className: callerClass, callerClass };
-        }
-        if (chainUpper === 'PARENT') {
-            // resolveCurrentClassName gives us the class; we need its parent
-            if (!callerClass) return null;
-            const parentClass = await this.resolveParentOf(callerClass, document, position.line);
-            if (!parentClass) return null;
-            return { className: parentClass, callerClass };
-        }
-
-        // --- Chained expression (SELF/PARENT/variable chains) ---
-        if (chain.includes('.')) {
-            return this.resolveChainedSegments(chain, document, position, tokens, callerClass);
-        }
-
-        // --- Plain word: variable or class name ---
-        // Try variable type resolution first. `position.line` lets resolveVariableType fall
-        // back to the enclosing procedure's parameters, which are not column-0 tokens and so
-        // are invisible to the declaration lookup — without it a PARAMETER receiver resolves
-        // to nothing here and drops through to the class-name fallback below, handing the
-        // VARIABLE's own name downstream as a class name. Every other caller that supports
-        // parameters (definition, hover's structure-field resolver, implementation) already
-        // passes it.
-        // #654: a receiver is read as hover and Go to Definition read it (#651) - a local
-        // `ThisWindow CLASS(Base)` is itself, not a variable of type Base (#642), so its own
-        // members are offered with the inherited ones.
-        const receiver = await this.memberLocator.resolveReceiverAt(chain, document, position.line);
-        if (receiver) {
-            return { className: receiver.className, callerClass };
-        }
-        const typeInfo = await this.memberLocator.resolveVariableType(chain, tokens, document, position.line);
-        if (typeInfo) {
-            return { className: typeInfo.typeName, callerClass };
-        }
+    ): Promise<Owner | null> {
+        const owner = await this.dottedAccess.resolveOwner(chain, document, position.line);
+        if (owner || chain.includes('.') || /^(self|parent)$/i.test(chain)) return owner;
 
         // Prefixed field references (e.g. TGLO:Pictionary) are tokenized as
         // structure fields and are not resolved by MemberLocator's plain-variable
         // lookup path. Resolve the declared type directly from the token stream.
         const prefixedTypeName = this.resolvePrefixedFieldType(chain, tokens);
-        if (prefixedTypeName) {
-            return { className: prefixedTypeName, callerClass };
-        }
+        if (prefixedTypeName) return { kind: 'class', name: prefixedTypeName };
 
         // Fallback: treat as direct class name (e.g. "ThisWindow." used outside any method)
-        return { className: chain, callerClass };
-    }
-
-    /**
-     * Resolves a chained expression like "SELF.Order" to the type of the last segment.
-     * Uses ChainedPropertyResolver for intermediate resolution.
-     */
-    private async resolveChainedSegments(
-        chain: string,
-        document: TextDocument,
-        position: { line: number; character: number },
-        tokens: Token[],
-        callerClass: string | undefined
-    ): Promise<{ className: string; callerClass?: string } | null> {
-        const segments = chain.split('.').map(s => s.trim()).filter(Boolean);
-        if (segments.length < 2) return null;
-
-        // Use ChainedPropertyResolver to walk all but the last segment
-        // We treat the last segment as the "member" and want its type
-        const root = segments[0].toUpperCase();
-        let currentClass: string | null;
-
-        if (root === 'SELF') {
-            currentClass = this.chainedResolver.resolveCurrentClassName(document, position, tokens);
-        } else if (root === 'PARENT') {
-            currentClass = callerClass
-                ? await this.resolveParentOf(callerClass, document, position.line)
-                : null;
-        } else {
-            // Same reason as the plain-word branch: a chain rooted on a PARAMETER
-            // (`pSomething.Member.`) needs the scope line to resolve its declared type.
-            // #654: the receiver as hover and Go to Definition read it, as for a plain word above.
-            currentClass = (await this.memberLocator.resolveReceiverAt(segments[0], document, position.line))?.className
-                ?? (await this.memberLocator.resolveVariableType(root, tokens, document, position.line))?.typeName
-                ?? null;
-        }
-
-        if (!currentClass) return null;
-
-        // Walk each segment and carry the current structure type forward.
-        for (let i = 1; i < segments.length; i++) {
-            const seg = segments[i];
-            const members = await this.memberLocator.enumerateMembersInClass(currentClass, document, callerClass, { atLine: position.line });
-            const member = members.find(m => m.name.toUpperCase() === seg.toUpperCase());
-            if (!member) return null;
-
-            const nextClass = extractClassName(member.type);
-            if (!nextClass) return null;
-            currentClass = nextClass;
-        }
-
-        return { className: currentClass, callerClass };
-    }
-
-    /** Finds the parent class of a given class (via ClassDefinitionIndexer). */
-    private async resolveParentOf(className: string, document: TextDocument, atLine?: number): Promise<string | null> {
-        // #623: this used to scan the open document's text and stop there. A class declared in an
-        // .inc — where generated and hand-written Clarion classes normally live — has no CLASS
-        // line in the .clw being edited, so PARENT. offered nothing at all. The same shape already
-        // worked through ClassMemberResolver.getParentClassInfo, which consults the include chain
-        // and the declaration index; both now take the same two tiers.
-        return this.memberLocator.resolveParentName(className, document, atLine);
+        return { kind: 'class', name: chain };
     }
 
     // -------------------------------------------------------------------------
@@ -750,7 +654,7 @@ export class CompletionProvider {
     private toCompletionItem(member: MemberEnumItem, _forClass: string): CompletionItem {
         const kind = member.kind === 'method'
             ? CompletionItemKind.Method
-            : CompletionItemKind.Field;
+            : member.type === 'INTERFACE' ? CompletionItemKind.Interface : CompletionItemKind.Field; // #773 SELF.IFace
 
         const { paramDetail, returnDescription } = this.parseTypeForLabel(member.type, member.kind);
 
