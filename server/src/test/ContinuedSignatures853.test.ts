@@ -81,6 +81,13 @@ suite('Signatures continued with | are read whole (#853)', () => {
             ['Bare         PROCEDURE', '  CODE', '  x# = 1', 'Named        PROCEDURE', '  CODE', '  x# = 1'])), ['Bare', 'Named']);
     });
 
+    test('control: a prototype with no parameter list pairs only with an implementation with none', () => {
+        assert.deepStrictEqual(returnChecks(program(
+            ['Foo          PROCEDURE,LONG', 'Foo          PROCEDURE(LONG n),LONG'],
+            ['Foo          PROCEDURE', '  CODE', '  RETURN 1',
+             'Foo          PROCEDURE(LONG n)', '  CODE', '  n += 1'])), ['Foo']);
+    });
+
     test('control: DERIVED on a continued CLASS prototype still exempts it', () => {
         assert.deepStrictEqual(returnChecks([
             '  PROGRAM', '  MAP', '  END',
@@ -129,6 +136,15 @@ suite('Signatures continued with | are read whole (#853)', () => {
                 .findMapDeclarationInMemberFile('Alpha', 'parent', doc, 'Alpha PROCEDURE(LONG a, LONG b)', undefined);
             assert.ok(result, 'resolves');
             assert.strictEqual(result!.line, 4);
+
+            // The same choice through the declarant-graph fallback, which reaches its own copy of
+            // the overload selection (searchDeclarantFileForMapDeclaration). It is private and
+            // needs a built graph to be reached, so it is called directly here.
+            const frgPath = path.join(tmpDir, 'parent.clw').split(path.sep).join('/').toLowerCase();
+            const viaGraph = await (new CrossFileResolver(TokenCache.getInstance()) as any)
+                .searchDeclarantFileForMapDeclaration(frgPath, 'member.clw', 'Alpha', 'Alpha PROCEDURE(LONG a, LONG b)');
+            assert.ok(viaGraph, 'resolves through the declarant fallback');
+            assert.strictEqual(viaGraph.line, 4);
         });
     });
 });
