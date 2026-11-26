@@ -22,7 +22,7 @@ import { TokenHelper } from '../utils/TokenHelper';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { StructureDeclarationIndexer, StructureDeclarationInfo, inheritsMembersFromParent } from '../utils/StructureDeclarationIndexer';
 import { CrossFileCache } from '../providers/hover/CrossFileCache';
-import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, overloadAcceptsArgs, detectMemberAccess, countParametersInDeclaration, withContinuations } from '../utils/ClassMemberScan';
+import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, overloadAcceptsArgs, detectMemberAccess, countParametersInDeclaration, withContinuations, logicalLine } from '../utils/ClassMemberScan';
 import { nearestClassLabel } from '../utils/ClassNameUtils';
 import { extractParentName, findParentInText } from '../utils/ParentClassName';
 import type { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
@@ -1590,7 +1590,7 @@ export class MemberLocatorService {
             if (parts[0].toLowerCase() !== clsLower) continue;
             const methodName = parts[2].toLowerCase();
             // #834: a header continued with `|` is counted whole, as the interface's prototype is (#805)
-            const paramCount = countParametersInDeclaration(docLines[t.line] === undefined ? '' : withContinuations(docLines, t.line));
+            const paramCount = countParametersInDeclaration(logicalLine(docLines, t.line));
             impls.add(`${parts[1].toLowerCase()}.${methodName}#${paramCount}`);
         }
         return impls;
@@ -1900,7 +1900,7 @@ export class MemberLocatorService {
             methods.push({
                 name: token.label,
                 // #805: a parameter list continued with `|` is counted whole, not from its first line.
-                paramCount: countParametersInDeclaration(docLines[token.line] === undefined ? '' : withContinuations(docLines, token.line))
+                paramCount: countParametersInDeclaration(logicalLine(docLines, token.line))
             });
         }
         return { methods, parentName };

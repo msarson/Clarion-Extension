@@ -12,7 +12,7 @@ import { getLocalMapScope } from '../../utils/LocalMapScopeHelper';
 import { pathToCanonicalUri } from '../../utils/UriUtils';
 import { moduleTargetMatchesFile } from '../../utils/ClarionSourceNaming';
 import { makeTimeSlicer } from '../../utils/cooperativeScan';
-import { withContinuations } from '../../utils/ClassMemberScan';
+import { logicalLine } from '../../utils/ClassMemberScan'; // #853: shared, was local
 import * as fs from 'fs';
 import * as nodePath from 'path';
 import { resolveMemberHeaderTokenForUri } from '../../utils/MemberHeaderResolver';
@@ -20,16 +20,6 @@ import { resolveMemberHeaderTokenForUri } from '../../utils/MemberHeaderResolver
 const logger = LoggerManager.getLogger('MapDeclarationDiagnostics');
 logger.setLevel('error');
 
-/**
- * A prototype or PROCEDURE line with its `|` continuation lines joined in. The signature
- * checks below read a declaration and an implementation from their first line; for one
- * continued with `|` the parameter list never closes on that line, so it read as no
- * parameters at all: a mismatch when only one side was continued, and a vacuous match
- * when both were.
- */
-function logicalLine(lines: string[], k: number): string {
-    return lines[k] === undefined ? '' : withContinuations(lines, k);
-}
 
 /** Resolve a bare CLW filename (as stored in MODULE token.referencedFile) to an
  *  absolute path using the solution's redirection parser.  Returns null if it

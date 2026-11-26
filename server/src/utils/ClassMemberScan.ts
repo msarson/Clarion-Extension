@@ -45,6 +45,16 @@ export function withContinuations(lines: string[], k: number): string {
 }
 
 /**
+ * #853 — a statement read whole from line `k`: withContinuations, and '' for a line past the
+ * end. What the signature readers compare (MAP checks, the RETURN check, overload selection,
+ * the member locator's parameter counts), so a declaration continued with `|` reads the same
+ * as one written on a single line.
+ */
+export function logicalLine(lines: string[], k: number): string {
+    return lines[k] === undefined ? '' : withContinuations(lines, k);
+}
+
+/**
  * The kind of structure a member was found in. Carried on MemberInfo so a
  * consumer can describe the member accurately: a QUEUE/GROUP member is a field,
  * not a "Class Property". Optional because not every producer of a MemberInfo

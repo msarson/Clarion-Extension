@@ -20,6 +20,7 @@ import * as path from 'path';
 import { clarionSourceCandidates, moduleTargetMatchesFile } from './ClarionSourceNaming';
 import { ScopeAnalyzer } from './ScopeAnalyzer';
 import { readSourceText } from './SourceText'; // #879
+import { logicalLine } from './ClassMemberScan'; // #853
 
 const logger = LoggerManager.getLogger("CrossFileResolver");
 logger.setLevel("error");
@@ -314,7 +315,7 @@ export class CrossFileResolver {
                             const implParams = ProcedureSignatureUtils.extractImplementationParameterTypes(signature, true);
 
                             for (const decl of procedureDecls) {
-                                const declSignature = lines[decl.line].trim();
+                                const declSignature = logicalLine(lines, decl.line).trim(); // #853: a continued overload whole
                                 const declParams = ProcedureSignatureUtils.extractParameterTypes(declSignature);
 
                                 if (ProcedureSignatureUtils.parametersMatch(implParams, declParams)) {
@@ -573,7 +574,7 @@ export class CrossFileResolver {
                         const lines = content.split('\n');
                         const implParams = ProcedureSignatureUtils.extractImplementationParameterTypes(signature, true);
                         for (const d of procedureDecls) {
-                            const declParams = ProcedureSignatureUtils.extractParameterTypes(lines[d.line].trim());
+                            const declParams = ProcedureSignatureUtils.extractParameterTypes(logicalLine(lines, d.line).trim()); // #853
                             if (ProcedureSignatureUtils.parametersMatch(implParams, declParams)) {
                                 decl = d;
                                 break;
