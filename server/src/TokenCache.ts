@@ -64,9 +64,10 @@ export class TokenCache {
 
     /** #484 — extensions that are never Clarion source; getTokensForClosedFile returns [] for them.
      *  Besides binaries, the sources of other languages a project may compile and a MODULE may
-     *  name: assembler (`MODULE('x.a')`), C and C++ (`MODULE('x.cpp')`, a .cwproj Compile item). */
+     *  name: assembler (`MODULE('x.a')`, `.asm`, `.s`), C and C++ (`MODULE('x.cpp')`, a .cwproj
+     *  Compile item; `.cc`, `.cxx`, `.hpp`, `.hh`, `.hxx`, #891). */
     public static readonly NON_SOURCE_EXTENSION =
-        /\.(dll|lib|exe|obj|res|pdb|ico|bmp|png|jpg|jpeg|gif|cur|app|dct|tps|tpsx|zip|7z|rar|msi|chm|pdf|a|c|cpp|h)$/i;
+        /\.(dll|lib|exe|obj|res|pdb|ico|bmp|png|jpg|jpeg|gif|cur|app|dct|tps|tpsx|zip|7z|rar|msi|chm|pdf|a|c|cpp|cc|cxx|h|hpp|hh|hxx|asm|s)$/i;
 
     /** #260 — test/diagnostics visibility into the closed-file cache size. */
     public get closedFileCacheSize(): number {
