@@ -7,6 +7,7 @@ import { StructureViewProvider } from '../views/StructureViewProvider';
 import LoggerManager from '../utils/LoggerManager';
 import * as path from 'path';
 import { attributeEditLinksFeature, trustAttributeEditLinks } from '../hover/AttributeEditCommand';
+import { clarionFilesEncoding } from '../config/SourceEncoding';
 
 const logger = LoggerManager.getLogger("LanguageServerManager");
 logger.setLevel("error");
@@ -74,6 +75,9 @@ export async function startLanguageServer(
         initializationOptions: {
             settings: workspace.getConfiguration('clarion'),
             lookupExtensions: lookupExtensions,
+            // #879: the encoding VS Code decodes Clarion files with, so the server reads the files
+            // it opens itself (INCLUDEs, MEMBER parents, the index) the same way.
+            sourceEncoding: clarionFilesEncoding(),
             // #289: announce the configured solution INSIDE the initialize request itself, so the
             // server knows a solution is coming at t≈0 — the clarion/solutionPending notification
             // proved racy (it queues behind whatever the busy event loop is processing and lost to

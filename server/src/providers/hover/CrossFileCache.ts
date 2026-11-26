@@ -5,6 +5,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from '../../logger';
 import { pathToCanonicalUri } from '../../utils/UriUtils';
+import { readSourceTextAsync } from '../../utils/SourceText'; // #879
 
 const logger = LoggerManager.getLogger("CrossFileCache");
 logger.setLevel("error");
@@ -84,7 +85,7 @@ export class CrossFileCache {
             
             // Cache miss or stale - read file
             logger.info(`❌ Cache MISS for: ${path.basename(normalizedPath)} (reading from disk)`);
-            const fileContent = await fs.promises.readFile(normalizedPath, 'utf-8');
+            const fileContent = await readSourceTextAsync(normalizedPath);
             const document = TextDocument.create(
                 `file:///${normalizedPath.replace(/\\/g, '/')}`,
                 'clarion',

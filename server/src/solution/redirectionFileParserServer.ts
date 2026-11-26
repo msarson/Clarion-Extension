@@ -6,6 +6,7 @@ import * as os from "os";
 import LoggerManager from "../logger";
 import { serverSettings } from "../serverSettings";
 import { DirectoryFileIndex } from "./DirectoryFileIndex";
+import { readSourceText, readSourceTextAsync } from '../utils/SourceText'; // #879
 
 const logger = LoggerManager.getLogger("RedirectionParserServer");
 logger.setLevel("error");
@@ -542,7 +543,7 @@ export class RedirectionFileParserServer {
       }
 
       logger.info(`Parsing redirection file: ${redFileToParse}`);
-      const content = fs.readFileSync(redFileToParse, "utf-8");
+      const content = readSourceText(redFileToParse);
       const redPath = path.dirname(redFileToParse);
       let currentSection: string | null = null;
 
@@ -691,7 +692,7 @@ export class RedirectionFileParserServer {
       }
 
       logger.info(`Parsing redirection file: ${redFileToParse}`);
-      const content = await fs.promises.readFile(redFileToParse, "utf-8");
+      const content = await readSourceTextAsync(redFileToParse);
       const redPath = path.dirname(redFileToParse);
       let currentSection: string | null = null;
 

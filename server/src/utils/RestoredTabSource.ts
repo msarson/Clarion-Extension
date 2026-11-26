@@ -1,4 +1,5 @@
 import * as fs from 'fs';
+import { decodeSource } from './SourceText';
 
 /**
  * #696 — a restored editor tab that VS Code has not instantiated is pulled for diagnostics by URI
@@ -12,17 +13,13 @@ export function isClarionSourcePath(filePath: string): boolean {
 }
 
 /**
- * The file's text as the editor would most likely show it. Valid UTF-8 is read as UTF-8; anything
- * else as Latin-1, since generated Clarion is often ANSI and a UTF-8 read would turn each high-bit
- * byte into U+FFFD — which the #629 check then reports as a wrongly decoded file the user never
+ * The file's text as the editor would show it: the rule every file read from disk follows
+ * (#879, SourceText.decodeSource). An ANSI file is never read as UTF-8 here, or each high-bit
+ * byte would become U+FFFD and the #629 check would report a wrongly decoded file the user never
  * opened.
  */
 export function decodeSourceBytes(bytes: Uint8Array): string {
-    try {
-        return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-    } catch {
-        return Buffer.from(bytes).toString('latin1');
-    }
+    return decodeSource(Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength));
 }
 
 /** Read an unopened source for diagnostics: its text and modification time, or null. */

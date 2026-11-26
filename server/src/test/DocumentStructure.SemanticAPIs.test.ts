@@ -1511,6 +1511,42 @@ CODE`;
             assert.strictEqual(codeMarker, null, 'Should return null when no CODE');
         });
         
+        // #856: an indented CODE, the usual way it is written, is an ExecutionMarker
+        // token; the tests above all write CODE at column 0, which hid the gap.
+        test('should find an indented CODE marker (#856)', () => {
+            const code = [
+                '  PROGRAM',
+                '  MAP',
+                '  END',
+                'GlobalVar     LONG',
+                '  CODE   ! main program',
+                '  GlobalVar = 1'
+            ].join('\r\n');
+            const structure = new DocumentStructure(new ClarionTokenizer(code).tokenize());
+            structure.process();
+            assert.strictEqual(structure.getFirstCodeMarker()?.line, 4);
+        });
+
+        test('should not include procedure-local labels after an indented program CODE (#856)', () => {
+            const code = [
+                '  PROGRAM',
+                '  MAP',
+                'Proc1 PROCEDURE',
+                '  END',
+                'GlobalVar     LONG',
+                '  CODE',
+                '  Proc1()',
+                '',
+                'Proc1 PROCEDURE',
+                'LocalVar      LONG',
+                '  CODE',
+                '  LocalVar = GlobalVar'
+            ].join('\r\n');
+            const structure = new DocumentStructure(new ClarionTokenizer(code).tokenize());
+            structure.process();
+            assert.deepStrictEqual(structure.getGlobalVariables().map(t => t.value.toUpperCase()), ['GLOBALVAR']);
+        });
+
         test('should find first CODE marker', () => {
             const code = `GlobalVar STRING(20)
 

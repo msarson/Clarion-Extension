@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { addItem, listItems, removeItem } from '../project/CwprojItems';
+import { addItem, listItems, removeItem } from '../../../common/CwprojItems';
 
 /**
  * #803 — the Solution View shows each project's folders as the Clarion IDE does. "Projects to

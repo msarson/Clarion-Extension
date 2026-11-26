@@ -15,7 +15,7 @@ import * as path from "path";
  * `ConfigDir` is not an MSBuild concept — it appears nowhere in
  * Microsoft.Common.targets and `msbuild /help` has no such switch. It is an ordinary
  * property that `SoftVelocity.Build.Clarion.targets` hands to its own tasks
- * (`Redirection` ×3, `CWClean`) and never defines itself, so it can only come from the
+ * (the `CW` compile, `Redirection` ×3, `CWClean`; #863) and never defines itself, so it can only come from the
  * caller. It names the FOLDER holding ClarionProperties.xml, which is where the
  * compile target's version, its redirection file name and its macros are read from.
  *
@@ -28,6 +28,47 @@ export function buildConfigDirArg(clarionPropertiesFile: string | undefined | nu
     // #708 — bare: MSBuild is started without a shell, and the launcher quotes an argument
     // containing a space itself. A quote of our own reaches MSBuild literally.
     return `/property:ConfigDir=${path.dirname(clarionPropertiesFile)}`;
+}
+
+/**
+ * #863 — the `/property:clarion_version=` argument naming the chosen version, or an empty
+ * string when none is chosen.
+ *
+ * The targets hand `Version="$(clarion_version)"` to the `CW` compile, `Redirection` and
+ * `CWClean`, so it selects which of ConfigDir's registered versions supplies the compiler,
+ * the redirection file and the macros. Without it the compile picks a version matching
+ * ClarionBinPath, which cannot tell apart two registered versions sharing one bin.
+ *
+ * Passed only when it is safe; otherwise omitted, which still builds with the version
+ * ClarionBinPath belongs to, and `skipped` says why:
+ * - the properties file must register that exact name (the solution loader matches it
+ *   exactly too): the CW task fails a name it cannot find;
+ * - that version's own bin must be ClarionBinPath: a version from another install than
+ *   ClarionBinPath's crashes MSBuild, and the two can disagree while a solution is
+ *   still loading;
+ * - no `;` or `,`, which MSBuild would split into further properties.
+ */
+export function buildClarionVersionArg(
+    clarionVersion: string | undefined | null,
+    registeredVersions: ReadonlyArray<{ name: string; bin: string | undefined }> | null,
+    clarionBinPath: string
+): { arg: string; skipped?: string } {
+    const version = (clarionVersion ?? '').trim();
+    if (!version) return { arg: "" };
+    if (/[;,]/.test(version)) return { arg: "", skipped: `"${version}" contains ; or , which MSBuild would split` };
+    const entry = registeredVersions?.find(v => v.name === version);
+    if (!entry) return { arg: "", skipped: `"${version}" is not registered in the properties file` };
+    if (!entry.bin || !sameFolder(entry.bin, clarionBinPath)) {
+        return { arg: "", skipped: `"${version}" belongs to ${entry.bin ?? 'no bin'}, not ClarionBinPath ${clarionBinPath}` };
+    }
+    // #708 — bare, like ConfigDir: the launcher quotes an argument containing a space.
+    return { arg: `/property:clarion_version=${version}` };
+}
+
+/** Windows folder paths compared without case or a trailing separator. */
+function sameFolder(a: string, b: string): boolean {
+    const norm = (p: string) => path.win32.normalize(p.trim()).replace(/[\\/]+$/, '').toLowerCase();
+    return norm(a) === norm(b);
 }
 
 /** #708 — an argument as it would be typed at a prompt: quoted when it contains whitespace. */

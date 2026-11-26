@@ -17,6 +17,18 @@ import { SolutionManager } from '../../solution/solutionManager';
 import LoggerManager from '../../logger';
 import * as fs from 'fs';
 import * as path from 'path';
+import { readSourceText } from '../../utils/SourceText'; // #879
+
+/** #882 — the fields a QUEUE(parent) or GROUP(parent) inherits; `count` is undefined when the parent was not found. */
+interface InheritedFields {
+    parent: string;
+    /** Fields from the parent and its ancestors; undefined when the parent could not be counted. */
+    count?: number;
+    /** An ancestor further up the chain that was not found. */
+    missing?: string;
+    /** The chain names a parent seen already, so it was not followed round. */
+    loops?: boolean;
+}
 
 const logger = LoggerManager.getLogger("VariableHoverResolver");
 logger.setLevel("error");
@@ -151,7 +163,8 @@ export class VariableHoverResolver {
         if (scopeInfo) {
             markdown.push(structureKind ? `${scopeIcon} ${scopeWord} ${structureKind} structure` : `${scopeIcon} ${scopeWord} variable`);
             if (structureKind) {
-                const facts = this.describeStructure(symbolInfo.token, structureKind, tokens, document);
+                const inherited = await this.inheritedFields(symbolInfo.token, structureKind, tokens, document);
+                const facts = this.describeStructure(symbolInfo.token, structureKind, tokens, document, inherited);
                 if (facts) {
                     markdown.push(``);
                     markdown.push(facts);
@@ -341,10 +354,12 @@ export class VariableHoverResolver {
     /** #656: the global card with its LIKE resolution. */
     private async globalCard(globalVar: Token, tokens: Token[], document: TextDocument, hoverLine?: number): Promise<Hover> {
         const like = await this.like.resolve(document.uri, globalVar.line, document);
-        return this.buildGlobalVariableHover(globalVar, tokens, document, hoverLine, like ?? undefined);
+        const structureKind = this.structureKindOf(globalVar, tokens);
+        const inherited = structureKind ? await this.inheritedFields(globalVar, structureKind, tokens, document) : null;
+        return this.buildGlobalVariableHover(globalVar, tokens, document, hoverLine, like ?? undefined, inherited);
     }
 
-    private buildGlobalVariableHover(globalVar: Token, tokens: Token[], document: TextDocument, hoverLine?: number, like?: LikeResolution): Hover {
+    private buildGlobalVariableHover(globalVar: Token, tokens: Token[], document: TextDocument, hoverLine?: number, like?: LikeResolution, inherited?: InheritedFields | null): Hover {
         const typeInfo = SymbolFinderService.extractTypeInfo(globalVar, tokens);
 
         // Check if this variable is inside a CLASS or INTERFACE structure
@@ -419,7 +434,7 @@ export class VariableHoverResolver {
                         : `${scopeWord} variable`;
             markdown.push(`${scopeIcon} ${scopeLabel}`);
             if (structureKind) {
-                const facts = this.describeStructure(globalVar, structureKind, tokens, document);
+                const facts = this.describeStructure(globalVar, structureKind, tokens, document, inherited);
                 if (facts) {
                     markdown.push(``);
                     markdown.push(facts);
@@ -490,9 +505,10 @@ export class VariableHoverResolver {
     /**
      * #486 — one line of facts for a structure card, from the declaration the
      * tokenizer already parsed. FILE: driver, PRE prefix, keys, memos/blobs and
-     * record fields. QUEUE/GROUP: PRE prefix and field count. Nothing for the rest.
+     * record fields. QUEUE/GROUP: PRE prefix and field count, counting the fields a
+     * QUEUE(parent) or GROUP(parent) inherits (#882). Nothing for the rest.
      */
-    private describeStructure(labelToken: Token, kind: string, tokens: Token[], document: TextDocument): string {
+    private describeStructure(labelToken: Token, kind: string, tokens: Token[], document: TextDocument, inherited?: InheritedFields | null): string {
         const opener = tokens.find(t =>
             t.line === labelToken.line && t.start > labelToken.start &&
             t.type === TokenType.Structure && t.finishesAt !== undefined);
@@ -511,9 +527,7 @@ export class VariableHoverResolver {
         }
 
         // Column-0 labels declared inside this structure, with the keyword that follows each.
-        const members = tokens.filter(t =>
-            t.line > opener.line && t.line < opener.finishesAt! &&
-            t.start === 0 && t.type === TokenType.Label);
+        const members = this.memberLabels(opener, tokens);
         const followerOf = (t: Token) => tokens.find(n => n.line === t.line && n.start > t.start)?.value.toUpperCase() ?? '';
         const plural = (n: number, word: string) => `${n} ${word}${n === 1 ? '' : 's'}`;
 
@@ -532,10 +546,122 @@ export class VariableHoverResolver {
             return parts.length ? `🗄️ ${parts.join(' · ')}` : '';
         }
         if (kind === 'QUEUE' || kind === 'GROUP') {
-            parts.push(plural(members.length, 'field'));
+            parts.push(this.describeFieldCount(members.length, inherited));
             return `🗂️ ${parts.join(' · ')}`;
         }
         return parts.length ? `🗂️ ${parts.join(' · ')}` : '';
+    }
+
+    /**
+     * #882 — "4 fields (3 from `BaseQ`)". What could not be counted is said, never taken as none:
+     * a parent not found, an ancestor further up not found, or parents that name each other.
+     */
+    private describeFieldCount(own: number, inherited?: InheritedFields | null): string {
+        const plural = (n: number) => `${n} field${n === 1 ? '' : 's'}`;
+        if (!inherited) return plural(own);
+        if (inherited.count === undefined) {
+            return `${plural(own)} + the fields of \`${inherited.parent}\` (${inherited.loops ? 'the parents loop' : 'not found'})`;
+        }
+        const notes = [`${inherited.count} from \`${inherited.parent}\``];
+        if (inherited.loops) notes.push('the parents loop');
+        let text = `${plural(own + inherited.count)} (${notes.join('; ')})`;
+        if (inherited.missing) text += ` + the fields of \`${inherited.missing}\` (not found)`;
+        return text;
+    }
+
+    /** Column-0 labels declared inside a structure, nested structures' fields included. */
+    private memberLabels(opener: Token, tokens: Token[]): Token[] {
+        return tokens.filter(t =>
+            t.line > opener.line && t.line < opener.finishesAt! &&
+            t.start === 0 && t.type === TokenType.Label);
+    }
+
+    /** #882 — how many fields a structure declares itself, or undefined when the label opens no structure. */
+    private ownFieldCount(labelToken: Token, tokens: Token[]): number | undefined {
+        const opener = this.structureOpener(labelToken, tokens);
+        return opener ? this.memberLabels(opener, tokens).length : undefined;
+    }
+
+    private structureOpener(labelToken: Token, tokens: Token[]): Token | undefined {
+        return tokens.find(t =>
+            t.line === labelToken.line && t.start > labelToken.start &&
+            t.type === TokenType.Structure && t.finishesAt !== undefined);
+    }
+
+    /**
+     * #882 — a QUEUE(parent) or GROUP(parent) begins with the parent's fields (Language Reference,
+     * QUEUE: the parent may be a GROUP, QUEUE or RECORD, TYPE or not). Returns the parent's name and
+     * how many fields come from it, counting the parent's own parent in turn. `count` is undefined
+     * when the parent cannot be counted; `missing` names an ancestor further up that was not found.
+     * Null when the structure names no parent. Only the declaration's own line is read: a parent
+     * written on a `|` continuation line is not seen, and the card keeps the structure's own count.
+     */
+    private async inheritedFields(
+        labelToken: Token, kind: string, tokens: Token[], document: TextDocument,
+        visited: Set<string> = new Set([labelToken.value.toLowerCase()]),
+    ): Promise<InheritedFields | null> {
+        if (kind !== 'QUEUE' && kind !== 'GROUP') return null;
+        const declLine = document.getText({ start: { line: labelToken.line, character: 0 }, end: { line: labelToken.line + 1, character: 0 } });
+        const m = /^[A-Za-z_][\w:]*\s+(?:QUEUE|GROUP)\s*\(\s*([A-Za-z_][\w:]*)\s*\)/i.exec(declLine);
+        if (!m) return null;
+        const parent = m[1];
+        const key = parent.toLowerCase();
+        // A parent seen already on this chain (or a chain deeper than any real one) is not followed.
+        if (visited.has(key) || visited.size >= 8) return { parent, loops: true };
+        visited.add(key);
+
+        const found = await this.findStructureLabel(parent, tokens, document);
+        const own = found ? this.ownFieldCount(found.label, found.tokens) : undefined;
+        if (!found || own === undefined) return { parent };
+        const parentKind = this.structureKindOf(found.label, found.tokens) ?? '';
+        const deeper = await this.inheritedFields(found.label, parentKind, found.tokens, found.document, visited);
+        if (!deeper) return { parent, count: own };
+        return {
+            parent,
+            count: own + (deeper.count ?? 0),
+            missing: deeper.count === undefined && !deeper.loops ? deeper.parent : deeper.missing,
+            loops: deeper.loops,
+        };
+    }
+
+    /** #882 — a structure's label token: in this file first, else through the structure index (the project, or the file's INCLUDE chain). */
+    private async findStructureLabel(
+        name: string, tokens: Token[], document: TextDocument,
+    ): Promise<{ label: Token; tokens: Token[]; document: TextDocument } | null> {
+        const lower = name.toLowerCase();
+        const isStructureLabel = (t: Token, ts: Token[]) =>
+            t.type === TokenType.Label && t.start === 0 && t.value.toLowerCase() === lower &&
+            this.ownFieldCount(t, ts) !== undefined;
+        const local = tokens.find(t => isStructureLabel(t, tokens)) ?? this.findPrefixedRecord(name, tokens, document);
+        if (local) return { label: local, tokens, document };
+
+        const info = await this.symbolFinder.findIndexedTypeDeclaration(name, document);
+        if (!info || !this.crossFileCache) return null;
+        const loaded = await this.crossFileCache.getOrLoadDocument(info.filePath);
+        if (!loaded) return null;
+        const label = loaded.tokens.find(t => t.line === info.line && isStructureLabel(t, loaded.tokens));
+        return label ? { label, tokens: loaded.tokens, document: loaded.document } : null;
+    }
+
+    /**
+     * #882 — `ORD:Record`: a FILE's RECORD named through the FILE's prefix. The RECORD's own label
+     * is `Record`; the prefix picks which FILE's, as `PRE(ORD)` on the FILE line says.
+     */
+    private findPrefixedRecord(name: string, tokens: Token[], document: TextDocument): Token | undefined {
+        const colon = name.lastIndexOf(':');
+        if (colon <= 0) return undefined;
+        const prefix = name.slice(0, colon).toLowerCase();
+        const base = name.slice(colon + 1).toLowerCase();
+        const lineText = (line: number) => document.getText({ start: { line, character: 0 }, end: { line: line + 1, character: 0 } });
+        return tokens.find(t => {
+            if (t.type !== TokenType.Label || t.start !== 0 || t.value.toLowerCase() !== base) return false;
+            if (this.structureOpener(t, tokens)?.value.toUpperCase() !== 'RECORD') return false;
+            const file = tokens.find(f =>
+                f.type === TokenType.Structure && f.value.toUpperCase() === 'FILE' &&
+                f.line < t.line && f.finishesAt !== undefined && f.finishesAt > t.line);
+            const pre = file ? /\bPRE\s*\(\s*([A-Za-z_][\w:]*)\s*\)/i.exec(lineText(file.line)) : null;
+            return pre?.[1].toLowerCase() === prefix;
+        });
     }
 
     private renderDeclaredValueSummary(name: string, type: string, value: string | undefined): string {
@@ -561,7 +687,7 @@ export class VariableHoverResolver {
         if (!equatesPath || !fs.existsSync(equatesPath)) return null;
 
         try {
-            const content = fs.readFileSync(equatesPath, 'utf-8');
+            const content = readSourceText(equatesPath);
             const uri = `file:///${equatesPath.replace(/\\/g, '/')}`;
             let doc: TextDocument;
             let equatesTokens: Token[];

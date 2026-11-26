@@ -17,7 +17,7 @@ function readCachedOrDiskFile(fileUri: string): string {
         ?? TokenCache.getInstance().getDocumentTextByUriCaseInsensitive(fileUri);
     if (cached !== null && cached !== undefined) return cached;
     const diskPath = decodeURIComponent(fileUri.replace('file:///', ''));
-    return fs.readFileSync(diskPath, 'utf-8');
+    return readSourceText(diskPath);
 }
 import LoggerManager from '../../logger';
 import { DocCommentReader, DocComment } from '../../utils/DocCommentReader';
@@ -26,6 +26,8 @@ import { EventEntry } from '../../utils/EventService';
 import { DirectiveEntry } from '../../utils/DirectiveService';
 import { KeywordEntry } from '../../utils/KeywordService';
 import { ProcedureSignatureUtils } from '../../utils/ProcedureSignatureUtils';
+import { DeclaredValueParser } from '../../tokenizer/DeclaredValueParser';
+import { readSourceText } from '../../utils/SourceText'; // #879
 
 const logger = LoggerManager.getLogger("HoverFormatter");
 logger.setLevel("error");
@@ -261,7 +263,7 @@ export class HoverFormatter {
         const sameFile = (uri: string) => !!document &&
             decodeURIComponent(uri).toLowerCase() === decodeURIComponent(document.uri).toLowerCase();
         const readLines = (uri: string, path: string) =>
-            sameFile(uri) ? document!.getText().split('\n') : fs.readFileSync(path, 'utf-8').split('\n');
+            sameFile(uri) ? document!.getText().split('\n') : readSourceText(path).split('\n');
         const { category: memberCategory } =
             describeMemberOwner(declarationInfo.structureType, declarationInfo.isInterface, true);
         const header = this.buildMethodHeader(name, declarationInfo.type, memberCategory, 'Method', declarationInfo.className, true);
@@ -348,7 +350,7 @@ export class HoverFormatter {
         let docComment: DocComment | null = null;
         try {
             const declUri = decodeURIComponent(declInfo.file.replace('file:///', ''));
-            const declContent = fs.readFileSync(declUri, 'utf-8');
+            const declContent = readSourceText(declUri);
             docComment = DocCommentReader.read(declContent.split('\n'), declInfo.line);
         } catch { }
         if (implLocation) {
@@ -373,9 +375,12 @@ export class HoverFormatter {
      * Parses modifiers from a Clarion type/signature string.
      * Attributes (PRIVATE, PROTECTED, VIRTUAL, DERIVED) can appear anywhere after the parameter list.
      * The first unrecognized token after the params is treated as the return type.
+     * The declaration arrives as written, so a trailing `!` comment is stripped first: split on commas, it
+     * became the return type ("LONG  !Rows found") or hid an attribute ("DERIVED  !note" is not DERIVED).
      */
     private parseMethodModifiers(typeStr: string): { visibility: string; modifiers: string[]; returnType: string | null } {
         const KNOWN_NON_TYPES = new Set(['PRIVATE', 'PROTECTED', 'VIRTUAL', 'DERIVED', 'STATIC', 'PROC', 'PROCEDURE', 'FUNCTION']);
+        typeStr = DeclaredValueParser.stripTrailingComment(typeStr);
         let afterParams = typeStr;
 
         // Find content after the closing paren of the parameter list
@@ -446,7 +451,7 @@ export class HoverFormatter {
                     mapContent = currentDocument.getText();
                 } else if (!mapDecl.uri.startsWith('test://')) {
                     const mapUri = decodeURIComponent(mapDecl.uri.replace('file:///', ''));
-                    mapContent = fs.readFileSync(mapUri, 'utf-8');
+                    mapContent = readSourceText(mapUri);
                 } else {
                     mapContent = '';
                 }
@@ -466,7 +471,7 @@ export class HoverFormatter {
                     implContent = currentDocument.getText();
                 } else if (!procImpl.uri.startsWith('test://')) {
                     const implUri = decodeURIComponent(procImpl.uri.replace('file:///', ''));
-                    implContent = fs.readFileSync(implUri, 'utf-8');
+                    implContent = readSourceText(implUri);
                 } else {
                     implContent = '';
                 }
@@ -587,7 +592,7 @@ export class HoverFormatter {
                     throw new Error('Cannot read test:// URI from filesystem');
                 } else {
                     mapUri = decodeURIComponent(mapDecl.uri.replace('file:///', ''));
-                    mapContent = fs.readFileSync(mapUri, 'utf-8');
+                    mapContent = readSourceText(mapUri);
                 }
 
                 const mapLines = mapContent.split('\n');
@@ -934,6 +939,18 @@ export class HoverFormatter {
         const label = `${this.locationBaseName(fileOrUri)}:${lineNo}`;
         const uri = this.toFileUri(fileOrUri);
         return uri ? `[${label}](${uri}#L${lineNo})` : label;
+    }
+
+    /**
+     * A link to a line of the SAME document, labelled with the bare line number (no file name: the
+     * target is the file the card is shown in). `title` becomes the link's tooltip, which a client can
+     * also key styling on. Plain line number when the location isn't openable, as `locationLink`.
+     */
+    lineLink(fileOrUri: string, line0: number, title?: string): string {
+        const lineNo = line0 + 1;
+        const uri = this.toFileUri(fileOrUri);
+        const titlePart = title ? ` "${title.replace(/"/g, "'")}"` : '';
+        return uri ? `[${lineNo}](${uri}#L${lineNo}${titlePart})` : `${lineNo}`;
     }
 
     /** File name for a footer label, from either a `file:///` URI or a plain path (percent-decoded). */

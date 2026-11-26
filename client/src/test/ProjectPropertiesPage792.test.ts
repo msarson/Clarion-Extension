@@ -1,7 +1,7 @@
 import * as assert from 'assert';
-import { listItems } from '../project/CwprojItems';
+import { listItems } from '../../../common/CwprojItems';
 import { buildPageState, editItems } from '../project/ProjectPropertiesPage';
-import { targetsProperties } from '../project/ProjectPropertyFields';
+import { targetsProperties } from '../../../common/ProjectPropertyFields';
 
 /**
  * #792 — what the Project Properties page shows for a configuration: each IDE page's groups and

@@ -13,6 +13,8 @@ import { OmitCompileDetector, DirectiveBlock } from '../utils/OmitCompileDetecto
 import { resolvePrefixedName, prefixedNameStartsLine, continuesPreviousLine } from '../utils/PrefixChain';
 import { RESERVED_WORDS as RESERVED_LABEL_WORDS } from '../utils/ReservedWords';
 import { TextDocument } from 'vscode-languageserver-textdocument';
+import { isBareExecutionMarker } from '../utils/ExecutionMarker';
+import { tokensOnLine } from '../utils/TokenLineIndex';
 
 /**
  * Extended DocumentSymbol with Clarion-specific metadata
@@ -383,7 +385,9 @@ export class ClarionDocumentSymbolProvider {
             }
 
             // Check if current token is CODE execution marker - stop variable processing
-            if (type === TokenType.ExecutionMarker && value.toUpperCase() === "CODE") {
+            // #865 — only a CODE alone on its line; `code = 1` is a statement
+            if (type === TokenType.ExecutionMarker && value.toUpperCase() === "CODE" &&
+                isBareExecutionMarker(token, l => tokensOnLine(tokens, l))) {
                 pastCodeStatement = true;
                 
                 // For method implementations, clear currentProcedure AND pop from parent stack
@@ -419,7 +423,8 @@ export class ClarionDocumentSymbolProvider {
                 // tokenizer splits at the colon, or a variable plainly called `Data`. Reopening
                 // declarations there made every following IF/OF/DO line an outline entry named
                 // after the expression with its operators dropped ("Loc:Flag AND01").
-                if (insideRoutine) {
+                // #865 — and only a DATA alone on its line: `data = 1` is a statement.
+                if (insideRoutine && isBareExecutionMarker(token, l => tokensOnLine(tokens, l))) {
                     pastCodeStatement = false;
                 }
                 continue;

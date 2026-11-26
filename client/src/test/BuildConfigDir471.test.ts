@@ -9,8 +9,8 @@ import { buildConfigDirArg } from "../utils/ClarionBuildArgs";
  * `ConfigDir` is NOT an MSBuild concept: it appears nowhere in
  * Microsoft.Common.targets, `msbuild /help` has no such switch, and MSBuild attaches
  * no meaning to the name. It is an ordinary property that
- * `SoftVelocity.Build.Clarion.targets` passes into its own tasks — `Redirection` three
- * times and `CWClean` once — and never defines itself, so it can only come from the
+ * `SoftVelocity.Build.Clarion.targets` passes into its own tasks — the `CW` compile,
+ * `Redirection` three times and `CWClean` once (#863) — and never defines itself, so it can only come from the
  * caller. `clarion.exe` / `clarioncl.exe` expose the same thing as a `/ConfigDir=`
  * switch.
  *

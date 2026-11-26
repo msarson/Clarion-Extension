@@ -16,7 +16,8 @@ suite('#733 OMIT body detection reads only the lines it needs', () => {
     const FILLER = 1000;
     const lines = [
         ...Array.from({ length: FILLER }, (_, i) => `Var${i}  LONG`),   // 0..999
-        "  OMIT('***')",                                                 // 1000
+        // A COMPILE: a terminator inside a string closes a skipped OMIT, but not a compiled block.
+        "  COMPILE('***')",                                              // 1000
         '  IF a',                                                        // 1001
         "  MESSAGE('***')",                                              // 1002 <- terminator only in a string
         '  ***',                                                         // 1003 <- the terminator
@@ -28,7 +29,7 @@ suite('#733 OMIT body detection reads only the lines it needs', () => {
         const tokens = new ClarionTokenizer(text).tokenize();
         const read: number[] = [];
         const blocks = OmitCompileDetector.findDirectiveBlocksInLines(tokens, lines.length, l => { read.push(l); return lines[l]; });
-        assert.deepStrictEqual(blocks.map(b => [b.type, b.startLine, b.endLine]), [['OMIT', 1000, 1003]]);
+        assert.deepStrictEqual(blocks.map(b => [b.type, b.startLine, b.endLine]), [['COMPILE', 1000, 1003]]);
         assert.deepStrictEqual(read, [1001, 1002, 1003], `read ${read.length} lines, from ${read[0]} to ${read[read.length - 1]}`);
     });
 

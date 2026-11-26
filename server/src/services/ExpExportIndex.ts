@@ -1,6 +1,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from '../logger';
+import { readSourceText } from '../utils/SourceText'; // #879
 
 const logger = LoggerManager.getLogger('ExpExportIndex');
 logger.setLevel('error');
@@ -116,7 +117,7 @@ export class ExpExportIndex {
 
         try {
             const stat = fs.statSync(expPath);
-            const content = fs.readFileSync(expPath, 'utf8');
+            const content = readSourceText(expPath);
             const exports = ExpExportIndex.parseExports(content);
             const data = ExpExportIndex.parseDataExports(content);
             const entry: ExpCacheEntry = { exports, data, expPath, mtimeMs: stat.mtimeMs, checkedAt: now };

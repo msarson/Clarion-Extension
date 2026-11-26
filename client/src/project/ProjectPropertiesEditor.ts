@@ -3,9 +3,9 @@ import * as fs from 'fs';
 import * as path from 'path';
 import LoggerManager from '../utils/LoggerManager';
 import { globalSettings } from '../globals';
-import { setProperty, setPropertyScope } from './CwprojProperties';
-import { PROJECT_PROPERTY_FIELDS, PROJECT_PROPERTY_TABS, SOURCE_PRAGMAS, targetsProperties } from './ProjectPropertyFields';
-import { addItem, includeFor } from './CwprojItems';
+import { setProperty, setPropertyScope } from '../../../common/CwprojProperties';
+import { PROJECT_PROPERTY_FIELDS, PROJECT_PROPERTY_TABS, SOURCE_PRAGMAS, targetsProperties } from '../../../common/ProjectPropertyFields';
+import { addItem, includeFor } from '../../../common/CwprojItems';
 import { buildPageState, editItems } from './ProjectPropertiesPage';
 import { minimalEdit, pageHtml as kitPage, scriptJson } from '../webview/PageKit';
 
@@ -112,6 +112,7 @@ export class ProjectPropertiesEditorProvider implements vscode.CustomTextEditorP
                     case 'addItem':
                     case 'removeItem':
                     case 'setPragma':
+                    case 'setGenerated':
                         await applyText(document, editItems(document.getText(), msg));
                         break;
                     case 'pickSource': {
@@ -294,17 +295,26 @@ function pageHtml(webview: vscode.Webview): string {
     }));
   }
 
+  // #880: a source's Generated mark, which Rename and the generated-code checks go by.
+  function generatedBox(i) {
+    const box = el('input', { type: 'checkbox', 'aria-label': 'Generated: ' + i.include,
+      title: 'The Clarion IDE generates this module from an app, so Rename leaves it alone. Clear it for a module you write yourself; it takes effect when the project is saved.',
+      onchange: e => vscode.postMessage({ type: 'setGenerated', kind: 'Compile', value: i.include, generated: e.target.checked }) });
+    box.checked = i.generated;
+    return box;
+  }
+
   function sources(s) {
     const compiled = el('section', {},
       el('h2', {}, 'Compiled sources · ' + s.compile.length),
       s.compile.length === 0 ? none('No source files.') : el('div', { class: 'table-wrap' }, el('table', {},
-        el('thead', {}, el('tr', {}, el('th', {}, 'File'), el('th', {}, ''), el('th', {}, 'Pragmas'), el('th', {}, ''))),
+        el('thead', {}, el('tr', {}, el('th', {}, 'File'), el('th', {}, 'Generated'), el('th', {}, 'Pragmas'), el('th', {}, ''))),
         el('tbody', {}, ...s.compile.flatMap(i => {
           const open = pragmasOpen.has(i.include.toLowerCase());
           const summary = pragmaSummary(i.pragmas);
           const row = el('tr', {},
             el('td', { class: 'file' }, i.include),
-            el('td', {}, i.generated ? el('span', { class: 'pill info', title: 'The Clarion IDE generates this module' }, 'Generated') : ''),
+            el('td', {}, generatedBox(i)),
             el('td', {}, el('button', { type: 'button', class: 'secondary', 'aria-expanded': open ? 'true' : 'false',
               title: 'This source’s own pragmas, as the Clarion IDE’s File Options',
               onclick: () => { const k = i.include.toLowerCase(); pragmasOpen.has(k) ? pragmasOpen.delete(k) : pragmasOpen.add(k); render(); } },

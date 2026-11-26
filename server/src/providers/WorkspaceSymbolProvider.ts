@@ -10,9 +10,22 @@ import { CancellationToken } from 'vscode-languageserver';
 import { cooperativeCheckpoint } from '../utils/cooperativeScan';
 import { pathToCanonicalUri } from '../utils/UriUtils';
 import LoggerManager from '../logger';
+import { readSourceText } from '../utils/SourceText'; // #879
 
 const logger = LoggerManager.getLogger("WorkspaceSymbolProvider");
 logger.setLevel("error");
+
+/** Outline grouping nodes, and the parts of a VIEW: nothing Ctrl+T should list. */
+const GROUPING_NODE = /^(?:MAP$|MODULE\b|PROJECT\b|JOIN\b)/i;
+
+/** Kinds whose display text starts with the label: `Label ( LONG p )`, `Label (Routine)`, `Label KEY(...)`. */
+const LABEL_FIRST_KINDS: SymbolKind[] = [SymbolKind.Function, SymbolKind.Method, SymbolKind.Key];
+
+/**
+ * An INDEX has the KEY's display shape, `Label INDEX(...)`, but kind Field, which a
+ * VIEW's `PROJECT(...)` also has, so it is matched by shape rather than by kind.
+ */
+const INDEX_SHAPE = /^\S+ INDEX\(/i;
 
 /**
  * Provides Workspace Symbol Search (Ctrl+T) — returns SymbolInformation[] for
@@ -62,7 +75,7 @@ export class WorkspaceSymbolProvider {
 
                     try {
                         if (!fs.existsSync(fullPath)) continue;
-                        const content = fs.readFileSync(fullPath, 'utf8');
+                        const content = readSourceText(fullPath);
                         const doc = TextDocument.create(uri, 'clarion', 1, content);
                         const tokens = this.tokenCache.getTokens(doc);
                         this.collectSymbols(tokens, uri, queryLower, results);
@@ -91,13 +104,17 @@ export class WorkspaceSymbolProvider {
         uri: string,
         queryLower: string,
         results: SymbolInformation[],
-        containerName?: string
+        parentLabel?: string
     ): void {
         for (const sym of symbols) {
-            if (!queryLower || sym.name.toLowerCase().includes(queryLower)) {
-                results.push(
-                    SymbolInformation.create(sym.name, sym.kind, sym.range, uri, containerName)
-                );
+            const label = this.labelOf(sym);
+            if (label !== undefined && (!queryLower || label.toLowerCase().includes(queryLower))) {
+                // A MAP or MODULE prototype's name is the bare label and its signature is in
+                // detail, which is what tells overloads apart. Other details are descriptions
+                // ("Global Procedure"), not declaration text.
+                const signature = sym.detail?.trimStart().startsWith('(') ? sym.detail : undefined;
+                const container = parentLabel ?? this.declarationText(sym, label) ?? signature;
+                results.push(SymbolInformation.create(label, sym.kind, sym.range, uri, container));
             }
             if (sym.children && sym.children.length > 0) {
                 this.flattenSymbols(
@@ -105,9 +122,41 @@ export class WorkspaceSymbolProvider {
                     uri,
                     queryLower,
                     results,
-                    sym.name
+                    label ?? parentLabel
                 );
             }
         }
+    }
+
+    /**
+     * #859 — the label a symbol is searched and listed by. A symbol's own name is the
+     * Outline's display text (`GROUP (Label),PRE(X)`, `Label LONG`, `Label ( LONG p )`).
+     * A window control has no label, so it keeps its text. Returns undefined for a
+     * grouping node, which is not listed. (No "Functions" or "Methods" containers are
+     * produced any more, so those names are real procedures and are listed.)
+     */
+    private labelOf(sym: ClarionDocumentSymbol): string | undefined {
+        if (sym._clarionVarName) return sym._clarionVarName;
+        if (LABEL_FIRST_KINDS.includes(sym.kind) || INDEX_SHAPE.test(sym.name)) {
+            return /^[^\s(]+/.exec(sym.name)?.[0];
+        }
+        return GROUPING_NODE.test(sym.name) ? undefined : sym.name;
+    }
+
+    /**
+     * The display text without the label: `GROUP,PRE(X)`, `LONG`, `( LONG p )`. Undefined
+     * for an empty parameter list, or when the text does not start with the label.
+     */
+    private declarationText(sym: ClarionDocumentSymbol, label: string): string | undefined {
+        const bracketed = ` (${label})`;
+        let text: string;
+        if (sym.name.includes(bracketed)) {
+            text = sym.name.replace(bracketed, '');
+        } else if (sym.name.toLowerCase().startsWith(label.toLowerCase())) {
+            text = sym.name.slice(label.length).trim();
+        } else {
+            return undefined;
+        }
+        return text && !/^\(\s*\)$/.test(text) ? text : undefined;
     }
 }

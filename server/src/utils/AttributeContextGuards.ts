@@ -84,9 +84,13 @@ export function isNestedInsideAttributeArgs(tokens: Token[], tokenIndex: number,
  * A declaration label can never legitimately BE an attribute application or a
  * builtin function call: those are things a name is used WITH, not something
  * a name-being-declared can itself be. So this holds regardless of which
- * attribute/builtin/keyword the label's text happens to collide with, and
+ * attribute/builtin the label's text happens to collide with, and
  * regardless of dotting/nesting/declaration-context — unlike the other guards
  * here, it needs no case-by-case reasoning about surrounding syntax.
+ *
+ * Not so for keywords: every column-0 token becomes a Label, and a reserved
+ * word may start a statement in column 0 (`RETURN`, `IF X = 1`). A caller
+ * checking a keyword excludes RESERVED_WORDS first (see HoverRouter.handleKeyword).
  *
  * Without this, `handleAttribute`'s declaration-context check (which asks "is
  * this line inside a GROUP/QUEUE/CLASS/control declaration", not "is this

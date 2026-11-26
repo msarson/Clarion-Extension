@@ -8,6 +8,7 @@ import { getCrossFileEpoch } from '../utils/crossFileEpoch';
 import { pathToCanonicalUri } from '../utils/UriUtils';
 import { StructureDeclarationIndexer } from '../utils/StructureDeclarationIndexer';
 import { MemberLocatorService } from './MemberLocatorService';
+import { readSourceText } from '../utils/SourceText'; // #879
 
 /** `LIKE(name)` as written, and the definition it takes when that resolves. */
 export interface LikeResolution {
@@ -152,7 +153,7 @@ export class LikeTypeResolver {
         if (text !== undefined && text !== null) return TextDocument.create(uri, 'clarion', 1, text);
         try {
             const fsPath = decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
-            return TextDocument.create(uri, 'clarion', 1, fs.readFileSync(fsPath, 'utf8'));
+            return TextDocument.create(uri, 'clarion', 1, readSourceText(fsPath));
         } catch {
             return undefined;
         }

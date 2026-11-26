@@ -4,6 +4,7 @@ import * as path from 'path';
 import { scanConditionalCompile } from './ConditionalCompile';
 import { resolveViaProjectRedirection } from './RedirectionResolution';
 import { isProjectDependency, projectDependencyHolds, projectSwitches } from '../solution/ProjectDefines';
+import { readSourceText } from './SourceText'; // #879
 
 /**
  * #807 — the INCLUDE lines of a file that sit in a COMPILE/OMIT block decided not to compile, for
@@ -80,7 +81,7 @@ function equatesOfFile(file: string, visiting: Set<string>, depth: number, deep:
     const mtimeMs = mtimeOf(file);
     if (mtimeMs === undefined) return undefined;
     let text: string;
-    try { text = fs.readFileSync(file, 'latin1'); } catch { return undefined; }
+    try { text = readSourceText(file); } catch { return undefined; }
     const own = new Map<string, number>([[file, mtimeMs]]);
     visiting.add(file.toLowerCase());
     const scan = scanConditionalCompile(text.split(/\r?\n/), deep ? {
@@ -126,16 +127,47 @@ export function compiledIncludeTest(filePath: string | null, text: string): { at
  * for it keeps its modification time.
  */
 /** Keyed by path; the text is held as its length and hash, not a copy (thousands of large modules). */
-const resultCache = new Map<string, { length: number; hash: string; deps: Map<string, number>; lines: Set<number> }>();
+interface Decision {
+    /** The INCLUDE lines in blocks that do not compile. */
+    lines: Set<number>;
+    /** Every line in a block that does not compile, as inclusive [first, last] pairs in order. */
+    code: number[];
+}
+const resultCache = new Map<string, Decision & { length: number; hash: string; deps: Map<string, number> }>();
 const hashOf = (text: string) => crypto.createHash('md5').update(text).digest('hex');
 const RESULT_CACHE_MAX = 2000;
+const NOTHING_INACTIVE: Decision = { lines: new Set(), code: [] };
 
 export function inactiveIncludeLines(filePath: string | null, text: string): Set<number> {
-    if (!DIRECTIVE_HINT.test(text)) return new Set();
+    return decide(filePath, text).lines;
+}
+
+/**
+ * #270 — for the diagnostics: whether a line sits in a COMPILE/OMIT block decided not to compile,
+ * from the same reading as the INCLUDEs (its conditions, the project's switches, the EQUATEs of
+ * earlier INCLUDEs). A block that cannot be decided counts as compiled. Always false, at no cost,
+ * for a file with no OMIT or COMPILE.
+ */
+export function inactiveCodeTest(filePath: string | null, text: string): (line: number) => boolean {
+    const code = decide(filePath, text).code;
+    if (code.length === 0) return () => false;
+    return line => {
+        // The last pair starting at or before the line.
+        let lo = 0, hi = code.length / 2 - 1, found = -1;
+        while (lo <= hi) {
+            const mid = (lo + hi) >> 1;
+            if (code[mid * 2] <= line) { found = mid; lo = mid + 1; } else hi = mid - 1;
+        }
+        return found >= 0 && line <= code[found * 2 + 1];
+    };
+}
+
+function decide(filePath: string | null, text: string): Decision {
+    if (!DIRECTIVE_HINT.test(text)) return NOTHING_INACTIVE;
     const key = filePath?.toLowerCase();
     const cached = key !== undefined ? resultCache.get(key) : undefined;
     const hash = key !== undefined ? hashOf(text) : '';
-    if (cached && cached.length === text.length && cached.hash === hash && [...cached.deps].every(([f, m]) => depHolds(f, m))) return cached.lines;
+    if (cached && cached.length === text.length && cached.hash === hash && [...cached.deps].every(([f, m]) => depHolds(f, m))) return cached;
 
     const visiting = new Set<string>(key ? [key] : []);
     // #812: a file a project compiles has its project's switches, worked out when first asked. It
@@ -146,7 +178,8 @@ export function inactiveIncludeLines(filePath: string | null, text: string): Set
     const deps = new Map<string, number>();
     // With the index built, read only the INCLUDEs that define a name, and only them.
     const deep = builtIndex() === undefined;
-    const scan = scanConditionalCompile(text.split(/\r?\n/), {
+    const textLines = text.split(/\r?\n/);
+    const scan = scanConditionalCompile(textLines, {
         lookup: name => { askedProject = true; return project.value(name); },
         includesDefining,
         equatesOfInclude: name => {
@@ -155,13 +188,21 @@ export function inactiveIncludeLines(filePath: string | null, text: string): Set
         },
     });
     const lines = new Set(scan.includes.filter(i => !i.active).map(i => i.line));
+    // Held as runs, not a line set: a module can hold thousands of lines that do not compile.
+    const code: number[] = [];
+    for (let line = 0; line < textLines.length; line++) {
+        if (!scan.isInactive(line)) continue;
+        if (code.length > 0 && code[code.length - 1] === line - 1) code[code.length - 1] = line;
+        else code.push(line, line);
+    }
     if (askedProject) for (const [f, m] of project.deps) deps.set(f, m);
+    const decision = { lines, code };
     if (key !== undefined) {
         resultCache.delete(key);
-        resultCache.set(key, { length: text.length, hash, deps, lines });
+        resultCache.set(key, { length: text.length, hash, deps, ...decision });
         if (resultCache.size > RESULT_CACHE_MAX) resultCache.delete(resultCache.keys().next().value!);
     }
-    return lines;
+    return decision;
 }
 
 /**

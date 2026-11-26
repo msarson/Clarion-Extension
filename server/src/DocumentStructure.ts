@@ -10,6 +10,7 @@ import { ViewDescriptor, ViewDescriptorParser } from './tokenizer/ViewDescriptor
 import { ControlService } from './utils/ControlService';
 import { ScopeResolver } from './scope/ScopeResolver';
 import { firstTokenAfterLine } from './utils/TokenLineIndex';
+import { isBareExecutionMarker } from './utils/ExecutionMarker';
 import { OmitCompileDetector } from './utils/OmitCompileDetector';
 
 /**
@@ -769,7 +770,9 @@ export class DocumentStructure {
                         break;
                     case "CODE":
                     case "DATA":
-                        this.handleExecutionMarker(token);
+                        // #855: `Code = 1` in a procedure body is an assignment to a
+                        // variable labelled Code, not a second CODE statement.
+                        if (this.isCodeOrDataStatement(token)) this.handleExecutionMarker(token);
                         break;
                     case "WHILE":
                     case "UNTIL":
@@ -788,7 +791,11 @@ export class DocumentStructure {
             ) {
                 // Special case: CODE/DATA at column 0 should be execution markers, not field labels
                 const upperValue = token.value.toUpperCase();
-                if ((token.type === TokenType.Label && token.start === 0) && (upperValue === 'CODE' || upperValue === 'DATA')) {
+                // #855: only when nothing but a comment follows it. `Code  CSTRING(16)`
+                // is a field or variable labelled Code (compiler-verified legal on C10
+                // and C12) and belongs to its structure like any other label.
+                if ((token.type === TokenType.Label && token.start === 0) && (upperValue === 'CODE' || upperValue === 'DATA') &&
+                    this.isCodeOrDataStatement(token)) {
                     if (DOCSTRUCT_TRACE) logger.info(`🔧 [ROUTINE-DATA-FIX] Handling CODE/DATA as execution marker: "${token.value}" at line ${token.line}`);
                     if (DOCSTRUCT_TRACE) logger.debug(`🔧 [ROUTINE-DATA-FIX] Handling CODE/DATA as execution marker: "${token.value}" at line ${token.line}`);
                     this.handleExecutionMarker(token);
@@ -872,7 +879,7 @@ export class DocumentStructure {
 
         // Walk every CASE / IF structure and record its OF / OROF / ELSE / ELSIF
         // clauses on the parent token's `branches` field.
-        this.populateBranches();
+        this.populateBranches(omitted);
     }
 
     /**
@@ -884,8 +891,12 @@ export class DocumentStructure {
      * Nested CASE/IF inside a branch are handled by their own `populateBranches`
      * pass — the outer pass skips their inner ConditionalContinuation tokens to
      * avoid double-attribution.
+     *
+     * `omitted` is the unconditional OMIT body flags from `process()`. A branch keyword in an
+     * OMIT body belongs only to a CASE/IF opened in that body, as the body's ENDs do: an ELSE
+     * left in an omitted block is not a branch of the CASE around the block.
      */
-    private populateBranches(): void {
+    private populateBranches(omitted: Uint8Array | undefined): void {
         const cases = this.structuresByType.get('CASE') ?? [];
         const ifs   = this.structuresByType.get('IF') ?? [];
         const containers: Token[] = [...cases, ...ifs];
@@ -916,10 +927,15 @@ export class DocumentStructure {
         const owned = new Map<Token, Token[]>();
         let open: Token[] = [];
         let next = 0;
+        const inOmit = (line: number): boolean => omitted !== undefined && omitted[line] === 1;
         for (const t of allBranchTokens) {
             while (next < byStart.length && byStart[next].line < t.line) open.push(byStart[next++]);
             if (open.some(c => c.finishesAt! <= t.line)) open = open.filter(c => c.finishesAt! > t.line);
+            // Only a structure opened in the OMIT body can own an omitted keyword. One opened in a
+            // body closes with it, so "opened in an OMIT body" here means this body.
+            const keywordOmitted = inOmit(t.line);
             for (const container of open) {
+                if (keywordOmitted && !inOmit(container.line)) continue;
                 const inNested = open.some(n =>
                     n !== container && n.line > container.line && n.finishesAt! < container.finishesAt!
                 );
@@ -1462,6 +1478,11 @@ export class DocumentStructure {
         return false;
     }
 
+    /** #855 — a CODE or DATA statement stands alone on its line (see utils/ExecutionMarker). */
+    private isCodeOrDataStatement(token: Token): boolean {
+        return isBareExecutionMarker(token, line => this.tokensByLine.get(line) ?? []);
+    }
+
     private handleExecutionMarker(token: Token): void {
         const currentProcedure = this.procedureStack[this.procedureStack.length - 1] ?? null;
         const currentRoutine = this.routineStack[this.routineStack.length - 1] ?? null;
@@ -1494,6 +1515,11 @@ export class DocumentStructure {
 
         for (const token of this.tokens) {
             const insideExecutionCode = this.procedureStack.length > 0;
+
+            // A CODE or DATA statement written at column 0 (the compiler accepts it) stays the
+            // execution marker: the outline and the diagnostics only look for ExecutionMarker.
+            // `Code  LONG` is not bare and still becomes a Label (#855).
+            if (token.type === TokenType.ExecutionMarker && this.isCodeOrDataStatement(token)) continue;
 
             if (!insideExecutionCode && token.start === 0 && 
                 token.type !== TokenType.Comment && 
@@ -2825,7 +2851,7 @@ export class DocumentStructure {
                 const upperValue = token.value.toUpperCase();
                 
                 // Skip keywords that might be tokenized as labels (DATA, CODE)
-                if (upperValue === 'DATA' || upperValue === 'CODE') {
+                if ((upperValue === 'DATA' || upperValue === 'CODE') && this.isCodeOrDataStatement(token)) {
                     continue;
                 }
                 
@@ -2855,14 +2881,17 @@ export class DocumentStructure {
     /**
      * Gets the first CODE marker token in the document
      * This marks the boundary between global scope and procedural code
-     * CODE can be tokenized as either Keyword or Label depending on context
+     * CODE is tokenized as an ExecutionMarker when indented and a Label at column 0
      * @returns First CODE token or null if not found
      */
     public getFirstCodeMarker(): Token | null {
         // Find first CODE keyword or label
         for (const token of this.tokens) {
             if (token.value.toUpperCase() === 'CODE' &&
-                (token.type === TokenType.Keyword || token.type === TokenType.Label)) {
+                // #856: an indented CODE is an ExecutionMarker token, a column-0 one a Label.
+                (token.type === TokenType.ExecutionMarker || token.type === TokenType.Keyword ||
+                 token.type === TokenType.Label) &&
+                this.isCodeOrDataStatement(token)) {   // #855: not a global `Code  LONG`
                 return token;
             }
         }

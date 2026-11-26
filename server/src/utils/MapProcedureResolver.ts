@@ -28,6 +28,8 @@ import { StructureDeclarationIndexer } from './StructureDeclarationIndexer';
 import LoggerManager from '../logger';
 import * as fsSync from 'fs';
 import * as pathUtil from 'path';
+import { resolveMemberHeader } from './MemberHeaderResolver';
+import { readSourceText } from './SourceText'; // #879
 
 /**
  * #711 — a module source as the server sees it: the open buffer's text as the token cache last
@@ -355,31 +357,16 @@ export class MapProcedureResolver {
 
     /**
      * The MEMBER parent of a module: its literal MEMBER header, or the header of the
-     * include shim that is its first statement (TokenHelper.findShimIncludeToken —
-     * `INCLUDE('Member.clw')` whose file holds the MEMBER line), followed up to
-     * MAX_SHIM_HOPS shims deep.
+     * include shim that is its first statement (MemberHeaderResolver), resolved from
+     * the file the MEMBER line is written in.
      */
     private async memberParentPathOf(tokens: Token[], filePath: string): Promise<string | null> {
-        const visited = new Set<string>();
-        for (let hop = 0; hop <= MapProcedureResolver.MAX_SHIM_HOPS; hop++) {
-            const memberToken = TokenHelper.findMemberHeaderToken(tokens);
-            if (memberToken?.referencedFile) {
-                return this.resolveIncludeTarget(TokenHelper.normalizeMemberFilename(memberToken.referencedFile), filePath);
-            }
-            const shim = TokenHelper.findShimIncludeToken(tokens);
-            if (!shim?.referencedFile) return null;
-            const shimPath = this.resolveIncludeTarget(shim.referencedFile, filePath);
-            if (!shimPath || visited.has(shimPath.toLowerCase())) return null;
-            visited.add(shimPath.toLowerCase());
-            const shimFile = await this.loadDocForWalk(shimPath);
-            if (!shimFile) return null;
-            tokens = shimFile.tokens;
-            filePath = shimPath;
-        }
-        return null;
+        const header = resolveMemberHeader(tokens, filePath, {
+            resolveInclude: (fileName, from) => this.resolveIncludeTarget(fileName, from)
+        });
+        if (!header) return null;
+        return this.resolveIncludeTarget(TokenHelper.normalizeMemberFilename(header.token.referencedFile!), header.hostFile);
     }
-
-    private static readonly MAX_SHIM_HOPS = 3;
 
     /**
      * Cheap pre-check before tokenizing an include that sits outside a MAP. Only a file
@@ -740,9 +727,38 @@ export class MapProcedureResolver {
         if (ProcedureUtils.containsProcedureKeyword(maybeCallLine)) return -1;
         if (candidateSignatures.length < 2) return -1;
 
+        const segments = MapProcedureResolver.callArgumentTexts(procName, maybeCallLine);
+        if (!segments) return -1;
+
+        const classifier = new CallSiteArgumentClassifier();
+        const args = segments.map(s => classifier.classifyArgumentText(s, tokens));
+        const result = new MethodOverloadResolver().findOverloadByArgClassifications(
+            args, candidateSignatures);
+        return (!result.matchedAll && result.matchedIndex >= 0) ? result.matchedIndex : -1;
+    }
+
+    /**
+     * The argument texts of a call to `procName` on a line, an omitted argument as an empty
+     * text holding its position (#250); null when the line holds no complete call. With
+     * `atCharacter`, the call whose name covers that column (#881: `Fmt(S) & Fmt(N)`);
+     * otherwise, or when none does, the first. A name inside a string is not a call.
+     * Only the one line is read: a call continued with `|` returns null.
+     * Shared by the sync pick above and the hover's typed pick (#881).
+     */
+    public static callArgumentTexts(procName: string, maybeCallLine: string, atCharacter?: number): string[] | null {
         const escaped = procName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const callMatch = new RegExp(`\\b${escaped}\\s*\\(`, 'i').exec(maybeCallLine);
-        if (!callMatch) return -1;
+        const callRe = new RegExp(`\\b${escaped}\\s*\\(`, 'ig');
+        const insideString = (index: number) => (maybeCallLine.slice(0, index).match(/'/g)?.length ?? 0) % 2 === 1;
+        let callMatch: RegExpExecArray | null = null;
+        for (let m = callRe.exec(maybeCallLine); m !== null; m = callRe.exec(maybeCallLine)) {
+            if (insideString(m.index)) continue;
+            callMatch ??= m;
+            if (atCharacter !== undefined && atCharacter >= m.index && atCharacter <= m.index + procName.length) {
+                callMatch = m;
+                break;
+            }
+        }
+        if (!callMatch) return null;
 
         // Extract the balanced-paren argument text (Clarion strings are '...' with '' escapes).
         const openIdx = callMatch.index + callMatch[0].length - 1;
@@ -760,7 +776,7 @@ export class MapProcedureResolver {
                 if (depth === 0) { closeIdx = i; break; }
             }
         }
-        if (closeIdx < 0) return -1;
+        if (closeIdx < 0) return null;
         const argText = maybeCallLine.substring(openIdx + 1, closeIdx);
 
         // Split top-level commas (depth- and string-aware); keep empty segments —
@@ -780,12 +796,50 @@ export class MapProcedureResolver {
             current += ch;
         }
         if (current.trim() !== '' || segments.length > 0) segments.push(current);
+        return segments;
+    }
 
-        const classifier = new CallSiteArgumentClassifier();
-        const args = segments.map(s => classifier.classifyArgumentText(s, tokens));
-        const result = new MethodOverloadResolver().findOverloadByArgClassifications(
-            args, candidateSignatures);
-        return (!result.matchedAll && result.matchedIndex >= 0) ? result.matchedIndex : -1;
+    /**
+     * #881 — the prototypes in a declaring file that overload the one on `declLine`: the same
+     * name, written as the same kind of prototype (a MAP/MODULE entry, or a bare one in an
+     * included file), each with its line text. The one on `declLine` is included, in order.
+     */
+    public overloadedPrototypes(procName: string, declTokens: Token[], declDoc: TextDocument, declLine: number): Array<{ line: number; text: string }> {
+        const lower = procName.toLowerCase();
+        const named = (t: Token) => t.label?.toLowerCase() === lower || t.value.toLowerCase() === lower;
+        const ranges = (keyword: string) => declTokens
+            .filter(t => t.type === TokenType.Structure && t.value.toUpperCase() === keyword && t.finishesAt !== undefined)
+            .map(t => ({ start: t.line, end: t.finishesAt! }));
+        const maps = ranges('MAP');
+        const blocks = [...maps, ...ranges('MODULE')];
+        const inside = (line: number, r: { start: number; end: number }) => line > r.start && line < r.end;
+        // A prototype is a MapProcedure, or an indented `Name(...)` (a Function token) inside a
+        // MAP or MODULE block. The same Function token anywhere else is a call to the procedure.
+        const isPrototype = (t: Token) => named(t) &&
+            (t.subType === TokenType.MapProcedure || (t.type === TokenType.Function && blocks.some(r => inside(t.line, r))));
+
+        let lines: number[];
+        const own = declTokens.find(t => t.line === declLine && isPrototype(t));
+        if (own) {
+            // Overloads share a MAP (Language Reference, Procedure Overloading): a same-named
+            // prototype in another procedure's local MAP declares another procedure. An included
+            // file has no MAP of its own - its text is part of the MAP that includes it - so there
+            // the whole file is that MAP.
+            const map = maps.filter(r => inside(own.line, r)).sort((a, b) => (a.end - a.start) - (b.end - b.start))[0];
+            lines = declTokens
+                .filter(t => isPrototype(t) && (map ? inside(t.line, map) : !maps.some(r => inside(t.line, r))))
+                .map(t => t.line);
+        } else {
+            // A bare `Name PROCEDURE(...)` prototype in an included file tokenizes as a GlobalProcedure;
+            // in a file with a MAP of its own, the same token is an implementation.
+            const bare = declTokens.find(t => t.line === declLine && named(t) && t.subType === TokenType.GlobalProcedure);
+            if (!bare || maps.length > 0) return [];
+            lines = declTokens.filter(t => named(t) && t.subType === TokenType.GlobalProcedure).map(t => t.line);
+        }
+        return [...new Set(lines)].sort((a, b) => a - b).map(line => ({
+            line,
+            text: declDoc.getText({ start: { line, character: 0 }, end: { line, character: Number.MAX_SAFE_INTEGER } }).replace(/\r?\n$/, ''),
+        }));
     }
 
     /**
@@ -889,7 +943,7 @@ export class MapProcedureResolver {
                         // Read the INCLUDE file to get the signature
                         try {
                             const fs = require('fs');
-                            const content = fs.readFileSync(t.sourceFile, 'utf8');
+                            const content = readSourceText(t.sourceFile);
                             const lines = content.split('\n');
                             lineText = lines[t.line]?.replace(/\r$/, '');
                             signature = lines[t.line]?.trim() || '';
@@ -1434,10 +1488,10 @@ export class MapProcedureResolver {
                 if (cached) {
                     content = cached.document.getText();
                 } else {
-                    content = fs.readFileSync(resolvedPath, 'utf8');
+                    content = readSourceText(resolvedPath);
                 }
             } else {
-                content = fs.readFileSync(resolvedPath, 'utf8');
+                content = readSourceText(resolvedPath);
             }
             
             // 🚀 PERFORMANCE: Try fast extraction first - only tokenize the MODULE block we need

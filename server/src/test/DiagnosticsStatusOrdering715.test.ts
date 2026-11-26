@@ -68,7 +68,6 @@ suite('#715 diagnostics status ordering while the re-validation yields to hovers
     };
     const codeLine = (k: number) => lines.findIndex((l, i) => i > 2000 + k * 900 && /^\s+Rpt:Name = /.test(l));
     const hoverLine = (k: number) => codeLine(k) + 1;
-    const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
     /** Hovers back to back until `until` settles; returns how many were answered. */
     const hoverFlood = async (k: number, until: Promise<unknown>) => {
         let done = false, count = 0;
@@ -86,9 +85,15 @@ suite('#715 diagnostics status ordering while the re-validation yields to hovers
             : { kind: 'publish' as const, version: n.params.version, at: n.at });
 
     test('a version superseded mid-pass, then one validated under a stream of hovers', async () => {
-        // v_a: let the re-validation start (500 ms after the last change), then change again mid-pass.
+        // v_a: let the re-validation start, then change again mid-pass. #887: not after a fixed
+        // sleep (the 500 ms debounce plus a margin): on a loaded machine v_b then arrived before
+        // v_a's pass began, so v_a was never validated and never superseded. The pass publishes
+        // its sync diagnostics (`partial`) before the async validators run, so that publish says
+        // the pass is under way, with the long async part still ahead of it. That holds because
+        // the solution and index are ready (suiteSetup waits for v1 complete) and this client
+        // does not advertise pull diagnostics, so the server pushes publishDiagnostics.
         const a = edit(codeLine(0));
-        await sleep(560);
+        await server.waitFor('textDocument/publishDiagnostics', p => p.uri === uri && p.version === a, 60000);
         const b = edit(codeLine(1));
         const bComplete = server.waitFor('clarion/diagnosticsStatus', p => p.uri === uri && p.version === b && p.state === 'complete', 60000);
         const hoversB = await hoverFlood(1, bComplete);
@@ -118,8 +123,8 @@ suite('#715 diagnostics status ordering while the re-validation yields to hovers
             const stale = log.slice(i + 1).find(e => e.kind === 'publish' && e.version < log[i].version);
             assert.ok(!stale, `publish(v${stale?.version}) after ${log[i].state}(v${log[i].version}): ${describe()}`);
         }
-        // v_a's pass was running when v_b arrived (it starts 500 ms after the change and takes
-        // longer than 60 ms), so its diagnostics never became final: superseded, not complete.
+        // v_a's pass was running when v_b arrived (v_b is sent on v_a's partial publish, before
+        // its async validators), so its diagnostics never became final: superseded, not complete.
         assert.ok(log.some(e => e.kind === 'status' && e.version === a && e.state === 'superseded'), `v${a} should be superseded: ${describe()}`);
         assert.ok(!log.some(e => e.kind === 'status' && e.version === a && e.state === 'complete'), `v${a} completed after a newer version arrived: ${describe()}`);
         assert.ok(log.some(e => e.kind === 'status' && e.version === b && e.state === 'complete'), describe());

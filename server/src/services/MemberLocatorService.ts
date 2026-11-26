@@ -22,12 +22,12 @@ import { TokenHelper } from '../utils/TokenHelper';
 import { ProcedureUtils } from '../utils/ProcedureUtils';
 import { StructureDeclarationIndexer, StructureDeclarationInfo, inheritsMembersFromParent } from '../utils/StructureDeclarationIndexer';
 import { CrossFileCache } from '../providers/hover/CrossFileCache';
-import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, overloadAcceptsArgs, detectMemberAccess, countParametersInDeclaration, withContinuations } from '../utils/ClassMemberScan';
+import { MemberInfo, MemberEnumItem, OverloadCandidate, scanClassBodyForMember, scanClassBodyForAllMembers, selectBestMemberOverload, overloadAcceptsArgs, detectMemberAccess, countParametersInDeclaration, withContinuations, logicalLine } from '../utils/ClassMemberScan';
 import { nearestClassLabel } from '../utils/ClassNameUtils';
 import { extractParentName, findParentInText } from '../utils/ParentClassName';
 import type { MethodOverloadResolver } from '../utils/MethodOverloadResolver';
 import { SymbolFinderService } from './SymbolFinderService';
-import { SolutionManager } from '../solution/solutionManager';
+import { SolutionManager, getProjectsGeneration } from '../solution/solutionManager';
 import { resolveViaProjectRedirection } from '../utils/RedirectionResolution';
 import { resolveFileInNoSolutionMode } from '../solution/findFileNoSolution';
 import * as fs from 'fs';
@@ -38,6 +38,8 @@ import { isAncestorOf, ancestorChain, pickDeclaration } from '../utils/ClassAnce
 import { inactiveIncludeLines } from '../utils/ConditionalIncludes';
 import { resolveEnclosingClassName } from '../utils/EnclosingClassResolver';
 import { ScopeKind } from '../scope/ScopeTypes';
+import { resolveMemberHeaderToken } from '../utils/MemberHeaderResolver';
+import { readSourceText, readSourceTextAsync } from '../utils/SourceText'; // #879
 
 const logger = LoggerManager.getLogger("MemberLocatorService");
 const dotAccessTraceEnabled = process.env.CLARION_TRACE_DOT_ACCESS === '1';
@@ -68,6 +70,31 @@ interface LabelScan { labels: Set<string>; includes: string[] }
 interface InterfaceDeclaredMembers { methods: Array<{ name: string; paramCount: number }>; parentName?: string }
 const labelScanCache = new Map<string, LabelScan | null>();
 let labelScanEpoch = -1;
+// #890: resolveFilePath answers (path or null), per cross-file epoch, projects generation and
+// solution presence. Its key holds the asking file, so it is capped (cleared whole when full).
+const fileResolveCache = new Map<string, string | null>();
+let fileResolveEpoch = { epoch: -1, generation: -1, hasSolution: false };
+const FILE_RESOLVE_CACHE_MAX = 50000;
+// #890: loadDocument's text of a closed file, by lowercased path, valid while its mtime is.
+// Bounded by count like TokenCache's closed-file cache, and by total size (oldest first out).
+const loadedTextCache = new Map<string, { content: string; mtimeMs: number }>();
+const LOADED_TEXT_CACHE_MAX = 512;
+const LOADED_TEXT_CACHE_MAX_CHARS = 32 * 1024 * 1024;
+let loadedTextChars = 0;
+// #890: what one INCLUDE'd file declares itself for className.memberName (findInIncludeChain's
+// per-file step), by path + mtime + names; never for a file open in the editor.
+const includeMemberCache = new Map<string, MemberInfo | null>();
+let includeMemberEpoch = -1;
+
+/** #890 — empties the memos above, for tests that rewrite a fixture at the same path. */
+export function resetMemberLocatorMemosForTests(): void {
+    fileResolveCache.clear();
+    fileResolveEpoch = { epoch: -1, generation: -1, hasSolution: false };
+    loadedTextCache.clear();
+    loadedTextChars = 0;
+    includeMemberCache.clear();
+    includeMemberEpoch = -1;
+}
 
 export class MemberLocatorService {
     private sdi = StructureDeclarationIndexer.getInstance();
@@ -241,6 +268,45 @@ export class MemberLocatorService {
             }
             return null;
         }
+        return this.typeOfDeclaration(found, scopeLine, provenance);
+    }
+
+    /**
+     * resolveVariableType for a receiver word that may also be a GROUP or QUEUE label declared
+     * with a type argument (`Totals QUEUE(TotalType)` followed by fields of its own), from one
+     * declaration walk. Such a structure's fields are the type's AND its own, so reading it as a
+     * variable of the type loses the own ones: it answers with the declaration instead.
+     */
+    public async resolveVariableOrTypedStructure(
+        varName: string,
+        tokens: Token[],
+        document: TextDocument,
+        scopeLine?: number
+    ): Promise<
+        | { structure: { file: string; line: number; base: string } }
+        | { type: { typeName: string; isClass: boolean; isReference: boolean } }
+        | null
+    > {
+        const found = await this.findVariableTokenCrossFile(varName, tokens, document, scopeLine);
+        if (!found) {
+            const parameter = scopeLine !== undefined ? this.resolveParameterType(varName, document, scopeLine) : null;
+            return parameter ? { type: parameter } : null;
+        }
+        const line = found.token.line;
+        const isTypedStructure = found.tokens.some(t =>
+            t.line === line && t.type === TokenType.Structure && ['GROUP', 'QUEUE'].includes(t.value.toUpperCase()));
+        const base = isTypedStructure ? extractParentName(lineText(found.doc, line), ['GROUP', 'QUEUE']) : null;
+        if (base) return { structure: { file: found.doc.uri, line, base } };
+        const type = await this.typeOfDeclaration(found, scopeLine);
+        return type ? { type } : null;
+    }
+
+    /** The declared type of a variable token resolveVariableType found, with LIKE aliases followed. */
+    private async typeOfDeclaration(
+        found: { token: Token; tokens: Token[]; doc: TextDocument },
+        scopeLine: number | undefined,
+        provenance?: Set<string>
+    ): Promise<{ typeName: string; isClass: boolean; isReference: boolean } | null> {
         // The file that declares the variable is the primary dependency of this resolution.
         provenance?.add(this.uriToFsPath(found.doc.uri));
         const extracted = this.extractTypeFromToken(found.token, found.tokens);
@@ -971,7 +1037,7 @@ export class MemberLocatorService {
         if (cached !== undefined) return cached;
         let text: string;
         try {
-            text = await fs.promises.readFile(filePath, 'utf-8');
+            text = await readSourceTextAsync(filePath);
         } catch {
             labelScanCache.set(key, null);
             return null;
@@ -1524,7 +1590,7 @@ export class MemberLocatorService {
             if (parts[0].toLowerCase() !== clsLower) continue;
             const methodName = parts[2].toLowerCase();
             // #834: a header continued with `|` is counted whole, as the interface's prototype is (#805)
-            const paramCount = countParametersInDeclaration(docLines[t.line] === undefined ? '' : withContinuations(docLines, t.line));
+            const paramCount = countParametersInDeclaration(logicalLine(docLines, t.line));
             impls.add(`${parts[1].toLowerCase()}.${methodName}#${paramCount}`);
         }
         return impls;
@@ -1563,7 +1629,7 @@ export class MemberLocatorService {
         // every miss asks: read the file only when the first line can lead to an IMPLEMENTS
         if (!ClarionTokenizer.endsWithContinuation(info.lineContent)) return info.lineContent;
         let lines: string[];
-        try { lines = fs.readFileSync(info.filePath, 'utf-8').split(/\r?\n/); } catch { return info.lineContent; }
+        try { lines = readSourceText(info.filePath).split(/\r?\n/); } catch { return info.lineContent; }
         const parts: string[] = [];
         for (let i = info.line; i < lines.length; i++) {
             parts.push(lines[i]);
@@ -1576,7 +1642,7 @@ export class MemberLocatorService {
     private interfaceDeclarationIn(name: string, filePath: string, text?: string): { filePath: string; line: number; lineContent: string } | null {
         let content = text;
         if (content === undefined) {
-            try { content = fs.readFileSync(filePath, 'utf-8'); } catch { return null; }
+            try { content = readSourceText(filePath); } catch { return null; }
         }
         const pattern = new RegExp(`^${name.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\\s+INTERFACE\\b`, 'i');
         const lines = content.split(/\r?\n/);
@@ -1834,7 +1900,7 @@ export class MemberLocatorService {
             methods.push({
                 name: token.label,
                 // #805: a parameter list continued with `|` is counted whole, not from its first line.
-                paramCount: countParametersInDeclaration(docLines[token.line] === undefined ? '' : withContinuations(docLines, token.line))
+                paramCount: countParametersInDeclaration(logicalLine(docLines, token.line))
             });
         }
         return { methods, parentName };
@@ -1859,34 +1925,28 @@ export class MemberLocatorService {
             // 🚀 Load once — use tokens for member lookup, then recurse into nested INCLUDEs
             const data = await this.loadDocument(resolvedPath);
             if (data) {
-                const result =
-                    this.findMemberFromTokens(data.tokens, data.doc, resolvedPath, className, memberName, paramCount, 'CLASS') ??
-                    this.findMemberFromTokens(data.tokens, data.doc, resolvedPath, className, memberName, paramCount, 'GROUP') ??
-                    this.findMemberFromTokens(data.tokens, data.doc, resolvedPath, className, memberName, paramCount, 'QUEUE');
-                if (result) return result;
-                // Fallback to disk scan for edge cases — prefer live editor text if file is open
+                // #890: this file's own answer is the same for every module that includes it while
+                // its text on disk is, and an open file's buffer is the same text (else no memo).
+                // `loaded` may be from an earlier loadDocument (CrossFileCache supplies `data`
+                // without reading it): a disk change it has not seen is a watched-file change,
+                // whose epoch bump empties this memo.
                 const diskUri = `file:///${resolvedPath.replace(/\\/g, '/')}`;
                 const liveContent = this.tokenCache.getDocumentText(diskUri) ?? undefined;
-                const diskResult =
-                    scanClassBodyForMember(
-                        resolvedPath, className, memberName, paramCount, 'CLASS',
-                        (line) => countParametersInDeclaration(line),
-                        (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc),
-                        liveContent
-                    ) ??
-                    scanClassBodyForMember(
-                        resolvedPath, className, memberName, paramCount, 'GROUP',
-                        (line) => countParametersInDeclaration(line),
-                        (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc),
-                        liveContent
-                    ) ??
-                    scanClassBodyForMember(
-                        resolvedPath, className, memberName, paramCount, 'QUEUE',
-                        (line) => countParametersInDeclaration(line),
-                        (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc),
-                        liveContent
-                    );
-                if (diskResult) return diskResult;
+                const loaded = loadedTextCache.get(resolvedPath.toLowerCase());
+                const memoKey = loaded && (liveContent === undefined || liveContent === loaded.content)
+                    ? `${resolvedPath.toLowerCase()}|${loaded.mtimeMs}|${className.toLowerCase()}|${memberName.toLowerCase()}|${paramCount ?? ''}`
+                    : undefined;
+                if (getCrossFileEpoch() !== includeMemberEpoch) {
+                    includeMemberCache.clear();
+                    includeMemberEpoch = getCrossFileEpoch();
+                }
+                const known = memoKey !== undefined ? includeMemberCache.get(memoKey) : undefined;
+                const own = known !== undefined ? known : this.findOwnMemberInInclude(data, resolvedPath, className, memberName, paramCount, liveContent);
+                if (memoKey !== undefined && known === undefined) {
+                    includeMemberCache.set(memoKey, own);
+                    if (includeMemberCache.size > 20000) includeMemberCache.clear();
+                }
+                if (own) return own;
 
                 const nested = await this.findInIncludeChain(
                     className, memberName, data.tokens, path.dirname(resolvedPath), paramCount, visited, fromFile
@@ -1895,6 +1955,32 @@ export class MemberLocatorService {
             }
         }
         return null;
+    }
+
+    /** findInIncludeChain's step for one INCLUDE'd file: what it declares itself, tokens first, then its text. */
+    private findOwnMemberInInclude(
+        data: { doc: TextDocument; tokens: Token[] },
+        resolvedPath: string,
+        className: string,
+        memberName: string,
+        paramCount: number | undefined,
+        liveContent: string | undefined
+    ): MemberInfo | null {
+        const result =
+            this.findMemberFromTokens(data.tokens, data.doc, resolvedPath, className, memberName, paramCount, 'CLASS') ??
+            this.findMemberFromTokens(data.tokens, data.doc, resolvedPath, className, memberName, paramCount, 'GROUP') ??
+            this.findMemberFromTokens(data.tokens, data.doc, resolvedPath, className, memberName, paramCount, 'QUEUE');
+        if (result) return result;
+        // Fallback text scan for edge cases: the live editor text if the file is open, else the
+        // text loadDocument just read (#890: the scan read the file from disk again, three times).
+        const text = liveContent ?? data.doc.getText();
+        const scan = (kind: 'CLASS' | 'GROUP' | 'QUEUE') => scanClassBodyForMember(
+            resolvedPath, className, memberName, paramCount, kind,
+            (line) => countParametersInDeclaration(line),
+            (candidates: OverloadCandidate[], pc) => selectBestMemberOverload(candidates, pc),
+            text
+        );
+        return scan('CLASS') ?? scan('GROUP') ?? scan('QUEUE');
     }
 
     /** Walks the CLASS(Parent) inheritance chain via the class index. */
@@ -2038,6 +2124,23 @@ export class MemberLocatorService {
             ? declarations[0]
             : this.visibleDeclaration(declarations, doc, atLine);
         if (!classToken || classToken.finishesAt === undefined) return [];
+        return this.membersOfStructureToken(tokens, doc, classToken, filePath, structureType, className);
+    }
+
+    /**
+     * The members declared directly in the structure `classToken` opens: the body of
+     * extractMembersFromTokens, also used for a structure named by its declaration line
+     * rather than its label (enumerateStructureFields).
+     */
+    private membersOfStructureToken(
+        tokens: Token[],
+        doc: TextDocument,
+        classToken: Token,
+        filePath: string,
+        structureType: 'CLASS' | 'QUEUE' | 'GROUP' | 'FILE',
+        className: string
+    ): MemberEnumItem[] {
+        if (classToken.finishesAt === undefined) return [];
         const classEnd = classToken.finishesAt;
 
         // A FILE keeps its fields inside its own RECORD, so for a FILE the RECORD is transparent:
@@ -2276,52 +2379,14 @@ export class MemberLocatorService {
      * direct-fix-sites.
      */
     /**
-     * Resolves the MEMBER token for a file, following its FIRST statement into an
-     * INCLUDE'd shim when no literal MEMBER statement is present locally.
-     *
-     * Project convention seen across many member modules: the real MEMBER('program')
-     * statement lives in a small generated shim file reached via e.g. INCLUDE('member.clw')
-     * rather than being written directly in each member — this lets the same shared source
-     * files belong to different PROGRAMs across projects by swapping just that one shim.
-     * TokenHelper.findMemberHeaderToken() only sees literal tokens in the tokens it's given,
-     * so it can never find a MEMBER hidden behind that indirection on its own.
-     *
-     * Because MEMBER/PROGRAM must be the first statement of the compiled token stream
-     * (see TokenHelper.findShimIncludeToken), only the FIRST statement of each file is
-     * ever consulted: if it isn't an INCLUDE, the file cannot be a shim-headed member
-     * module and the walk stops immediately — the common miss (a definition include, a
-     * PROGRAM file, plain data) costs zero file reads. Each hop reads exactly one file;
-     * MAX_SHIM_HOPS bounds the legal-but-rare chained-shim case and a visited set stops
-     * include cycles.
-     *
-     * `fromFile` (the CURRENT file's own path, not the include target) must be threaded through
-     * to resolveFilePath's owner-project-first redirection (#328) — some projects use a DIFFERENT
-     * same-named shim per project (e.g. many `member.clw` files, one per project, each redirecting
-     * to a different MEMBER target so the same shared source tree can belong to different PROGRAMs).
-     * Omitting it makes redirection fall back to an unscoped solution-wide walk that can resolve to
-     * the WRONG project's shim.
+     * The module's MEMBER token, following a first-statement INCLUDE shim — the shared walk in
+     * MemberHeaderResolver, with this service's resolveFilePath for the shim (owner-project-first
+     * redirection (#328), and the no-solution search when no solution is loaded).
      */
-    private static readonly MAX_SHIM_HOPS = 3;
     private async resolveMemberHeaderToken(tokens: Token[], fromDir: string, fromFile?: string): Promise<Token | undefined> {
-        const visited = new Set<string>();
-        for (let hop = 0; hop <= MemberLocatorService.MAX_SHIM_HOPS; hop++) {
-            const direct = TokenHelper.findMemberHeaderToken(tokens);
-            if (direct) return direct;
-
-            const shimInclude = TokenHelper.findShimIncludeToken(tokens);
-            if (!shimInclude) return undefined;
-            const resolvedPath = this.resolveFilePath(shimInclude.referencedFile!, fromDir, fromFile);
-            if (!resolvedPath) return undefined;
-            const key = resolvedPath.toLowerCase();
-            if (visited.has(key)) return undefined;
-            visited.add(key);
-            const data = await this.loadDocument(resolvedPath);
-            if (!data) return undefined;
-            tokens = data.tokens;
-            fromDir = path.dirname(resolvedPath);
-            fromFile = resolvedPath;
-        }
-        return undefined;
+        return resolveMemberHeaderToken(tokens, fromFile ?? path.join(fromDir, '_'), {
+            resolveInclude: (fileName, from) => this.resolveFilePath(fileName, path.dirname(from), from)
+        });
     }
 
     /** See TokenHelper.normalizeMemberFilename — kept as a thin delegate for existing call sites. */
@@ -2329,7 +2394,34 @@ export class MemberLocatorService {
         return TokenHelper.normalizeMemberFilename(name);
     }
 
+    /**
+     * #890 — where `filename` resolves from `fromDir` / `fromFile`, remembered (found or not) until
+     * the cross-file epoch bumps: every watched-file change does, a created or deleted file too, as
+     * does a solution or redirection change (ResolutionEnvironment). A dotted-access resolve walks
+     * INCLUDE chains through here once per receiver, so a Find All References over hundreds of
+     * files asked the redirection and the disk the same question thousands of times.
+     */
     private resolveFilePath(filename: string, fromDir: string, fromFile?: string): string | null {
+        // Loading the solution assigns its projects without bumping the epoch, and an answer
+        // worked out before it (no-solution mode) or for other projects must not outlive that.
+        const epoch = getCrossFileEpoch();
+        const generation = getProjectsGeneration();
+        const hasSolution = !!SolutionManager.getInstance()?.solution;
+        if (epoch !== fileResolveEpoch.epoch || generation !== fileResolveEpoch.generation ||
+            hasSolution !== fileResolveEpoch.hasSolution) {
+            fileResolveCache.clear();
+            fileResolveEpoch = { epoch, generation, hasSolution };
+        }
+        const key = `${filename.toLowerCase()}|${fromDir.toLowerCase()}|${(fromFile ?? '').toLowerCase()}`;
+        const known = fileResolveCache.get(key);
+        if (known !== undefined) return known;
+        const resolved = this.resolveFilePathUncached(filename, fromDir, fromFile);
+        if (fileResolveCache.size >= FILE_RESOLVE_CACHE_MAX) fileResolveCache.clear();
+        fileResolveCache.set(key, resolved);
+        return resolved;
+    }
+
+    private resolveFilePathUncached(filename: string, fromDir: string, fromFile?: string): string | null {
         const sm = SolutionManager.getInstance();
         if (sm?.solution) {
             // #328: owner-project-first when the caller knows the from FILE
@@ -2362,14 +2454,92 @@ export class MemberLocatorService {
         return this.loadDocument(filePath);
     }
 
+    /**
+     * The fields of the GROUP / QUEUE / RECORD declared on `line` of `file` (a uri): a structure
+     * reached through a chain (`SELF.Totals.`, an inline GROUP in a class body) or a typed root
+     * (`Totals.`). The members of its type argument `base` come first, read from `document`'s
+     * view of the solution at `atLine` (a TYPE may be declared in each procedure, #829), then its
+     * own; its own win on a name both have. The fields of a structure nested inside it belong to
+     * that structure, not to this one.
+     */
+    public async enumerateStructureFields(
+        file: string,
+        line: number,
+        fromClass: string,
+        document: TextDocument,
+        base?: string,
+        callerClass?: string,
+        atLine?: number
+    ): Promise<MemberEnumItem[]> {
+        const own: MemberEnumItem[] = [];
+        const filePath = decodeURIComponent(file.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
+        const loaded = await this.loadDocument(filePath);
+        if (loaded) {
+            const structure = loaded.tokens.find(t =>
+                t.line === line && t.type === TokenType.Structure && t.finishesAt !== undefined &&
+                ['GROUP', 'QUEUE', 'RECORD'].includes(t.value.toUpperCase()));
+            if (structure) {
+                const kind = structure.value.toUpperCase() === 'QUEUE' ? 'QUEUE' : 'GROUP';
+                own.push(...this.membersOfStructureToken(loaded.tokens, loaded.doc, structure, filePath, kind, fromClass));
+            }
+        }
+        if (!base) return own;
+        const ownNames = new Set(own.map(m => m.name.toUpperCase()));
+        const inherited = await this.enumerateMembersInClass(base, document, callerClass, { atLine });
+        return [...inherited.filter(m => !ownNames.has(m.name.toUpperCase())), ...own];
+    }
+
+    /**
+     * #773 — the interfaces `className` and its ancestors name in IMPLEMENTS, as members:
+     * `SELF.IFace` is the class's implementation of IFace, typed `INTERFACE`. Each points at the
+     * class declaration that names it; the interface itself is not looked up here, because a
+     * completion list asks this on every keystroke and only shows the name.
+     */
+    public async enumerateImplementedInterfaces(className: string, document: TextDocument): Promise<MemberEnumItem[]> {
+        const items: MemberEnumItem[] = [];
+        const seen = new Set<string>();
+        for await (const { info } of ancestorChain(className, n => this.resolveClassDeclarationInfo(n, document))) {
+            if (!info || info.structureType !== 'CLASS') break;
+            const header = this.declarationHeader(info);
+            for (const m of header.matchAll(/\bIMPLEMENTS\s*\(\s*([A-Za-z_][\w:]*)\s*\)/gi)) {
+                const iface = m[1];
+                if (seen.has(iface.toLowerCase())) continue;
+                seen.add(iface.toLowerCase());
+                items.push({
+                    name: iface, kind: 'property', type: 'INTERFACE', access: 'public', fromClass: info.name,
+                    signature: `IMPLEMENTS(${iface})`, line: info.line, file: info.filePath,
+                });
+            }
+        }
+        return items;
+    }
+
     private async loadDocument(filePath: string): Promise<{ doc: TextDocument; tokens: Token[] } | null> {
         if (this.crossFileCache) {
             const cached = await this.crossFileCache.getOrLoadDocument(filePath);
             if (cached) return { doc: cached.document, tokens: cached.tokens };
         }
-        if (!fs.existsSync(filePath)) return null;
+        // #890: a closed file's text, read once per change on disk. A dotted-access resolve
+        // loads the same INCLUDE'd files for every receiver, so a Find All References over
+        // hundreds of modules re-read and re-decoded each one hundreds of times.
+        let mtimeMs: number;
+        try { mtimeMs = fs.statSync(filePath).mtimeMs; } catch { return null; }
         try {
-            const content = await fs.promises.readFile(filePath, 'utf-8');
+            const key = filePath.toLowerCase();
+            const known = loadedTextCache.get(key);
+            const content = known && known.mtimeMs === mtimeMs ? known.content : await readSourceTextAsync(filePath);
+            if (!known || known.mtimeMs !== mtimeMs) {
+                if (known) loadedTextChars -= known.content.length;
+                loadedTextCache.delete(key);
+                loadedTextCache.set(key, { content, mtimeMs });
+                loadedTextChars += content.length;
+                while (loadedTextCache.size > LOADED_TEXT_CACHE_MAX || loadedTextChars > LOADED_TEXT_CACHE_MAX_CHARS) {
+                    const oldest = loadedTextCache.keys().next().value;
+                    if (oldest === undefined || oldest === key) break;
+                    loadedTextChars -= loadedTextCache.get(oldest)!.content.length;
+                    loadedTextCache.delete(oldest);
+                }
+            }
             const uri = `file:///${filePath.replace(/\\/g, '/')}`;
             const doc = TextDocument.create(uri, 'clarion', 1, content);
             // 🚀 Prefer tokens already in the cache (e.g. file open in editor) to avoid

@@ -261,13 +261,13 @@ suite('#807 — COMPILE/OMIT conditions', () => {
         ]), ['v11.inc']);
     });
 
-    test('a terminator inside a string does not close the block', () => {
+    test('a terminator inside a string closes a skipped block (the compiler searches the raw text)', () => {
         assert.deepStrictEqual(includes([
             "  OMIT('***')",
             "  MESSAGE('***')",
             "  INCLUDE('a.inc')",
             '***',
-        ]), []);
+        ]), ['a.inc']);
     });
 
     test('an EQUATE local to a procedure, or a member of an ITEMIZE, is not a switch', () => {

@@ -17,6 +17,7 @@ import { ClarionPatterns } from './ClarionPatterns';
 import { ProcedureUtils } from './ProcedureUtils';
 import { pathToCanonicalUri } from './UriUtils';
 import { ClarionTokenizer } from '../ClarionTokenizer';
+import { readSourceText } from './SourceText'; // #879
 
 /**
  * A member's declaration with its `|` continuation lines joined in (the `|` dropped), so a
@@ -41,6 +42,16 @@ export function withContinuations(lines: string[], k: number): string {
     }
     if (l < lines.length) parts.push(lines[l].trim());
     return parts.join(' ');
+}
+
+/**
+ * #853 — a statement read whole from line `k`: withContinuations, and '' for a line past the
+ * end. What the signature readers compare (MAP checks, the RETURN check, overload selection,
+ * the member locator's parameter counts), so a declaration continued with `|` reads the same
+ * as one written on a single line.
+ */
+export function logicalLine(lines: string[], k: number): string {
+    return lines[k] === undefined ? '' : withContinuations(lines, k);
 }
 
 /**
@@ -100,7 +111,7 @@ export function scanClassBodyForAllMembers(
 ): MemberEnumItem[] {
     const results: MemberEnumItem[] = [];
     try {
-        const content = contentOverride ?? fs.readFileSync(filePath, 'utf8');
+        const content = contentOverride ?? readSourceText(filePath);
         const lines = content.split(/\r?\n/);
         const headerPattern = new RegExp(`^${className}\\s+(CLASS|QUEUE|GROUP|INTERFACE)`, 'i');
 
@@ -191,7 +202,7 @@ export function scanClassBodyForMember(
     contentOverride?: string
 ): MemberInfo | null {
     try {
-        const content = contentOverride ?? fs.readFileSync(filePath, 'utf8');
+        const content = contentOverride ?? readSourceText(filePath);
         const lines = content.split(/\r?\n/);
         const headerPattern = new RegExp(`^${className}\\s+(CLASS|QUEUE|GROUP|INTERFACE)`, 'i');
 
@@ -380,7 +391,7 @@ export function getDeclarationLineText(fileUri: string, line: number): string | 
         if (filePath.startsWith('file:///')) {
             filePath = decodeURIComponent(filePath.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
         }
-        const content = fs.readFileSync(filePath, 'utf8');
+        const content = readSourceText(filePath);
         const lines = content.split(/\r?\n/);
         return lines[line] ?? null;
     } catch {

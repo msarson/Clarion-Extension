@@ -19,6 +19,8 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { clarionSourceCandidates, moduleTargetMatchesFile } from './ClarionSourceNaming';
 import { ScopeAnalyzer } from './ScopeAnalyzer';
+import { readSourceText } from './SourceText'; // #879
+import { logicalLine } from './ClassMemberScan'; // #853
 
 const logger = LoggerManager.getLogger("CrossFileResolver");
 logger.setLevel("error");
@@ -79,7 +81,7 @@ export class CrossFileResolver {
             // cache (onDidChangeContent) → without this tier the loader read stale disk.
             return getLiveText?.(fsPath)
                 ?? (uri ? tokenCache.getDocumentText(uri) : undefined)
-                ?? fs.readFileSync(fsPath, 'utf8');
+                ?? readSourceText(fsPath);
         } catch {
             return undefined;
         }
@@ -207,7 +209,7 @@ export class CrossFileResolver {
                 return uriPath === normalizedResolved;
             });
             const content = (liveUri && this.tokenCache.getDocumentText(liveUri))
-                ?? fs.readFileSync(resolvedPath, 'utf8');
+                ?? readSourceText(resolvedPath);
             const parentDoc = TextDocument.create(liveUri ?? resolvedUri, 'clarion', 1, content);
             const parentTokens = await this.tokenCache.getTokens(parentDoc);
 
@@ -313,7 +315,7 @@ export class CrossFileResolver {
                             const implParams = ProcedureSignatureUtils.extractImplementationParameterTypes(signature, true);
 
                             for (const decl of procedureDecls) {
-                                const declSignature = lines[decl.line].trim();
+                                const declSignature = logicalLine(lines, decl.line).trim(); // #853: a continued overload whole
                                 const declParams = ProcedureSignatureUtils.extractParameterTypes(declSignature);
 
                                 if (ProcedureSignatureUtils.parametersMatch(implParams, declParams)) {
@@ -374,7 +376,7 @@ export class CrossFileResolver {
                     logger.info(`✅ Found ${procName} in parent MAP at ${declaringPath}:${token.line}`);
                     // #689: the canonical URI (#251) and the name's own range.
                     let lineText: string | undefined;
-                    try { lineText = fs.readFileSync(declaringPath, 'latin1').split(/\r?\n/)[token.line]; } catch { /* range from the token alone */ }
+                    try { lineText = readSourceText(declaringPath).split(/\r?\n/)[token.line]; } catch { /* range from the token alone */ }
                     const location = Location.create(pathToCanonicalUri(declaringPath), procedureNameRange(token, lineText));
                     return {
                         token,
@@ -445,7 +447,7 @@ export class CrossFileResolver {
                 return uriPath === normalizedResolved2;
             });
             const content = (liveUri2 && this.tokenCache.getDocumentText(liveUri2))
-                ?? fs.readFileSync(resolvedPath, 'utf8');
+                ?? readSourceText(resolvedPath);
             const parentDoc = TextDocument.create(liveUri2 ?? resolvedUri2, 'clarion', 1, content);
             const parentTokens = await this.tokenCache.getTokens(parentDoc);
 
@@ -515,7 +517,7 @@ export class CrossFileResolver {
             if (!liveUri && !fs.existsSync(osDiskPath)) return null;
 
             const content = (liveUri && this.tokenCache.getDocumentText(liveUri))
-                ?? fs.readFileSync(osDiskPath, 'utf8');
+                ?? readSourceText(osDiskPath);
             const docUri = liveUri ?? resolvedUri;
             const doc = TextDocument.create(docUri, 'clarion', 1, content);
             const tokens = await this.tokenCache.getTokens(doc);
@@ -572,7 +574,7 @@ export class CrossFileResolver {
                         const lines = content.split('\n');
                         const implParams = ProcedureSignatureUtils.extractImplementationParameterTypes(signature, true);
                         for (const d of procedureDecls) {
-                            const declParams = ProcedureSignatureUtils.extractParameterTypes(lines[d.line].trim());
+                            const declParams = ProcedureSignatureUtils.extractParameterTypes(logicalLine(lines, d.line).trim()); // #853
                             if (ProcedureSignatureUtils.parametersMatch(implParams, declParams)) {
                                 decl = d;
                                 break;

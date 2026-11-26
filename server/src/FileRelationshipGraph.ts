@@ -25,6 +25,7 @@ import { resolutionEnvironmentKey } from './solution/resolutionEnvironmentKey'; 
 import { resolveFileInNoSolutionMode } from './solution/findFileNoSolution';
 import { dependenciesUnchanged, inactiveIncludeLines, recordedDependencies } from './utils/ConditionalIncludes';
 import LoggerManager from './logger';
+import { readSourceText, readSourceTextAsync } from './utils/SourceText'; // #879
 
 const logger = LoggerManager.getLogger("FileRelationshipGraph");
 // #294/#295 diagnostics: always-on build progress — at real solution scale (3,016 files) the
@@ -57,7 +58,7 @@ export interface FileEdge {
 // before the solution's redirection parsers were primed, so every MEMBER('x.clw')
 // resolution failed and the persisted edge lists were missing their MEMBER edges
 // (Mark's VM: frg_member_edges_by_basename=0 with reused_from_disk=2987).
-const DISK_CACHE_VERSION = 5; // #484 — MODULE edges to binaries dropped; #807 — no edge for an INCLUDE in a block that does not compile; #812 — blocks on project defines decided
+const DISK_CACHE_VERSION = 6; // #879 — sources decoded as the editor decodes them; #484 — MODULE edges to binaries dropped; #807 — no edge for an INCLUDE in a block that does not compile; #812 — blocks on project defines decided
 
 /** #807: `deps` — the other files the entry's COMPILE/OMIT decisions were read from, and their times. */
 interface FrgDiskCacheEntry { mtimeMs: number; edges: FileEdge[]; deps?: Record<string, number>; }
@@ -445,7 +446,7 @@ export class FileRelationshipGraph {
             const sourceText = tokenCache.getDocumentText(this._noSolutionSourceUri)
                 ?? tokenCache.getDocumentText(this.pathToUri(this.denormalizePath(this._noSolutionSourceFile)))
                 ?? (fs.existsSync(this.denormalizePath(this._noSolutionSourceFile))
-                    ? fs.readFileSync(this.denormalizePath(this._noSolutionSourceFile), 'utf-8')
+                    ? readSourceText(this.denormalizePath(this._noSolutionSourceFile))
                     : '');
             const sourceDoc = TextDocument.create(this._noSolutionSourceUri, 'clarion', 1, sourceText);
             this.buildNoSolutionGraph(this._noSolutionSourceFile, sourceDoc);
@@ -647,7 +648,7 @@ export class FileRelationshipGraph {
         // File not in cache — use fast regex scan instead of full tokenization
         try {
             if (!fs.existsSync(filePath)) return [];
-            const content = await fs.promises.readFile(filePath, 'utf-8');
+            const content = await readSourceTextAsync(filePath);
             return this.processFileFromText(filePath, content);
         } catch {
             return [];
@@ -674,7 +675,7 @@ export class FileRelationshipGraph {
         try {
             const actualPath = this.denormalizePath(filePath);
             if (!fs.existsSync(actualPath)) return [];
-            const content = fs.readFileSync(actualPath, 'utf-8');
+            const content = readSourceText(actualPath);
             return this.processFileFromText(filePath, content);
         } catch {
             return [];
@@ -995,6 +996,30 @@ export class FileRelationshipGraph {
     }
 
     /**
+     * The PROGRAM files that INCLUDE `filePath` at program level — directly, or through other
+     * included files. A MAP in such a file is that PROGRAM's MAP, visible to every module of the
+     * program. A walk stops at a MEMBER module (its own MEMBER edge or a shim's): a MAP that
+     * arrives there is that module's, not the program's (#322's callout INCs).
+     */
+    public getIncludingProgramFiles(filePath: string): string[] {
+        if (!this._built) return [];
+        const programs = new Map<string, string>();
+        const visited = new Set<string>([this.normalizePath(filePath)]);
+        const queue = [filePath];
+        while (queue.length > 0 && visited.size <= FileRelationshipGraph.MAX_INCLUDER_FILES) {
+            for (const includer of this.getIncludingFiles(queue.shift()!)) {
+                const key = this.normalizePath(includer);
+                if (visited.has(key)) continue;
+                visited.add(key);
+                if (this.getProgramFile(includer) ?? this.programViaIncludedShim(includer)) continue;
+                if (this.getMemberFiles(includer).length > 0) programs.set(key, includer);
+                else queue.push(includer);
+            }
+        }
+        return [...programs.values()];
+    }
+
+    /**
      * #483 — can `fromPath` legitimately see a declaration that lives in `declPath`?
      *
      * A procedure prototype is visible to a caller only through the caller's own
@@ -1018,9 +1043,13 @@ export class FileRelationshipGraph {
         if (decl === from) return true;
         if (!this.forwardEdges.has(decl) && !this.reverseEdges.has(decl)) return undefined;
 
-        const program = this.getProgramFile(from);
+        // A shim-headed module (`INCLUDE('member.clw')` holding the MEMBER) has no MEMBER edge of
+        // its own; without the shim lookup it had no PROGRAM here, so a prototype INCLUDEd by that
+        // PROGRAM answered `false` and was dropped in favour of a stale copy the graph never saw.
+        const programOf = (f: string): string | undefined => this.getProgramFile(f) ?? this.programViaIncludedShim(f);
+        const program = programOf(from);
         const belongsHere = (f: string): boolean =>
-            f === from || (program !== undefined && (f === program || this.getProgramFile(f) === program));
+            f === from || (program !== undefined && (f === program || programOf(f) === program));
 
         if (belongsHere(decl)) return true;
 

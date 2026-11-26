@@ -4,6 +4,7 @@ import { conditionalDependencies, dependenciesUnchanged, inactiveIncludeLines } 
 import { DocumentStructure, SourceLines } from './DocumentStructure';
 import LoggerManager from './logger';
 import * as fs from 'fs';
+import { readSourceText } from './utils/SourceText'; // #879
 
 const logger = LoggerManager.getLogger("TokenCache");
 logger.setLevel("error");
@@ -61,9 +62,12 @@ export class TokenCache {
      *  hits re-insert (LRU), overflow evicts the oldest. Mutable for tests. */
     public static closedFileCacheMax = 512;
 
-    /** #484 — extensions that are never Clarion source; getTokensForClosedFile returns [] for them. */
+    /** #484 — extensions that are never Clarion source; getTokensForClosedFile returns [] for them.
+     *  Besides binaries, the sources of other languages a project may compile and a MODULE may
+     *  name: assembler (`MODULE('x.a')`, `.asm`, `.s`), C and C++ (`MODULE('x.cpp')`, a .cwproj
+     *  Compile item; `.cc`, `.cxx`, `.hpp`, `.hh`, `.hxx`, #891). */
     public static readonly NON_SOURCE_EXTENSION =
-        /\.(dll|lib|exe|obj|res|pdb|ico|bmp|png|jpg|jpeg|gif|cur|app|dct|tps|tpsx|zip|7z|rar|msi|chm|pdf)$/i;
+        /\.(dll|lib|exe|obj|res|pdb|ico|bmp|png|jpg|jpeg|gif|cur|app|dct|tps|tpsx|zip|7z|rar|msi|chm|pdf|a|c|cpp|cc|cxx|h|hpp|hh|hxx|asm|s)$/i;
 
     /** #260 — test/diagnostics visibility into the closed-file cache size. */
     public get closedFileCacheSize(): number {
@@ -375,7 +379,7 @@ export class TokenCache {
         }
 
         try {
-            const content = fs.readFileSync(filePath, 'utf-8');
+            const content = readSourceText(filePath);
             // tokenize() builds + runs DocumentStructure.process() internally; a
             // second process() here would be redundant (and double-push children).
             const tokens = new ClarionTokenizer(content).tokenize();

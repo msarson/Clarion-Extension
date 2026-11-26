@@ -1,5 +1,5 @@
 import * as path from 'path';
-import { readProperty } from '../project/CwprojProperties';
+import { readProperty } from '../../../common/CwprojProperties';
 import { configurationName, normalizeConfigurationTo } from '../utils/ConfigurationPrecedence';
 import { describeNonDefaultConfigDir } from '../utils/ClarionConfigDir';
 

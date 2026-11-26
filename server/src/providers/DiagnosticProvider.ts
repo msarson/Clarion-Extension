@@ -1,7 +1,7 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Diagnostic } from 'vscode-languageserver/node';
 import { yieldToRequests } from '../utils/cooperativeScan';
-import { ClarionTokenizer, Token } from '../ClarionTokenizer';
+import { ClarionTokenizer, Token, TokenType } from '../ClarionTokenizer';
 import { DocumentStructure } from '../DocumentStructure';
 import { TokenCache } from '../TokenCache';
 import { MemberLocatorService } from '../services/MemberLocatorService';
@@ -28,6 +28,7 @@ import { validateItemizeBlocks } from './diagnostics/ItemizeDiagnostics';
 import { validateByRefArguments } from './diagnostics/ByRefArgumentDiagnostics';
 import { validateIndistinguishablePrototypes } from './diagnostics/IndistinguishablePrototypeDiagnostics';
 import { OmitCompileDetector } from '../utils/OmitCompileDetector';
+import { inactiveCodeTest } from '../utils/ConditionalIncludes';
 
 const logger = LoggerManager.getLogger("DiagnosticProvider");
 logger.setLevel("error");
@@ -166,25 +167,48 @@ export class DiagnosticProvider {
     }
 
     /**
-     * #255 — drop diagnostics whose line is inside an unconditional OMIT block:
+     * #255 — drop diagnostics whose line is inside a block that does not compile:
      * compiled-out code isn't in the active build, so flagging it is pure noise
-     * (matches how C++ IDEs treat inactive `#if 0` regions). Conditional
-     * OMIT/COMPILE stays live (defines aren't evaluated yet), and rename
-     * deliberately still sees omitted code — this filter is diagnostics-only.
-     * Applied at the facade so every validator (sync + async passes) is covered.
+     * (matches how C++ IDEs treat inactive `#if 0` regions). Rename deliberately
+     * still sees omitted code — this filter is diagnostics-only. Applied at the
+     * facade so every validator (sync + async passes) is covered.
+     *
+     * #270 — that includes a conditional block decided from its switch (an EQUATE,
+     * also one from an earlier INCLUDE, or a project define), read as #807 reads
+     * INCLUDEs. A block whose switch is not known stays live.
      */
     private static filterOmitted(diagnostics: Diagnostic[], tokens: Token[], document: TextDocument): Diagnostic[] {
         if (diagnostics.length === 0) return diagnostics;
-        const blocks = OmitCompileDetector.findDirectiveBlocks(tokens, document);
-        if (blocks.length === 0) return diagnostics;
-        // Diagnostics ON a directive start line are STRUCTURAL (e.g. "unterminated
+        // Diagnostics ON a directive line are STRUCTURAL (e.g. "unterminated
         // OMIT") — they must survive even when that directive sits inside another
-        // omitted range, or nesting problems would hide their own reports.
-        const directiveStartLines = new Set(blocks.map(b => b.startLine));
-        return diagnostics.filter(d =>
-            directiveStartLines.has(d.range.start.line) ||
-            !OmitCompileDetector.isLineOmittedWithBlocks(d.range.start.line, blocks));
+        // omitted range, or nesting problems would hide their own reports. Read
+        // from the tokens: a conditional directive never becomes one of the blocks.
+        const directiveLines = new Set<number>();
+        for (const t of tokens) {
+            if (t.type === TokenType.Directive && /^(?:OMIT|COMPILE)$/i.test(t.value)) directiveLines.add(t.line);
+        }
+        if (directiveLines.size === 0) return diagnostics;
+        const blocks = OmitCompileDetector.findDirectiveBlocks(tokens, document);
+        const inactive = this.inactiveLineTest(tokens, document);
+        return diagnostics.filter(d => {
+            const line = d.range.start.line;
+            return directiveLines.has(line) ||
+                !(OmitCompileDetector.isLineOmittedWithBlocks(line, blocks) || inactive(line));
+        });
     }
+
+    /** #270 — one reading per token list: every validator of a pass filters with the same one. */
+    private static inactiveLineTest(tokens: Token[], document: TextDocument): (line: number) => boolean {
+        const memo = this.inactiveMemo.get(tokens);
+        if (memo && memo.uri === document.uri && memo.version === document.version) return memo.test;
+        const filePath = /^file:/i.test(document.uri)
+            ? decodeURIComponent(document.uri.replace(/^file:\/\/\/?/i, '')).replace(/\//g, '\\')
+            : null;
+        const test = inactiveCodeTest(filePath, document.getText());
+        this.inactiveMemo.set(tokens, { uri: document.uri, version: document.version, test });
+        return test;
+    }
+    private static inactiveMemo = new WeakMap<Token[], { uri: string; version: number; test: (line: number) => boolean }>();
 
     /** Async pass: warn when dot-access method call discards a return value. Closes #61 */
     public static async validateDiscardedReturnValues(

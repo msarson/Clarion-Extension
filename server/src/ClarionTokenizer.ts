@@ -156,7 +156,10 @@ export class ClarionTokenizer {
     static codeSectionSetBy(line: string): boolean | undefined {
         // #333: CODE may carry a trailing ! comment (appgen emits e.g. `CODE   !STOP('Print')`)
         if (/^\s*code\s*(!.*)?$/i.test(line)) return true;
-        if (/^\s*(DATA|ROUTINE)\b/i.test(line)) return false; // DATA/ROUTINE sections can have structures
+        // DATA/ROUTINE sections can have structures. The DATA header stands alone on its line,
+        // like CODE: a statement starting with a variable called Data (`data = ''`) is code.
+        if (/^\s*data\s*(!.*)?$/i.test(line)) return false;
+        if (/^\s*ROUTINE\b/i.test(line)) return false;
         if (/(?<![:\w])(?:PROCEDURE|FUNCTION)\b/i.test(line)) {
             // Strip string literals and comments before checking — "function" inside a string
             // like Trace('...function pointers...') must not reset inCodeSection.
@@ -730,6 +733,13 @@ export class ClarionTokenizer {
                             continue; // No dot nearby, skip expensive test
                         }
                     }
+
+                    // In executable code `&` is string concatenation (or `&=`), never a reference
+                    // declaration: `'Rows: ' & Num` became one `& Num` token, which hid the use of
+                    // Num and split `& Grp.Field`. Skipped here, the `&` is stepped over as before a
+                    // string literal and the name tokenizes normally. Declarations are not in a CODE
+                    // section, and a procedure header line resets it, so `&LONG pX` stays a reference.
+                    if (tokenType === TokenType.ReferenceVariable && inCodeSection) continue;
 
                     // 🔬 PROFILING: Time each pattern test (only when tracing — #353)
                     const testStart = TOKENIZER_TRACE ? performance.now() : 0;

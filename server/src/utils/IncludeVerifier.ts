@@ -13,9 +13,11 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { inactiveIncludeLines, recordedDependencies } from './ConditionalIncludes';
+import { resolveMemberHeaderToken } from './MemberHeaderResolver';
+import { readSourceTextAsync } from './SourceText'; // #879
 
 /** iv-includes.json format: 2 since #807 (an INCLUDE in a block that does not compile is not listed); 3 since #812 (project defines decide blocks). */
-const IV_LIST_VERSION = 3;
+const IV_LIST_VERSION = 4; // #879 — sources decoded as the editor decodes them
 
 const logger = LoggerManager.getLogger('IncludeVerifier');
 logger.setLevel('error');
@@ -274,7 +276,7 @@ export class IncludeVerifier {
             const includerPath = includer.replace(/\//g, '\\');
             let contents: string;
             try {
-                contents = await fs.promises.readFile(includerPath, 'utf-8');
+                contents = await readSourceTextAsync(includerPath);
             } catch {
                 continue;
             }
@@ -553,7 +555,7 @@ export class IncludeVerifier {
         const includes: IncludeStatement[] = [];
         try {
             IncludeVerifier.fileParseCount++;
-            const contents = await fs.promises.readFile(filePath, 'utf-8');
+            const contents = await readSourceTextAsync(filePath);
             const lines = contents.split('\n');
             const inactive = inactiveIncludeLines(filePath, contents); // #807
             for (let i = 0; i < lines.length; i++) {
@@ -845,7 +847,7 @@ export class IncludeVerifier {
 
             // Read and create document
             const t0 = Date.now();
-            const parentContents = await fs.promises.readFile(resolvedPath, 'utf-8');
+            const parentContents = await readSourceTextAsync(resolvedPath);
             logger.debug(`⏱️ [IV] readFile "${path.basename(resolvedPath)}" took ${Date.now() - t0}ms (${parentContents.length} chars)`);
             const parentDoc = TextDocument.create(
                 pathToCanonicalUri(resolvedPath),
@@ -878,65 +880,16 @@ export class IncludeVerifier {
     }
 
     /**
-     * Resolves the MEMBER token for a file, following its FIRST statement into an
-     * INCLUDE'd shim when no literal MEMBER statement is present locally.
-     *
-     * Project convention seen across many member modules: the real MEMBER('program')
-     * statement lives in a small shared shim file reached via e.g. INCLUDE('member.clw')
-     * rather than being written directly in each member — this lets the same shared source
-     * files belong to different PROGRAMs across projects by swapping just that one shim.
-     * TokenHelper.findMemberHeaderToken() only sees literal tokens in the tokens it's given,
-     * so it can never find a MEMBER hidden behind that indirection on its own — without this
-     * fallback, isClassIncluded()'s "MEMBER parent" check silently never fires for any file
-     * using the shim, so an include that's only reachable through the real PROGRAM/MEMBER
-     * file's chain is reported as missing even though it compiles fine.
-     *
-     * Because MEMBER/PROGRAM must be the first statement of the compiled token stream (see
-     * TokenHelper.findShimIncludeToken), only the FIRST statement of each file is consulted.
-     * This is what keeps the common cases free: a definition .inc (first statement is a
-     * data/CLASS declaration) or a PROGRAM file is an instant miss with ZERO file reads —
-     * the pre-fallback behavior of returning null immediately is preserved exactly. Each
-     * hop reads exactly one file, MAX_SHIM_HOPS bounds the legal-but-rare chained-shim
-     * case, and a visited set stops include cycles.
-     *
-     * Same first-statement walk MemberLocatorService.resolveMemberHeaderToken() applies for
-     * hover/F12/completion — mirrored here for the diagnostic path, sharing the convention
-     * logic via TokenHelper.findShimIncludeToken / TokenHelper.normalizeMemberFilename.
+     * The module's MEMBER token, following a first-statement INCLUDE shim (MemberHeaderResolver).
+     * Without it, isClassIncluded()'s "MEMBER parent" check never fires for a module whose MEMBER
+     * sits in a shim, and an include reachable only through the PROGRAM's chain is reported missing.
      */
-    private static readonly MAX_SHIM_HOPS = 3;
     private async findMemberHeaderTokenWithFallback(
         tokens: Token[],
-        fromDir: string,
+        _fromDir: string,
         fromFile: string
     ): Promise<Token | undefined> {
-        const visited = new Set<string>();
-        for (let hop = 0; hop <= IncludeVerifier.MAX_SHIM_HOPS; hop++) {
-            const direct = TokenHelper.findMemberHeaderToken(tokens);
-            if (direct) return direct;
-
-            const shimInclude = TokenHelper.findShimIncludeToken(tokens);
-            if (!shimInclude) return undefined;
-            let resolvedPath: string | null = resolveViaProjectRedirection(shimInclude.referencedFile!, fromFile);
-            if (!resolvedPath) {
-                const candidate = path.resolve(fromDir, shimInclude.referencedFile!);
-                if (fs.existsSync(candidate)) resolvedPath = candidate;
-            }
-            if (!resolvedPath) return undefined;
-            const key = resolvedPath.toLowerCase();
-            if (visited.has(key)) return undefined;
-            visited.add(key);
-
-            try {
-                const contents = await fs.promises.readFile(resolvedPath, 'utf-8');
-                const doc = TextDocument.create(pathToCanonicalUri(resolvedPath), 'clarion', 1, contents);
-                tokens = this.tokenCache.getTokens(doc);
-            } catch {
-                return undefined; // Unreadable — the chain is broken, nothing further can be legal
-            }
-            fromDir = path.dirname(resolvedPath);
-            fromFile = resolvedPath;
-        }
-        return undefined;
+        return resolveMemberHeaderToken(tokens, fromFile);
     }
 
     /** See TokenHelper.normalizeMemberFilename — kept as a thin delegate for existing call sites. */

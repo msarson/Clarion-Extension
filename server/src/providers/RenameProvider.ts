@@ -14,6 +14,7 @@ import { MemberLocatorService } from '../services/MemberLocatorService';
 import { DefinitionProvider } from './DefinitionProvider';
 import LoggerManager from '../logger';
 import { projectOf, isGeneratedIn } from '../utils/GeneratedFile';
+import { readSourceText } from '../utils/SourceText'; // #879
 
 /** #527 — what a rename left alone, for the client to show. */
 export interface RenameReport {
@@ -299,7 +300,7 @@ export class RenameProvider {
     /** #528 — file text for a hit not open in the editor (disk read; null when unreadable). */
     private readFileTextForUri(uri: string): string | null {
         try {
-            return fs.readFileSync(this.uriToPath(uri), 'utf-8');
+            return readSourceText(this.uriToPath(uri));
         } catch {
             return null;
         }

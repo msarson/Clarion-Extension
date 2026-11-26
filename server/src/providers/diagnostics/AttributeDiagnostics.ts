@@ -7,6 +7,8 @@ import { isDotSuffix, isDotBase, isNestedInsideAttributeArgs } from '../../utils
 import { ControlService } from '../../utils/ControlService';
 import { findDeclarationKeyword, readDeclaredAttributes, findAttributeProblems } from '../../utils/DeclaredAttributes';
 import { conditionalLines, getConditionalBlockRanges } from './StructureDiagnostics';
+import { isBareExecutionMarker } from '../../utils/ExecutionMarker';
+import { tokensOnLine } from '../../utils/TokenLineIndex';
 
 const attributeService = AttributeService.getInstance();
 const controlService = ControlService.getInstance();
@@ -254,7 +256,11 @@ function validateUnknownAttributes(tokens: Token[], structure: DocumentStructure
         const token = tokens[i];
         // CODE opens a code section, DATA a routine's data; a procedure starts with its data and a
         // routine is code unless it opens with DATA
-        if (token.type === TokenType.ExecutionMarker) { inCode = !/^DATA$/i.test(token.value); continue; }
+        // #865 — only a CODE or DATA alone on its line; `data = 1` is a statement
+        if (token.type === TokenType.ExecutionMarker) {
+            if (isBareExecutionMarker(token, l => tokensOnLine(tokens, l))) inCode = !/^DATA$/i.test(token.value);
+            continue;
+        }
         if (token.type !== TokenType.Label && token.type !== TokenType.Variable) {
             if (/^(PROCEDURE|FUNCTION)$/i.test(token.value)) { inCode = false; continue; }
             if (/^ROUTINE$/i.test(token.value)) { inCode = true; continue; }

@@ -44,8 +44,13 @@ import { OmitCompileDetector, DirectiveBlock } from '../utils/OmitCompileDetecto
 import { cooperativeCheckpoint } from '../utils/cooperativeScan';
 import { ReferenceCountIndex } from '../services/ReferenceCountIndex';
 import { resolvePrefixedName } from '../utils/PrefixChain';
-import { onDiskSpelling, pathToCanonicalUri } from '../utils/UriUtils';
+import { resolveFieldEquate } from '../utils/FieldEquateResolver';
+import { isBareExecutionMarker } from '../utils/ExecutionMarker';
+import { tokensOnLine } from '../utils/TokenLineIndex';
+import { onDiskSpelling, pathToCanonicalUri, toCanonicalUri } from '../utils/UriUtils';
 import LoggerManager from '../logger';
+import { resolveMemberHeaderTokenForUri } from '../utils/MemberHeaderResolver';
+import { readSourceText } from '../utils/SourceText'; // #879
 
 const logger = LoggerManager.getLogger("ReferencesProvider");
 logger.setLevel("error");
@@ -329,7 +334,7 @@ export class ReferencesProvider {
     private readFileTextForUri(uri: string): string | null {
         try {
             const filePath = decodeURIComponent(uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
-            return fs.readFileSync(filePath, 'utf-8');
+            return readSourceText(filePath);
         } catch {
             return null;
         }
@@ -344,6 +349,15 @@ export class ReferencesProvider {
         // GENERATED code; the durable edit belongs in the .app (see #325).
         crossProjectDll: boolean = true
     ): Promise<Location[] | null> {
+        // A `?Name` field equate names a control, resolved by the rule hover and F12 use (#614).
+        // Terminal: the word ladder below drops the `?` (and bails on the sigil itself), then
+        // searches for the bare name, which no symbol carries.
+        const feqToken = TokenHelper.getFieldEquateTokenAt(this.tokenCache.getTokens(document), position.line, position.character);
+        if (feqToken) {
+            this.trace({ route: 'fieldEquate', word: feqToken.value });
+            return this.provideFieldEquateReferences(document, feqToken, context.includeDeclaration);
+        }
+
         const wordRange = TokenHelper.getWordRangeAtPosition(document, position);
         if (!wordRange) return null;
 
@@ -384,11 +398,14 @@ export class ReferencesProvider {
                     word = anchorMatch[0] + '.' + word;
                     logger.info(`🔗 Reconstructed chained word: "${word}" from middle-segment cursor`);
                 } else {
-                    // Typed variable access: e.g. INIMgr.Init — pick the nearest identifier before the dot
-                    const varMatch = textBeforeDot.match(/\b([A-Za-z_][A-Za-z0-9_]*)$/);
-                    if (varMatch) {
-                        word = varMatch[1] + '.' + word;
-                        logger.info(`🔗 Reconstructed typed-variable word: "${word}" from before-dot identifier`);
+                    // Typed variable access: e.g. INIMgr.Init — the whole chain before the dot, as
+                    // the resolvers read a receiver. #846: taking only the nearest plain identifier
+                    // cut a colon-named root (`Glo:Obj.Grp.Field` became `Obj.Grp.Field`) and
+                    // named another variable, or none.
+                    const chain = ChainedPropertyResolver.extractChain(textBeforeDot);
+                    if (/^[A-Za-z_][\w:]*(?:\.[A-Za-z_][\w:]*)*$/.test(chain)) {
+                        word = chain + '.' + word;
+                        logger.info(`🔗 Reconstructed typed-variable word: "${word}" from the chain before the dot`);
                     }
                 }
             }
@@ -510,8 +527,15 @@ export class ReferencesProvider {
             const moduleMatch = classLine.match(/MODULE\s*\(\s*['"](.+?)['"]\s*\)/i);
             const classModuleFile = moduleMatch?.[1];
             logger.test(`🏛️ [FAR] Route: CLASS body (class=${enclosingClass.label ?? '?'}, module=${classModuleFile ?? 'none'}) → member-access path`);
-            this.trace({ route: 'class-body-member', word });
-            return this.provideMemberReferences(`SELF.${word}`, document, position, context, classModuleFile, enclosingClass.label, token);
+            // #846 — a label inside a GROUP nested in the class body is that structure's field, not
+            // a member of the class: searched as the field declared on this line.
+            const inNestedStructure = tokens.some(t =>
+                t.type === TokenType.Structure && ['GROUP', 'QUEUE', 'RECORD'].includes(t.value.toUpperCase()) &&
+                t.line > enclosingClass.line && t.line < position.line &&
+                t.finishesAt !== undefined && t.finishesAt > position.line);
+            this.trace({ route: inNestedStructure ? 'class-body-structure-field' : 'class-body-member', word });
+            return this.provideMemberReferences(`SELF.${word}`, document, position, context, classModuleFile, enclosingClass.label, token,
+                inNestedStructure ? position.line : undefined);
         }
 
         // Check if cursor is on a MethodImplementation line for a locally-declared class.
@@ -523,7 +547,12 @@ export class ReferencesProvider {
             t.label !== undefined &&
             t.line === position.line
         );
-        if (methodImplToken?.label) {
+        // #844 — only the method's own name: a word in the parameter list is a parameter.
+        const onImplLabel = (label: string): boolean => {
+            const at = fullLine.toLowerCase().indexOf(label.toLowerCase());
+            return at >= 0 && position.character <= at + label.length;
+        };
+        if (methodImplToken?.label && onImplLabel(methodImplToken.label)) {
             const dotIdx = methodImplToken.label.indexOf('.');
             const implClassName = dotIdx > 0 ? methodImplToken.label.substring(0, dotIdx) : null;
             if (implClassName && this.isClassDeclaredInDocument(implClassName, document)) {
@@ -651,6 +680,15 @@ export class ReferencesProvider {
             locations.push(...fileLocations);
         }
 
+        // A structure field: `.Field` was matched by name, whatever the receiver; drop the
+        // accesses whose receiver reaches another declaration.
+        if (symbolInfo.scope.type === 'field') {
+            const kept = await this.keepFieldAccessesOfDeclaration(locations, searchWord,
+                { file: symbolInfo.location.uri, line: symbolInfo.location.line }, document, token);
+            if (kept === null) return null;
+            locations.splice(0, locations.length, ...kept);
+        }
+
         logger.test(`[FAR] ✅ ${locations.length} reference(s) found for "${searchWord}"`);
         return locations.length > 0 ? locations : null;
     }
@@ -726,7 +764,7 @@ export class ReferencesProvider {
                 const incPath = path.join(dir, fname);
                 const incUri = `file:///${incPath.replace(/\\/g, '/')}`;
                 let incContent: string;
-                try { incContent = fs.readFileSync(incPath, 'utf8'); } catch { continue; }
+                try { incContent = readSourceText(incPath); } catch { continue; }
 
                 // (a) IMPLEMENTS — add the MODULE CLW file
                 if (implementsRe.test(incContent)) {
@@ -901,7 +939,7 @@ export class ReferencesProvider {
                     if (fileUri === document.uri) {
                         fileContent = document.getText();
                     } else {
-                        try { fileContent = fs.readFileSync(decodeURIComponent(fileUri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\'), 'utf8'); } catch { fileContent = ''; }
+                        try { fileContent = readSourceText(decodeURIComponent(fileUri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\')); } catch { fileContent = ''; }
                     }
                 }
                 return fileContent!.split('\n');
@@ -948,7 +986,8 @@ export class ReferencesProvider {
         context: { includeDeclaration: boolean },
         classModuleFile?: string,
         knownClassName?: string,
-        token?: CancellationToken
+        token?: CancellationToken,
+        structureFieldLine?: number
     ): Promise<Location[] | null> {
         const lastDot = word.lastIndexOf('.');
         const beforeDot = word.substring(0, lastDot);
@@ -967,7 +1006,10 @@ export class ReferencesProvider {
         let declarationFile: string | null = null;
         let declarationLine: number = -1;
         let className: string | null = knownClassName ?? null;
-
+        // #846 — the target is a field a structure declares itself (an inline GROUP's field in a
+        // class body): its declaration, from the class-body route or the resolved access.
+        let structureTarget: { file: string; line: number } | undefined =
+            structureFieldLine !== undefined ? { file: document.uri, line: structureFieldLine } : undefined;
         // --- Resolve the declaring class ---------------------------------
         const isSelfOrParent = /^(self|parent)$/i.test(beforeDot);
         // #654: the anchor is the declaration hover and F12 name - DottedAccessResolver (#651, #652),
@@ -976,7 +1018,12 @@ export class ReferencesProvider {
         const isCall = new RegExp(`\\b${escapedMember}\\s*\\(`, 'i').test(cursorLineText);
         const resolveAnchor = () => this.dottedAccess.resolve(beforeDot, memberName, document, position.line, isCall ? callArgCount : undefined);
 
-        if (isSelfOrParent) {
+        if (structureTarget) {
+            // The class-body route on a field of a GROUP nested in the class: the cursor's line IS
+            // the declaration. SELF.<field> would name the class's own member of that name.
+            declarationFile = structureTarget.file;
+            declarationLine = structureTarget.line;
+        } else if (isSelfOrParent) {
             // #637 / #654 — each receiver's own class, named the way hover and F12 name it (#626 for
             // SELF, #648 for PARENT), then the shared member lookup. SELF and PARENT both went
             // to ClassMemberResolver.findClassMemberInfo, which starts at SELF's class, so
@@ -1062,6 +1109,7 @@ export class ReferencesProvider {
                     declarationFile = access.member.file;
                     declarationLine = access.member.line;
                     className = access.member.className;
+                    if (access.structureField) structureTarget = { file: access.member.file, line: access.member.line };
                     logger.info(`✅ ${beforeDot}.${memberName} → class="${className}" at ${declarationFile}:${declarationLine}`);
                 }
             }
@@ -1093,6 +1141,20 @@ export class ReferencesProvider {
             }
         }
 
+        // A field of a GROUP or QUEUE declared in this document (`Tally.Rows`) is data, not a
+        // class member: the class-member scan below matched `.Rows` behind any receiver and
+        // missed the group's own accesses. Answer from the field's declaration instead, so a
+        // use site lists what the declaration lists.
+        if (!isSelfOrParent && declarationFile && declarationLine >= 0 &&
+            toCanonicalUri(declarationFile).toLowerCase() === toCanonicalUri(document.uri).toLowerCase()) {
+            const docTokens = this.tokenCache.getTokens(document);
+            const declToken = docTokens.find(t =>
+                t.line === declarationLine && t.start === 0 && t.type === TokenType.Label);
+            if (declToken && this.structureFieldQualifier(declToken, () => docTokens)) {
+                this.trace({ route: 'member-structure-field', word });
+                return this.provideReferencesUnfiltered(document, { line: declarationLine, character: 0 }, context, token);
+            }
+        }
         // --- Determine files to search -----------------------------------
         // If we resolved a declarationFile (INC) and no classModuleFile was passed in,
         // extract the MODULE('xyz.clw') attribute from the CLASS declaration in that INC.
@@ -1139,6 +1201,13 @@ export class ReferencesProvider {
                 : this.getMemberSearchFiles(document, declarationFile, effectiveModuleFile);
         if (isProcedureLocalClass) {
             this.trace({ files_source: 'proc-local-current-doc' });
+        }
+
+        // #846 — a structure's own field is searched as that field, in the files its class's
+        // members are searched in, not as the class member of that name.
+        if (structureTarget) {
+            this.trace({ route: 'member-structure-own-field', word, files: filesToSearch.length });
+            return this.findStructureFieldReferences(structureTarget, memberName, filesToSearch, document, context.includeDeclaration, token);
         }
 
         this.trace({
@@ -1954,7 +2023,7 @@ export class ReferencesProvider {
             } else {
                 // Not cached — scan the raw file for the class name
                 try {
-                    const incContent = fs.readFileSync(resolvedPath, 'utf8');
+                    const incContent = readSourceText(resolvedPath);
                     const rx = new RegExp(`^\\s*${className}\\s+CLASS\\b`, 'im');
                     if (rx.test(incContent)) return incUri;
                 } catch { /* ignore */ }
@@ -1990,7 +2059,7 @@ export class ReferencesProvider {
     private getFileContent(fileUri: string): string | null {
         try {
             const path = decodeURIComponent(fileUri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-            return fs.readFileSync(path, 'utf8');
+            return readSourceText(path);
         } catch {
             return null;
         }
@@ -2066,6 +2135,42 @@ export class ReferencesProvider {
             }
         }
         return locations;
+    }
+
+    /**
+     * References for a `?Name` field equate: every `?Name` in this file that resolves to the
+     * same control, by the rule hover and F12 use (utils/FieldEquateResolver). Resolving each
+     * hit at ITS line keeps a same-named control in another procedure's window out, and puts a
+     * use inside a method of the procedure's local WindowManager class with that procedure.
+     * A window's controls are visible only to the code of the procedure that declares it, which
+     * is in the same file, so no cross-file scan exists.
+     *
+     * The declaration is the `?Name` in the control's `USE()`. Ranges cover the name without
+     * the `?`: that is the word rename replaces.
+     */
+    private provideFieldEquateReferences(document: TextDocument, feqToken: Token, includeDeclaration: boolean): Location[] | null {
+        const structure = this.tokenCache.getStructure(document);
+        const controlKeys = (line: number): Set<string> => {
+            const target = resolveFieldEquate(structure, feqToken.value, line);
+            if (!target) return new Set();
+            const controls = target.kind === 'control' ? [target.control] : target.controls.map(c => c.control);
+            return new Set(controls.map(c => `${c.line}:${c.start}`));
+        };
+        const wanted = controlKeys(feqToken.line);
+        if (wanted.size === 0) return null;
+
+        const nameLower = feqToken.value.toLowerCase();
+        const locations: Location[] = [];
+        for (const t of this.tokenCache.getTokens(document)) {
+            if (t.type !== TokenType.FieldEquateLabel || t.value.toLowerCase() !== nameLower) continue;
+            if (![...controlKeys(t.line)].some(k => wanted.has(k))) continue;
+            if (!includeDeclaration) {
+                const before = document.getText({ start: { line: t.line, character: 0 }, end: { line: t.line, character: t.start } });
+                if (/\bUSE\s*\(\s*$/i.test(before)) continue;
+            }
+            locations.push(Location.create(document.uri, Range.create(t.line, t.start + 1, t.line, t.start + t.value.length)));
+        }
+        return locations.length > 0 ? locations : null;
     }
 
     /**
@@ -2271,6 +2376,207 @@ export class ReferencesProvider {
     }
 
     /**
+     * #846 — the references of a field a structure declares itself (a field of an inline GROUP in
+     * a class body): its declaration, and every `receiver.Field` in `filesToSearch` whose receiver
+     * resolves, as hover and Go to Definition resolve it (DottedAccessResolver), to that same
+     * declaration. The class-member search matched `.Field` by the receiver's class, so it listed
+     * the class's own same-named member and missed the field's own accesses.
+     *
+     * Every `.Field` on a line counts, the middle of a chain too (`SELF.Grp.Sub.Deep` for `Sub`),
+     * and a subscript is no part of the receiver (`SELF.Arr[1].Hits`). Only a receiver ending in
+     * the structure's own label can reach one of its fields, so others are not resolved. One
+     * resolve per receiver per scope (procedure, method or routine). Null when nothing is found
+     * or the search is cancelled.
+     */
+    private async findStructureFieldReferences(
+        target: { file: string; line: number },
+        memberName: string,
+        filesToSearch: string[],
+        cursorDocument: TextDocument,
+        includeDeclaration: boolean,
+        token?: CancellationToken
+    ): Promise<Location[] | null> {
+        const sameFile = (a: string, b: string): boolean =>
+            toCanonicalUri(a).toLowerCase() === toCanonicalUri(b).toLowerCase();
+        const memberLower = memberName.toLowerCase();
+        const locations: Location[] = [];
+
+        const declUri = toCanonicalUri(target.file);
+        const declTokens = this.getTokensForUri(declUri) ?? [];
+        // The structure that declares the field: the innermost GROUP / QUEUE / RECORD around it.
+        const structureLabel = declTokens
+            .filter(t => t.type === TokenType.Structure && ['GROUP', 'QUEUE', 'RECORD'].includes(t.value.toUpperCase()) &&
+                t.line < target.line && t.finishesAt !== undefined && t.finishesAt > target.line)
+            .sort((a, b) => b.line - a.line)[0]?.label?.toLowerCase();
+        if (includeDeclaration) {
+            const declToken = declTokens.find(t => t.line === target.line && t.value.toLowerCase() === memberLower);
+            const col = declToken?.start ?? 0;
+            locations.push(Location.create(declUri, Range.create(target.line, col, target.line, col + memberName.length)));
+        }
+
+        // #315: one batched freshness pass, as the member path does, so the prune below stats nothing.
+        await ReferenceCountIndex.getInstance().verifyFilesFresh(filesToSearch);
+        const refIdx = ReferenceCountIndex.getInstance();
+        const escaped = memberName.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const access = new RegExp(`\\.(${escaped})(?![\\w:])`, 'gi');
+        const seenFiles = new Set<string>();
+        let steps = 0;
+        for (const fileUri of filesToSearch) {
+            if (await this.yieldIfNeeded(steps++, token)) return null;
+            if (seenFiles.has(fileUri.toLowerCase())) continue;
+            seenFiles.add(fileUri.toLowerCase());
+            if (!refIdx.mayContain(fileUri, memberName)) continue;
+
+            const isCursorFile = sameFile(fileUri, cursorDocument.uri);
+            const text = isCursorFile
+                ? cursorDocument.getText()
+                : this.tokenCache.getDocumentText(fileUri) ?? this.readFileTextForUri(fileUri);
+            if (text === null) continue;
+            const doc = isCursorFile ? cursorDocument : TextDocument.create(fileUri, 'clarion', 1, text);
+            const lines = text.split(/\r?\n/);
+            // #890: one tokenize per file. getStructure caches the tokens with the structure it
+            // builds; asking the closed-file cache first tokenized the same text a second time.
+            const structure = this.tokenCache.getStructure(doc);
+            const tokens = this.tokenCache.getTokens(doc);
+            const verdicts = new Map<string, boolean | undefined>();
+            // #890: the file's tokens by line, built on its first match (was a scan of every token per match).
+            let byLine: Map<number, Token[]> | undefined;
+            const tokensOn = (line: number): Token[] => {
+                if (!byLine) {
+                    byLine = new Map();
+                    for (const t of tokens) {
+                        const row = byLine.get(t.line);
+                        if (row) row.push(t); else byLine.set(t.line, [t]);
+                    }
+                }
+                return byLine.get(line) ?? [];
+            };
+
+            for (let line = 0; line < lines.length; line++) {
+                const lineText = lines[line];
+                if (!lineText.toLowerCase().includes('.' + memberLower)) continue;
+                access.lastIndex = 0;
+                for (let m = access.exec(lineText); m; m = access.exec(lineText)) {
+                    const memberStart = m.index + 1;
+                    // Code only: the name sits in an access token, not a comment or a string.
+                    const covering = tokensOn(line).find(t => t.start <= memberStart && memberStart < t.start + t.value.length);
+                    if (!covering || covering.type === TokenType.Comment || covering.type === TokenType.String) continue;
+                    const receiver = ReferencesProvider.fieldAccessReceiver(lineText, m.index);
+                    if (!receiver) continue;
+                    const lastSegment = receiver.substring(receiver.lastIndexOf('.') + 1).toLowerCase();
+                    if (structureLabel && lastSegment !== structureLabel) continue;
+
+                    if (await this.yieldIfNeeded(steps++, token)) return null;
+                    const keep = await this.fieldAccessVerdict(receiver, memberName, doc, structure, line, target, verdicts, true);
+                    if (keep !== false) {
+                        locations.push(Location.create(fileUri,
+                            Range.create(line, memberStart, line, memberStart + memberName.length)));
+                    }
+                }
+            }
+        }
+        return locations.length > 0 ? locations : null;
+    }
+
+    /**
+     * #846 — the receiver of a `.Field` access whose dot is at `dotIndex` of `lineText` (`SELF.Grp`
+     * in `SELF.Grp.Field`), a subscript being no part of it (`SELF.Arr[1].Hits`). Undefined when
+     * what precedes the dot is not a plain dotted name.
+     */
+    private static fieldAccessReceiver(lineText: string, dotIndex: number): string | undefined {
+        const receiver = ChainedPropertyResolver.extractChain(
+            lineText.substring(0, dotIndex).replace(/\[[^\][]*\]/g, ''));
+        return /^[A-Za-z_][\w:]*(\.[A-Za-z_][\w:]*)*$/.test(receiver) ? receiver : undefined;
+    }
+
+    /**
+     * #846 — whether `receiver.memberName` on `line` of `doc` names the field declared at
+     * `target`, as hover and Go to Definition resolve it (DottedAccessResolver): true, false
+     * when it names another declaration, undefined when it does not resolve. With
+     * `ownFieldOnly`, only a field the structure declares itself counts (#846). One resolve per
+     * receiver per scope (procedure, method or routine), kept in `verdicts`; each caller decides
+     * what an unresolved access means for it.
+     */
+    private async fieldAccessVerdict(
+        receiver: string,
+        memberName: string,
+        doc: TextDocument,
+        structure: DocumentStructure,
+        line: number,
+        target: { file: string; line: number },
+        verdicts: Map<string, boolean | undefined>,
+        ownFieldOnly = false
+    ): Promise<boolean | undefined> {
+        const scope = TokenHelper.getInnermostScopeAtLine(structure, line);
+        const key = receiver.toLowerCase() + '@' + (scope ? scope.line : -1);
+        if (verdicts.has(key)) return verdicts.get(key);
+        let verdict: boolean | undefined;
+        try {
+            const r = await this.dottedAccess.resolve(receiver, memberName, doc, line, undefined);
+            verdict = r
+                ? (!ownFieldOnly || !!r.structureField) &&
+                  r.member.line === target.line &&
+                  toCanonicalUri(r.member.file).toLowerCase() === toCanonicalUri(target.file).toLowerCase()
+                : undefined;
+        } catch {
+            verdict = undefined;
+        }
+        verdicts.set(key, verdict);
+        return verdict;
+    }
+
+    /**
+     * The search from a structure field's declaration matches `.Field` by name, behind any
+     * receiver, so it listed `x.Field` of every structure with a field of that name. Drop an
+     * access whose receiver resolves to another declaration; keep one that does not resolve,
+     * as the other receiver checks here do (rename must not miss a use). Accesses without a
+     * dot (`PRE:Field`, the declaration) are kept. Null when the search is cancelled.
+     */
+    private async keepFieldAccessesOfDeclaration(
+        locations: Location[],
+        memberName: string,
+        target: { file: string; line: number },
+        cursorDocument: TextDocument,
+        token?: CancellationToken
+    ): Promise<Location[] | null> {
+        type FileContext = { doc: TextDocument; lines: string[]; structure: DocumentStructure; verdicts: Map<string, boolean | undefined> };
+        const files = new Map<string, FileContext | null>();
+        const kept: Location[] = [];
+        let steps = 0;
+        for (const loc of locations) {
+            const fileKey = toCanonicalUri(loc.uri).toLowerCase();
+            let ctx = files.get(fileKey);
+            if (ctx === undefined) {
+                const isCursorFile = fileKey === toCanonicalUri(cursorDocument.uri).toLowerCase();
+                const text = isCursorFile
+                    ? cursorDocument.getText()
+                    : this.tokenCache.getDocumentText(loc.uri) ?? this.readFileTextForUri(loc.uri);
+                if (text === null) {
+                    ctx = null;
+                } else {
+                    const doc = isCursorFile ? cursorDocument : TextDocument.create(loc.uri, 'clarion', 1, text);
+                    ctx = { doc, lines: text.split(/\r?\n/), structure: this.tokenCache.getStructure(doc), verdicts: new Map() };
+                }
+                files.set(fileKey, ctx);
+            }
+            const line = loc.range.start.line;
+            const dotIndex = loc.range.start.character - 1;
+            const lineText = ctx?.lines[line] ?? '';
+            const receiver = ctx && dotIndex >= 0 && lineText[dotIndex] === '.'
+                ? ReferencesProvider.fieldAccessReceiver(lineText, dotIndex)
+                : undefined;
+            if (!ctx || !receiver) {
+                kept.push(loc);
+                continue;
+            }
+            if (await this.yieldIfNeeded(steps++, token)) return null;
+            const verdict = await this.fieldAccessVerdict(receiver, memberName, ctx.doc, ctx.structure, line, target, ctx.verdicts);
+            if (verdict !== false) kept.push(loc);
+        }
+        return kept;
+    }
+
+    /**
      * The `SELF.Field.Member` hits of one scanned file (findMemberReferencesInFile's
      * pendingChains) whose receiver is of the target class family. The receiver is named the
      * way hover and F12 name it (DottedAccessResolver), so `SELF.Field` is the type `Field` is
@@ -2312,7 +2618,9 @@ export class ReferencesProvider {
                 if (await this.yieldIfNeeded(resolves++, token)) return null;
                 try {
                     const r = await this.dottedAccess.resolve(p.receiver, memberName, doc, p.line, undefined);
-                    keep = !r || inFamily(r.receiverClass) || inFamily(r.member.className);
+                    // #846: a structure's own field (`SELF.Grp.Hits`, Grp an inline GROUP) is no
+                    // class member, though the class whose body declares the GROUP owns it.
+                    keep = !r || (!r.structureField && (inFamily(r.receiverClass) || inFamily(r.member.className)));
                 } catch {
                     keep = true;
                 }
@@ -2333,6 +2641,7 @@ export class ReferencesProvider {
      *   2. StructureField  "SELF.Sort.Thumb"  — 3+ segments; filtered by chainPrefix when known
      *   3. StructureField  "Order.Something"  — first segment matches (chain continuation token)
      *   4. Variable        "Order"            — terminal access preceded by Delimiter '.' or StructureField
+     *   4b. Variable / Function "Order"       — after StructurePrefix "Glo:Obj" (`Glo:Obj.Order`, no '.' token)
      *   5. Label (col 0)   "Order"            — declaration inside a CLASS body of the right class
      *
      * @param chainPrefix  The full expression before the final member (e.g. "SELF.Sort" for SELF.Sort.Thumb).
@@ -2420,7 +2729,7 @@ export class ReferencesProvider {
             if (!fileLines) {
                 try {
                     const filePath = decodeURIComponent(fileUri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-                    fileLines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
+                    fileLines = readSourceText(filePath).split(/\r?\n/);
                 } catch { fileLines = null; }
             }
         }
@@ -2477,6 +2786,56 @@ export class ReferencesProvider {
         const addChainHit = (location: Location, receiver: string): void => {
             if (!chainPrefixLower && pendingChains) pendingChains.push({ location, receiver, line: location.range.start.line });
             else locations.push(location);
+        };
+
+        /**
+         * P2b track-(b) + #269: `receiver.Member` with a variable as receiver - the receiver's
+         * declared type, resolved via the tier index at any tier (routine-local, parameter,
+         * procedure-local, module, global), is in the class family. Pre-#269 the cursor-on-call-site
+         * path matched receivers TEXTUALLY against the cursor's chainPrefix name: a routine-shadowed
+         * same-name receiver of a DIFFERENT class leaked in (rename rewrote the wrong class's
+         * method) and a same-class receiver under another name (`minst.Check()`) was missed.
+         * Conservative fallback: an UNRESOLVABLE receiver that matches the cursor's receiver name
+         * stays included (rename safety - same bias as the ambiguous-call-site rule). With no
+         * class context, the legacy textual receiver-name match (e.g. INIMgr.Init where
+         * chainPrefix is the variable name and the class could not be resolved).
+         */
+        const isTargetVariableReceiver = (receiverLower: string, line: number): boolean => {
+            if (classLower) {
+                const varType = this.scopeTypeIndex.lookupVarTypeAtLine(
+                    fileVarIndex, effectiveGlobalScope, line, receiverLower);
+                // #315: an inline instance (`ThisGPF Class(Parent)`) declares an
+                // anonymous class whose name IS the label — its methods are
+                // implemented as Label.Method, so the receiver's own name is the
+                // class name, not the raw type base 'class'.
+                const varTypeBase = inlineInstanceAwareTypeBase(varType, receiverLower);
+                const matchesFamily = varTypeBase !== undefined &&
+                    (classFamily ? classFamily.has(varTypeBase) : varTypeBase === classLower);
+                const unresolvedNameMatch = varType === undefined &&
+                    !!chainPrefixLower && receiverLower === chainPrefixLower;
+                return matchesFamily || unresolvedNameMatch;
+            }
+            return !!chainPrefixLower && receiverLower === chainPrefixLower;
+        };
+
+        // The text of a line of this file, read once and only when asked (a colon-named
+        // receiver's dot is checked in the text: no token stands for it).
+        let textLines: string[] | null | undefined;
+        const lineTextOf = (line: number): string => {
+            if (textLines === undefined) {
+                textLines = fileLines
+                    ?? (currentDocument && currentDocument.uri.toLowerCase() === fileUriNorm
+                        ? currentDocument.getText().split(/\r?\n/) : null)
+                    ?? this.tokenCache.getDocumentTextByUriCaseInsensitive(fileUri)?.split(/\r?\n/)
+                    ?? null;
+                if (!textLines) {
+                    try {
+                        const filePath = decodeURIComponent(fileUri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
+                        textLines = readSourceText(filePath).split(/\r?\n/);
+                    } catch { textLines = null; }
+                }
+            }
+            return textLines?.[line] ?? '';
         };
 
         for (let i = 0; i < tokens.length; i++) {
@@ -2545,49 +2904,24 @@ export class ReferencesProvider {
                                         receiver.substring(0, receiver.lastIndexOf('.')));
                                 }
                             }
-                        } else if (parts.length === 2 && classLower) {
-                            // P2b track-(b) + #269: var.member call — resolve the RECEIVER's
-                            // declared type via the tier index and gate on class family, for
-                            // BOTH cursor sides. Pre-#269 the cursor-on-call-site path matched
-                            // receivers TEXTUALLY against the cursor's chainPrefix name: a
-                            // routine-shadowed same-name receiver of a DIFFERENT class leaked
-                            // in (rename rewrote the wrong class's method) and a same-class
-                            // receiver under another name (`minst.Check()`) was missed.
-                            // Resolves receivers declared at any tier: routine-local /
-                            // parameter / procedure-local / module / global.
-                            const varNameLower = parts[0].toLowerCase();
-                            const varType = this.scopeTypeIndex.lookupVarTypeAtLine(
-                                fileVarIndex, effectiveGlobalScope, token.line, varNameLower);
-                            // #315: an inline instance (`ThisGPF Class(Parent)`) declares an
-                            // anonymous class whose name IS the label — its methods are
-                            // implemented as Label.Method, so the receiver's own name is the
-                            // class name, not the raw type base 'class'.
-                            const varTypeBase = inlineInstanceAwareTypeBase(varType, varNameLower);
-                            const matchesFamily = varTypeBase !== undefined &&
-                                (classFamily ? classFamily.has(varTypeBase) : varTypeBase === classLower);
-                            // Conservative fallback: an UNRESOLVABLE receiver that matches the
-                            // cursor's receiver name stays included (rename safety — same bias
-                            // as the ambiguous-call-site rule).
-                            const unresolvedNameMatch = varType === undefined &&
-                                !!chainPrefixLower && varNameLower === chainPrefixLower;
-                            if (matchesFamily || unresolvedNameMatch) {
-                                if (!includeDeclaration && implHeaderLines.has(token.line)) continue;
+                        } else if (parts.length === 2 && (classLower || chainPrefixLower)) {
+                            // var.member — the receiver is a variable of the target class family,
+                            // for BOTH cursor sides (isTargetVariableReceiver). A colon chain in
+                            // front of it belongs to the receiver: a prefix longer than the
+                            // tokenizer's PREFIX:Field pattern (`CommonLib:Obj.Hits`), or a second
+                            // colon (`reg:WIN:Obj.Hits`), arrives as `<link> ':'` + "Obj.Hits",
+                            // and reading the receiver as `Obj` typed another variable.
+                            const sep = tokens[i - 1];
+                            const receiver = i >= 2 && sep.value === ':' && sep.line === token.line && sep.start + 1 === token.start
+                                ? resolvePrefixedName(tokens, i - 2).name + ':' + parts[0]
+                                : parts[0];
+                            if (isTargetVariableReceiver(receiver.toLowerCase(), token.line)) {
+                                if (!includeDeclaration && implHeaderLines.has(token.line)) continue; // impl header line
                                 if (isCompatibleCallSite(i)) {
                                     locations.push(Location.create(fileUri,
                                         Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
                                                      token.line, token.start + token.value.length)));
                                 }
-                            }
-                        } else if (parts.length === 2 && chainPrefixLower &&
-                                   parts[0].toLowerCase() === chainPrefixLower) {
-                            // No class context available — retain the legacy textual
-                            // receiver-name match (e.g. INIMgr.Init where chainPrefix is
-                            // the variable name and the class could not be resolved).
-                            if (!includeDeclaration && implHeaderLines.has(token.line)) continue; // impl header line
-                            if (isCompatibleCallSite(i)) {
-                                locations.push(Location.create(fileUri,
-                                    Range.create(token.line, token.start + token.value.lastIndexOf('.') + 1,
-                                                 token.line, token.start + token.value.length)));
                             }
                         } else if (parts.length === 3 && !chainPrefixLower && classLower &&
                                    parts[0].toLowerCase() === 'self') {
@@ -2615,12 +2949,45 @@ export class ReferencesProvider {
                     const firstDot = token.value.indexOf('.');
                     const firstSeg = token.value.substring(0, firstDot).toLowerCase();
                     if (firstSeg === memberLower && isInTargetClass(token.line)) {
-                        locations.push(Location.create(fileUri,
+                        const location = Location.create(fileUri,
                             Range.create(token.line, token.start,
-                                         token.line, token.start + firstDot)));
+                                         token.line, token.start + firstDot));
+                        // #846 — the continuation of a chain the tokenizer split (`SELF.Grp` +
+                        // `Sub.Deep`): the member hangs off that chain, which may be an inline
+                        // GROUP's field rather than the class's, so its receiver is checked.
+                        const prev = i > 0 ? tokens[i - 1] : null;
+                        if (prev && prev.type === TokenType.StructureField && prev.line === token.line &&
+                            prev.start + prev.value.length + 1 === token.start) {
+                            addChainHit(location, prev.value);
+                        } else {
+                            locations.push(location);
+                        }
                     }
                 }
                 continue;
+            }
+
+            // A colon-named variable as receiver (`Glo:Obj.Hits`, `Loc:Obj.Bump()`) tokenizes as
+            // StructurePrefix("Glo:Obj") + Variable / Function("Hits"), with no token for the dot
+            // between them, so neither the StructureField branch above nor the explicit-dot one
+            // below saw it: such an access was never a reference, from any start point. Its
+            // receiver is the variable, read as `Obj.Hits`'s is, with the whole colon chain
+            // (`Glo:A:B:Obj` arrives as several tokens, see PrefixChain).
+            if ((token.type === TokenType.Variable || token.type === TokenType.Function) &&
+                token.value.toLowerCase() === memberLower) {
+                const prev = i > 0 ? tokens[i - 1] : null;
+                if (prev && prev.type === TokenType.StructurePrefix && prev.line === token.line &&
+                    prev.start + prev.value.length + 1 === token.start &&
+                    lineTextOf(token.line).charAt(token.start - 1) === '.') {
+                    const receiver = resolvePrefixedName(tokens, i - 1).name;
+                    if (isTargetVariableReceiver(receiver.toLowerCase(), token.line) &&
+                        (includeDeclaration || !implHeaderLines.has(token.line)) &&
+                        isCompatibleCallSite(i)) {
+                        locations.push(Location.create(fileUri,
+                            Range.create(token.line, token.start, token.line, token.start + token.value.length)));
+                    }
+                    continue;
+                }
             }
 
             // Phase B+ Tier 4 — SELF.field.method receiver tokenizes as
@@ -2824,7 +3191,7 @@ export class ReferencesProvider {
             t.subType === TokenType.GlobalProcedure &&
             (t.label ?? '').toLowerCase() === name);
         if (!impl) return symbolInfo;
-        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+        const memberToken = resolveMemberHeaderTokenForUri(tokens, document.uri);
         if (!memberToken?.referencedFile) return symbolInfo;
 
         const signature = document.getText({
@@ -3203,7 +3570,16 @@ export class ReferencesProvider {
                 // above still returns early on its own terms.
                 if (!this.isMemberFile(symbolInfo.location.uri)) {
                     const declPath = decodeURIComponent(symbolInfo.location.uri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
-                    const program = solutionManager?.findProjectForFile?.(path.basename(declPath));
+                    let program = solutionManager?.findProjectForFile?.(path.basename(declPath));
+                    // A MAP in an .inc the PROGRAM INCLUDEs in its global data is the PROGRAM's MAP
+                    // too, but the .inc is rarely a project source file, so the lookup above misses
+                    // it and the search stayed at the .inc, its MODULE target and its includers.
+                    if (!program && graph.isBuilt) {
+                        for (const programFile of graph.getIncludingProgramFiles(declPath)) {
+                            program = solutionManager?.findProjectForFile?.(programFile.replace(/\//g, '\\'));
+                            if (program) break;
+                        }
+                    }
                     if (program) {
                         const have = new Set(implFiles.map(u => u.toLowerCase()));
                         for (const sourceFile of program.sourceFiles) {
@@ -3585,7 +3961,7 @@ export class ReferencesProvider {
                 }
                 try {
                     const filePath = decodeURIComponent(fileUri.replace(/^file:\/\/\//i, '')).replace(/\//g, '\\');
-                    candidateFileLines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
+                    candidateFileLines = readSourceText(filePath).split(/\r?\n/);
                 } catch {
                     candidateFileLines = null;
                 }
@@ -3593,6 +3969,11 @@ export class ReferencesProvider {
             };
 
             const scopeType = symbolInfo.scope.type;
+            // A field of a GROUP or QUEUE that is not field-scoped (one declared in a procedure)
+            // is reached as `Group.Field`: those accesses name it only through that group.
+            const dotQualifier = scopeType !== 'field'
+                ? this.structureFieldQualifier(symbolInfo.token, () => this.getTokensForUri(symbolInfo.location.uri))
+                : undefined;
             let startLine = 0;
             let endLine = Number.MAX_SAFE_INTEGER;
 
@@ -3663,6 +4044,8 @@ export class ReferencesProvider {
 
             const declarationLine = symbolInfo.location.line;
             const declarationUri = symbolInfo.location.uri;
+            const fieldOwnPrefix = scopeType === 'field' &&
+                !!(symbolInfo.token.structurePrefix || symbolInfo.scope.token?.structurePrefix);
 
             // #268 — lazily-built per-file classifier context for call-site
             // overload filtering (only when this file actually contains a call).
@@ -3678,12 +4061,26 @@ export class ReferencesProvider {
                 let matchLength = token.value.length;
 
                 if (token.value.toLowerCase() === searchWordLower) {
+                    // A structure keyword (`Window WINDOW(...)`, a MAP block) is the keyword, not a
+                    // reference to a variable spelled like it: the structure's name is its own Label.
+                    // Nor is a CODE or DATA statement standing alone on its line; `Code = 1` is a reference.
+                    if (token.type === TokenType.Structure) continue;
+                    if (token.type === TokenType.ExecutionMarker &&
+                        isBareExecutionMarker(token, line => tokensOnLine(tokens, line))) continue;
                     // Exact match — for field scope, skip other structure field declarations
                     // (col-0 Label with a parent Structure) that are not the declaration line itself
                     if (scopeType === 'field' &&
                         token.start === 0 &&
                         token.parent !== undefined &&
                         !(fileUri === declarationUri && token.line === declarationLine)) {
+                        continue;
+                    }
+                    // #845 — a field of a PRE()'d structure is reached only as `Pre:Field` or
+                    // `Struct.Field`, so a bare word spelled like it is some other variable. A prefix
+                    // the tokenizer split off (`LONGPREFIX` `:` `Answer`, #600) is still the field's.
+                    if (fieldOwnPrefix &&
+                        !(fileUri === declarationUri && token.line === declarationLine) &&
+                        !this.isOwnQualifiedTail(tokens, i, fieldPrefixes)) {
                         continue;
                     }
                     // #487 — and for a NON-field symbol (a local, module or global), a col-0
@@ -3734,6 +4131,11 @@ export class ReferencesProvider {
                     } else {
                         continue;
                     }
+                } else if (dotQualifier && token.type === TokenType.StructureField &&
+                           this.isQualifiedFieldAccess(token.value, dotQualifier, searchWordLower)) {
+                    // `Tally.Rows` when searching for the field Rows of `Tally GROUP`
+                    matchStart = token.start + token.value.length - searchWord.length;
+                    matchLength = searchWord.length;
                 } else if (token.type === TokenType.StructureField || token.type === TokenType.Class) {
                     // Object prefix of a StructureField: "st.SetValue" when searching for "st"
                     const dotIndex = token.value.indexOf('.');
@@ -3830,6 +4232,37 @@ export class ReferencesProvider {
     }
 
     /**
+     * The lower-cased label of the GROUP, QUEUE, FILE or RECORD that declares `declToken`
+     * as a field, or undefined when it is not such a field. A structure with the TYPE
+     * attribute is excluded: its fields are reached through the variables declared with
+     * it (`MyQ.Field` for `MyQ QUEUE(BaseQ)`), never through its own label.
+     */
+    private structureFieldQualifier(declToken: Token, getDeclTokens: () => Token[]): string | undefined {
+        const parent = declToken.parent;
+        if (declToken.type !== TokenType.Label || !parent?.label) return undefined;
+        if (parent.type !== TokenType.Structure) return undefined;
+        if (!ReferencesProvider.LABEL_QUALIFIED_STRUCTURES.has(parent.value.toUpperCase())) return undefined;
+        const isTypeDeclaration = getDeclTokens().some(t =>
+            t.line === parent.line && t.start > parent.start &&
+            t.type === TokenType.Attribute && t.value.toUpperCase() === 'TYPE');
+        return isTypeDeclaration ? undefined : parent.label.toLowerCase();
+    }
+
+    private static readonly LABEL_QUALIFIED_STRUCTURES = new Set(['GROUP', 'QUEUE', 'FILE', 'RECORD']);
+
+    /**
+     * Whether a dotted StructureField token (`Tally.Rows`, `Outer.Tally.Rows`)
+     * accesses the field `fieldLower` through the structure labelled `qualifierLower`:
+     * the last segment is the field and the one before it is that structure.
+     */
+    private isQualifiedFieldAccess(value: string, qualifierLower: string, fieldLower: string): boolean {
+        const segments = value.toLowerCase().split('.');
+        return segments.length >= 2 &&
+            segments[segments.length - 1] === fieldLower &&
+            segments[segments.length - 2] === qualifierLower;
+    }
+
+    /**
      * #827 — whether `tokens[index]` is the last part of a colon-qualified TYPE name in a
      * declaration, so it can never be a reference to a variable of the same name.
      *
@@ -3862,6 +4295,24 @@ export class ReferencesProvider {
         const next = tokens[index + 1];
         return !!next && next.line === token.line && next.start > token.start + token.value.length &&
             (next.type === TokenType.Variable || next.type === TokenType.Label);
+    }
+
+    /**
+     * #845 — whether `tokens[index]`, a bare field name, is the tail of a qualified name: one of
+     * the field's own prefixes split off by the tokenizer (`LONGPREFIX` `:` `Answer`), or a
+     * `.` right before it (`Struct` `.` `Field`). Either way it is the field, not a namesake.
+     */
+    private isOwnQualifiedTail(tokens: Token[], index: number, fieldPrefixes?: Set<string>): boolean {
+        const token = tokens[index];
+        const before = tokens[index - 1];
+        if (before && before.line === token.line && before.value === '.' &&
+            before.start + 1 === token.start) {
+            return true;
+        }
+        const prefixed = resolvePrefixedName(tokens, index);
+        if (prefixed.startIndex === index) return false;
+        const prefix = prefixed.name.substring(0, prefixed.name.length - token.value.length - 1).toLowerCase();
+        return !!fieldPrefixes?.has(prefix);
     }
 
     /**
@@ -4379,7 +4830,7 @@ export class ReferencesProvider {
     private readIncludeWalkSource(fromPath: string): string | null {
         const live = this.tokenCache.getDocumentTextByUriCaseInsensitive(fsPathToUri(fromPath));
         if (live !== null) return live;
-        try { return fs.readFileSync(fromPath, 'utf-8'); } catch { return null; }
+        try { return readSourceText(fromPath); } catch { return null; }
     }
 
     /**

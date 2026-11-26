@@ -20,6 +20,7 @@ import * as fs from 'fs';
 import * as path from 'path';
 import { pathToCanonicalUri } from '../utils/UriUtils';
 import LoggerManager from '../logger';
+import { readSourceText } from '../utils/SourceText'; // #879
 
 const logger = LoggerManager.getLogger('MapDeclarationCodeActionProvider');
 logger.setLevel('error');
@@ -169,7 +170,7 @@ export class MapDeclarationCodeActionProvider {
         const rawParams = ProcedureSignatureUtils.extractRawParameterList(implLineText);
 
         // Tokenize parent file to find MODULE blocks
-        const parentContent = fs.readFileSync(parentPath, 'utf8');
+        const parentContent = readSourceText(parentPath);
         const parentLines = parentContent.split('\n');
         const parentDoc = TextDocument.create(pathToUri(parentPath), 'clarion', 1, parentContent);
         const tokenCache = TokenCache.getInstance();
@@ -251,7 +252,7 @@ export class MapDeclarationCodeActionProvider {
 
         // For same-file declarations (Cases 1 & 2) use the live document text; otherwise read disk
         const isSameFile = data.parentFileUri.toLowerCase() === data.currentFileUri.toLowerCase();
-        const parentContent = isSameFile ? document.getText() : fs.readFileSync(parentPath, 'utf8');
+        const parentContent = isSameFile ? document.getText() : readSourceText(parentPath);
         const parentLines = parentContent.split('\n');
         const declLineText = parentLines[data.declLine] ?? '';
         const declSpan = ProcedureSignatureUtils.findParameterListSpan(declLineText);
@@ -316,7 +317,7 @@ export class MapDeclarationCodeActionProvider {
         const declLineText = docLines[data.declLine] ?? '';
         const rawParams = ProcedureSignatureUtils.extractRawParameterList(declLineText);
 
-        const clwContent = fs.readFileSync(clwPath, 'utf8');
+        const clwContent = readSourceText(clwPath);
 
         const eol = clwContent.includes('\r\n') ? '\r\n' : '\n';
         const endsWithNewline = clwContent.endsWith('\n');
@@ -355,7 +356,7 @@ export class MapDeclarationCodeActionProvider {
         const declLineText = docLines[data.declLine] ?? '';
         const declSpan = ProcedureSignatureUtils.findParameterListSpan(declLineText);
 
-        const clwContent = fs.readFileSync(clwPath, 'utf8');
+        const clwContent = readSourceText(clwPath);
         const clwLines = clwContent.split('\n');
         const implLineText = clwLines[data.implLine] ?? '';
         const implSpan = ProcedureSignatureUtils.findParameterListSpan(implLineText);
@@ -437,7 +438,7 @@ export class MapDeclarationCodeActionProvider {
                 );
                 const fileUri = liveUri ?? pathToUri(filePath);
                 const fileContent = (liveUri && tokenCache.getDocumentText(liveUri))
-                    ?? fs.readFileSync(filePath, 'utf8');
+                    ?? readSourceText(filePath);
                 const fileDoc = TextDocument.create(fileUri, 'clarion', 1, fileContent);
                 const fileTokens = liveUri
                     ? (tokenCache.getTokensByUri(liveUri) ?? tokenCache.getTokens(fileDoc))

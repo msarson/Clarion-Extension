@@ -50,7 +50,7 @@ import { readUnopenedSource } from './utils/RestoredTabSource'; // #696
 import { ClarionDocumentSymbolProvider } from './providers/ClarionDocumentSymbolProvider';
 import { ClarionSemanticTokensProvider } from './providers/ClarionSemanticTokensProvider';
 
-import { Token, TokenType } from './ClarionTokenizer';
+import { Token } from './ClarionTokenizer';
 import { TokenCache } from './TokenCache';
 import { getServerVersionInfo } from './buildInfo';
 
@@ -117,6 +117,9 @@ import { DiagnosticsStore, DiagnosticsState } from './DiagnosticsStore';
 import { yieldToRequests } from './utils/cooperativeScan';
 import { beginInteractive, runAsBackground } from './utils/interactivePriority';
 import { readClientFeatures } from './utils/ClientFeatures';
+import { resolveMemberHeaderTokenForUri } from './utils/MemberHeaderResolver';
+import { invalidateCachesOnEncodingChange, markCachesStale, readSourceText, setSourceEncoding, sourceEncoding } from './utils/SourceText'; // #879
+import * as os from 'os'; // #879
 
 /**
  * #715 item 1 — a request handler that background validation waits for while it runs (hover,
@@ -289,7 +292,7 @@ async function precomputeCodeLensReferenceCounts(solution: ClarionSolutionInfo):
 
         const uri = pathToCanonicalUri(absPath);
         const openDoc = documents.get(uri);
-        const doc = openDoc ?? TextDocument.create(uri, 'clarion', 1, fs.readFileSync(absPath, 'utf8'));
+        const doc = openDoc ?? TextDocument.create(uri, 'clarion', 1, readSourceText(absPath));
         const lenses = codeLensProvider.provideCodeLenses(doc);
 
         for (const lens of lenses) {
@@ -460,6 +463,12 @@ connection.onInitialize((params) => {
         
         // Store initialization options
         globalClarionSettings = params.initializationOptions || {};
+        // #879: the encoding VS Code decodes Clarion files with, for the sources read from disk.
+        setSourceEncoding((params.initializationOptions as { sourceEncoding?: string } | undefined)?.sourceEncoding);
+        // The persisted caches hold text decoded with the encoding of their run; a changed
+        // setting clears them before the solution loads them (they rebuild).
+        const cleared = invalidateCachesOnEncodingChange(os.tmpdir());
+        logger.info(`📥 Source encoding for files read from disk: valid UTF-8, else ${sourceEncoding()}${cleared ? ' (changed: source-derived caches cleared)' : ''}`);
         // Optional client features under capabilities.experimental (attribute edit links on control cards).
         readClientFeatures(params.capabilities);
 
@@ -1509,7 +1518,8 @@ connection.onCodeLensResolve(async (lens) => {
 function revalidateRelatedDocuments(changedDocument: TextDocument, tokens: Token[]): void {
     try {
         const isProgramFile = TokenHelper.findProgramHeaderToken(tokens) !== undefined;
-        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+        // A module's MEMBER may sit in an INCLUDE'd shim (MemberHeaderResolver).
+        const memberToken = resolveMemberHeaderTokenForUri(tokens, changedDocument.uri);
 
         if (isProgramFile) {
             // Re-validate any open MEMBER files that reference this PROGRAM file
@@ -1520,9 +1530,7 @@ function revalidateRelatedDocuments(changedDocument: TextDocument, tokens: Token
                 if (openDoc.uri === changedDocument.uri) continue;
                 const openTokens = tokenCache.getCachedTokens(openDoc);
                 if (!openTokens) continue;
-                const openMemberToken = openTokens.find(t =>
-                    t.type === TokenType.ClarionDocument && t.value.toUpperCase() === 'MEMBER' && t.referencedFile
-                );
+                const openMemberToken = resolveMemberHeaderTokenForUri(openTokens, openDoc.uri);
                 // #450 — MEMBER('name') without an extension names name.clw, so this
                 // comparison must infer it or an edit to the PROGRAM never revalidates
                 // its member modules.
@@ -2754,6 +2762,22 @@ const projectConstantsCoalescer = new TrailingCoalescer(500, async () => {
 // #541 — a clarion.diagnostics.* setting changed in the editor. Apply the flags and
 // re-check every open document so the warnings appear or clear without a reload.
 // One document at a time, the same discipline as the startup re-validation chain.
+// #879: `files.encoding` for Clarion files changed. The text of every file read from disk was
+// decoded with the old encoding, so the closed-file tokens go and the cross-file caches restart.
+connection.onNotification('clarion/updateSourceEncoding', (params: { encoding?: string }) => {
+    const before = sourceEncoding();
+    setSourceEncoding(params?.encoding);
+    logger.info(`📥 clarion/updateSourceEncoding — ${before} → ${sourceEncoding()}`);
+    if (sourceEncoding() === before) return;
+    // Files read from now on use the new encoding. The indexes this server built hold names and
+    // lines read with the old one, and it may still save them, so the client offers a reload and
+    // the next start clears the persisted caches whatever they hold.
+    markCachesStale(os.tmpdir());
+    TokenCache.getInstance().clearAllTokens();
+    bumpCrossFileEpoch();
+    lastValidatedVersions.clear();
+});
+
 connection.onNotification('clarion/updateDiagnosticSettings', async (params: FeatureFlagParams) => {
     const changed = applyFeatureFlags(params ?? {});
     logger.info(`📥 clarion/updateDiagnosticSettings — changed: ${changed.length ? changed.join(', ') : '(nothing)'}`);
@@ -2981,7 +3005,7 @@ connection.onRequest('clarion/unresolvedReferences', async () => {
     const started = Date.now();
     const files = graph.getScannedFiles();
     const read = (file: string): string | null => {
-        try { return fs.readFileSync(file, 'latin1'); } catch { return null; }
+        try { return readSourceText(file); } catch { return null; }
     };
     const references: Array<ReturnType<typeof unresolvedReferences>[number] & { inProject: boolean }> = [];
     for (let i = 0; i < files.length; i += 100) {
@@ -3238,7 +3262,7 @@ connection.onRequest('clarion/documentSymbols', async (params: { uri: string }) 
                 const result = await solutionManager.findFileWithExtension(fileName, fromFsPath);
 
                 if (result.path && fs.existsSync(result.path)) {
-                    const fileContent = fs.readFileSync(result.path, 'utf8');
+                    const fileContent = readSourceText(result.path);
                     document = TextDocument.create(params.uri, 'clarion', 1, fileContent);
                     logger.info(`✅ Successfully loaded file from disk: ${result.path} (source: ${result.source})`);
                 } else {

@@ -138,6 +138,20 @@ export function rememberedSolutionState(
  * XML parser and can be called synchronously wherever the state is decided.
  */
 export function registeredVersionNamesFromXml(xml: string): string[] {
+    return registeredVersionsFromXml(xml).map(v => v.name);
+}
+
+/** #863 — a registered Win32 version: its name and the `bin` its `<path>` names. */
+export interface RegisteredVersion {
+    name: string;
+    bin: string | undefined;
+}
+
+/**
+ * #535/#863 — the Win32 versions a ClarionProperties.xml registers, with each one's own
+ * `<path value>` (its bin). Same entries and order as registeredVersionNamesFromXml.
+ */
+export function registeredVersionsFromXml(xml: string): RegisteredVersion[] {
     // Walk <Properties ...> / </Properties> tags with a depth counter from the
     // Clarion.Versions start tag: the version entries are its DIRECT children, and
     // each carries nested <Properties> of its own, so a lazy regex to the first
@@ -145,14 +159,22 @@ export function registeredVersionNamesFromXml(xml: string): string[] {
     const startTag = /<Properties\s+name="Clarion\.Versions"\s*\/?>/i.exec(xml);
     if (!startTag) return [];
     if (startTag[0].endsWith('/>')) return [];
-    const names: string[] = [];
+    const versions: RegisteredVersion[] = [];
     const tag = /<Properties\b([^>]*?)(\/?)>|<\/Properties\s*>/g;
     tag.lastIndex = startTag.index + startTag[0].length;
     let depth = 1;
+    let current: { version: RegisteredVersion; bodyStart: number } | undefined;
     let m: RegExpExecArray | null;
     while ((m = tag.exec(xml)) !== null) {
         if (m[0].startsWith('</')) {
             depth--;
+            if (depth === 1 && current) {
+                // The entry's own <path>, ahead of its first nested <Properties>.
+                const body = xml.slice(current.bodyStart, m.index);
+                const ownPart = body.split(/<Properties\b/)[0];
+                current.version.bin = /<path\s+value="([^"]*)"/.exec(ownPart)?.[1];
+                current = undefined;
+            }
             if (depth === 0) break;
             continue;
         }
@@ -163,28 +185,37 @@ export function registeredVersionNamesFromXml(xml: string): string[] {
             // #764: every entry but Clarion.NET, the loader's rule (ClarionInstallationDetector
             // .parseCompilerVersions). Requiring a "Clarion" prefix dropped custom-named
             // versions, so a solution remembering one read as stale.
-            if (name && !name.includes('Clarion.NET') && !names.includes(name)) names.push(name);
+            if (name && !name.includes('Clarion.NET') && !versions.some(v => v.name === name)) {
+                const version: RegisteredVersion = { name, bin: undefined };
+                versions.push(version);
+                if (!selfClosing) current = { version, bodyStart: tag.lastIndex };
+            }
         }
         if (!selfClosing) depth++;
     }
-    return names;
+    return versions;
 }
 
-const registryCache = new Map<string, { mtimeMs: number; names: string[] }>();
+const registryCache = new Map<string, { mtimeMs: number; versions: RegisteredVersion[] }>();
 
 /**
  * #535 — the registered version names of a ClarionProperties.xml on disk, mtime-cached;
  * null when the file cannot be read (then the remembered name is not judged).
  */
 export function readRegisteredVersionNames(propertiesFile: string): string[] | null {
+    return readRegisteredVersions(propertiesFile)?.map(v => v.name) ?? null;
+}
+
+/** #863 — the registered versions with their bins, mtime-cached; null when unreadable. */
+export function readRegisteredVersions(propertiesFile: string): RegisteredVersion[] | null {
     if (!propertiesFile) return null;
     try {
         const mtimeMs = fs.statSync(propertiesFile).mtimeMs;
         const cached = registryCache.get(propertiesFile);
-        if (cached && cached.mtimeMs === mtimeMs) return cached.names;
-        const names = registeredVersionNamesFromXml(fs.readFileSync(propertiesFile, 'utf8'));
-        registryCache.set(propertiesFile, { mtimeMs, names });
-        return names;
+        if (cached && cached.mtimeMs === mtimeMs) return cached.versions;
+        const versions = registeredVersionsFromXml(fs.readFileSync(propertiesFile, 'utf8'));
+        registryCache.set(propertiesFile, { mtimeMs, versions });
+        return versions;
     } catch {
         return null;
     }

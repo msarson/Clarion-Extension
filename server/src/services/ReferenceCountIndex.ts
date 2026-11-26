@@ -23,13 +23,14 @@ import * as os from 'os';
 import * as path from 'path';
 import * as crypto from 'crypto';
 import LoggerManager from '../logger';
+import { readSourceText, readSourceTextAsync } from '../utils/SourceText'; // #879
 
 const logger = LoggerManager.getLogger("ReferenceCountIndex");
 logger.setLevel("error");
 const perfLogger = LoggerManager.getLogger("ReferenceCountIndex.Perf", "perf");
 
 // 2: #525 — prefixed labels (GLO:Name) are recorded whole as well as by segment.
-const DISK_CACHE_VERSION = 2;
+const DISK_CACHE_VERSION = 3; // #879 — sources decoded as the editor decodes them
 
 interface RefIndexDiskEntry { mtimeMs: number; counts: Record<string, number>; }
 interface RefIndexDiskFile {
@@ -202,7 +203,7 @@ export class ReferenceCountIndex {
             const mtimeMs = fs.statSync(filePath).mtimeMs;
             if (mtimeMs === recorded) return false;
             // Regenerated since the scan — self-heal the entry, answer fresh.
-            this.setFileCounts(filePath, ReferenceCountIndex.scanContent(fs.readFileSync(filePath, 'utf8')));
+            this.setFileCounts(filePath, ReferenceCountIndex.scanContent(readSourceText(filePath)));
             this.fileMtimes.set(filePath, mtimeMs);
             this.verifiedAt.set(filePath, Date.now());
             return (this.perFile.get(filePath)?.get(nameLower) ?? 0) > 0;
@@ -234,7 +235,7 @@ export class ReferenceCountIndex {
                 try {
                     const mtimeMs = (await fs.promises.stat(p)).mtimeMs;
                     if (this.fileMtimes.get(p) !== mtimeMs) {
-                        const content = await fs.promises.readFile(p, 'utf8');
+                        const content = await readSourceTextAsync(p);
                         this.setFileCounts(p, ReferenceCountIndex.scanContent(content));
                         this.fileMtimes.set(p, mtimeMs);
                     }
@@ -278,7 +279,7 @@ export class ReferenceCountIndex {
                 }
 
                 try {
-                    const content = await fs.promises.readFile(filePath, 'utf8');
+                    const content = await readSourceTextAsync(filePath);
                     const counts = ReferenceCountIndex.scanContent(content);
                     scanned++;
                     freshEntries[filePath] = { mtimeMs, counts: Object.fromEntries(counts) };

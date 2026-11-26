@@ -6,6 +6,61 @@ All notable changes to the Clarion Extension are documented here.
 
 ## Recent Versions
 
+### [1.0.11] - 2026-11-26
+
+![32 fixes](https://img.shields.io/badge/fixes-32-1f6feb?style=flat-square) ![2 new](https://img.shields.io/badge/new-2-2da44e?style=flat-square) ![1 performance](https://img.shields.io/badge/performance-1-8250df?style=flat-square)
+
+Thirty-five changes. Find All References keeps apart fields, class members, parameters and keywords that share a name, reaches accesses through colon-named objects and modules that take their MEMBER from an INCLUDEd file, and is about twice as fast on a structure's field. Hover cards describe an attribute where it is used and the CASE hover lists its branches, and the project page sets or clears a source's Generated mark. Contributions from [@geircodes](https://github.com/geircodes).
+
+#### Navigation and hover
+
+- **Completion and hover no longer offer four runtime properties Clarion does not have.** PROP:Break, PROP:Select, PROP:Slider and PROP:Ticks are declared nowhere and do not compile; the properties that do their job, PROP:NoTicks, PROP:SliderPos, PROP:RangeLow and PROP:RangeHigh, now have cards of their own. [#847](https://github.com/msarson/Clarion-Extension/issues/847)
+- **Go to Symbol in Workspace lists a declaration by its label.** Ctrl+T showed and searched the Structure view's text, `GROUP (GLO:Settings),PRE(GLO)`, so typing GROUP returned every group. It now shows `GLO:Settings` with the type and attributes beside it. [#859](https://github.com/msarson/Clarion-Extension/issues/859)
+- **Find All References reaches callers of a procedure prototyped in an .inc the PROGRAM includes.** Callers in modules that take their MEMBER from an INCLUDEd file were missed, and an older copy of the prototype in a later .red folder could be listed in place of the real one. [#854](https://github.com/msarson/Clarion-Extension/pull/854) @geircodes
+- **Find All References and Rename work on a `?Name` control.** References on a field equate returned nothing. It now lists the control's USE() and every use that refers to the same control in the file, including uses in the window's local class methods, and Rename rewrites them while keeping the `?`. [#862](https://github.com/msarson/Clarion-Extension/pull/862) @geircodes
+- **The hover on a CASE, an OF or an END lists the CASE's branches.** Each branch is one row, with its line number as a link, its source line and its comment, and the hovered branch is marked. A long CASE shows 40 branches and a link to the rest. [#857](https://github.com/msarson/Clarion-Extension/pull/857) @geircodes
+- **A module that takes its MEMBER from an INCLUDEd file works with every feature.** Go to Implementation, the hover's links, Go to Definition, Find All References and the MAP, unresolved-call and PRIVATE checks now all follow the INCLUDE to the MEMBER statement. Before, only some of them did, so Ctrl+F12 on a call to a procedure in the PROGRAM's MAP did nothing. [#867](https://github.com/msarson/Clarion-Extension/pull/867) @geircodes
+- **A method's trailing comment stays out of its hover header.** With a `!` comment after the declaration, the card's first line read the comment as part of the return type. [#868](https://github.com/msarson/Clarion-Extension/pull/868) @geircodes
+- **Find All References finds a GROUP field written as `Group.Field`.** For a GROUP without PRE(), References on the field returned only its declaration. [#869](https://github.com/msarson/Clarion-Extension/pull/869) @geircodes
+- **A variable after a concatenation `&` is found by Find All References.** In code, `'Rows: ' & Num` was read as a reference declaration, so the use of Num was missed. [#870](https://github.com/msarson/Clarion-Extension/pull/870) @geircodes
+- **ERRORCODE returns a LONG and FILEERRORCODE a STRING.** The hover and signature help had the two return types swapped. [#871](https://github.com/msarson/Clarion-Extension/pull/871) @geircodes
+- **A CODE or DATA written at column 0 still starts the code or data section.** The outline read the code below such a CODE as declarations and listed code lines as variables. [#872](https://github.com/msarson/Clarion-Extension/pull/872) @geircodes
+- **Text from a file that is not open reads in the editor's encoding.** A comment or string in an INCLUDEd file saved in an ANSI code page, Windows-1251 Cyrillic for example, showed as replacement characters in hovers and cards. Files that are not open now decode as VS Code decodes Clarion files: as UTF-8 when the bytes are UTF-8, and otherwise with `files.encoding`. [#879](https://github.com/msarson/Clarion-Extension/issues/879)
+- **The IMM, CENTER, FULL, ALRT and SCROLL cards describe the attribute where it is used.** IMM on a WINDOW showed the text for a control, and that text was wrong for most controls. CENTER on a control described window position, FULL a full-screen window and SCROLL a scrolling TEXT. Each card now follows the Language Reference for the window or control the attribute is on. [#889](https://github.com/msarson/Clarion-Extension/issues/889)
+- **The hover on a call to an overloaded procedure shows the prototype the call's arguments pick.** A variable argument was not typed, so `Fmt(S)` with S a STRING showed whichever prototype came first. When the arguments cannot pick one, the card lists the prototypes they leave open. [#881](https://github.com/msarson/Clarion-Extension/issues/881)
+- **The card on a QUEUE or GROUP declared with a parent counts the parent's fields.** `ExtQ QUEUE(BaseQ)` begins with BaseQ's fields, but its card counted only the fields written inside it. It now reads, for example, "4 fields (3 from `BaseQ`)". [#882](https://github.com/msarson/Clarion-Extension/issues/882)
+- **An OF or ELSE inside an OMIT block is not a branch of the CASE or IF around it.** The CASE hover listed such a branch, and an omitted OF could stand in for the OF that a live OROF needs. [#873](https://github.com/msarson/Clarion-Extension/pull/873) @geircodes
+- **A label spelled like a keyword shows its own hover card.** A field named `Code` in a GROUP, or a global named `Map`, showed the card for the CODE or MAP keyword instead of the declaration. [#883](https://github.com/msarson/Clarion-Extension/pull/883) @geircodes
+- **Find All References on a name spelled like a keyword leaves out the keyword.** References on a field or variable named `Code` listed every CODE statement, and on `Window` the WINDOW keyword of its own declaration. [#884](https://github.com/msarson/Clarion-Extension/pull/884) @geircodes
+- **Find All References lists no lines from assembler or C++ sources.** A module named in a MAP, a CLASS's MODULE or LINK, or the project, such as a `.a`, `.asm`, `.cpp` or `.hpp` file, was read as Clarion, and its text could show up as references. [#888](https://github.com/msarson/Clarion-Extension/pull/888) @geircodes [#891](https://github.com/msarson/Clarion-Extension/issues/891)
+- **Find All References finds a class member reached through a colon-named object.** An access such as `Glo:Obj.Hits` was left out from every start point, and a module that takes its MEMBER from an INCLUDEd file now sees its program's global objects. [#876](https://github.com/msarson/Clarion-Extension/pull/876) @geircodes
+- **Dot completion offers the members hover and Go to Definition find.** After `SELF.G.` for an inline GROUP, or a dot after a typed GROUP or QUEUE, the list was empty or short. Completion now walks the same owners as hover and F12. [#875](https://github.com/msarson/Clarion-Extension/pull/875) @geircodes
+- **Find All References keeps a class member apart from a same-named field of the class's inline GROUP.** References on either one listed the other's uses too, so a rename changed both. [#877](https://github.com/msarson/Clarion-Extension/pull/877) [#846](https://github.com/msarson/Clarion-Extension/issues/846) @geircodes
+- **Find All References from a field's declaration lists only that field's accesses.** When two structures declare a field with the same name, references from one declaration listed accesses of the other. An access whose owner cannot be resolved is still kept, so a rename misses no use. [#886](https://github.com/msarson/Clarion-Extension/pull/886) @geircodes
+- **Find All References on a field of a PRE() structure lists only that field.** It listed every word spelled like the field, in any case, such as another procedure's parameter or local. Such a field is only reached as `Pre:Field` or `Group.Field`. [#845](https://github.com/msarson/Clarion-Extension/issues/845)
+- **A word CODE or DATA that is not a section marker no longer upsets the Structure view.** A method with a parameter named `code` hid every method declared after it in its CLASS. After `data = 1` in a routine's code, the following statements were listed as variables and code after the next EXIT was shaded as unreachable. Only a CODE or DATA alone on its line starts a section. [#865](https://github.com/msarson/Clarion-Extension/issues/865)
+- **Find All References on a parameter works from a method implementation's header.** On `Cls.Fetch PROCEDURE(LONG answer)` it returned nothing for `answer`, though it found the parameter from its use in the body. [#844](https://github.com/msarson/Clarion-Extension/issues/844)
+
+#### Diagnostics
+
+- **A field or variable labelled Code or Data is no longer taken for the CODE or DATA statement.** A VIEW that projected such a field, `PROJECT(PRL:Code)`, was warned that it is not a field on its FILE, and a procedure's local `Code` variable could move where its code section was thought to start. Only a CODE or DATA alone on its line now counts as the statement. [#855](https://github.com/msarson/Clarion-Extension/issues/855)
+- **A prototype continued with `|` is checked for a missing RETURN.** A procedure or method whose prototype or implementation header runs over several lines was skipped by the warning that it declares a return type but returns nothing, as was one with no parameter list, `Foo PROCEDURE,LONG`. Go to Definition on an overloaded procedure also matched a continued overload by its first line only, and could open the wrong one. [#853](https://github.com/msarson/Clarion-Extension/issues/853)
+- **A statement that assigns to a variable called Data no longer ends the code section.** After `data = ''` in a procedure, every later LOOP and IF lost its structure and each BREAK or CYCLE in such a LOOP was warned as outside a LOOP. [#861](https://github.com/msarson/Clarion-Extension/pull/861) @geircodes
+- **A COMPILE or OMIT block ends where the compiler ends it.** A terminator in a comment, such as `!'*Debug*'`, did not close the block, so with the switch off every later INCLUDE counted as not compiled and its classes were reported missing. A block that is skipped now ends at any line containing its terminator. A block that is compiled ends at one outside a string, as Clarion 11.1 and 12 read it. [#860](https://github.com/msarson/Clarion-Extension/pull/860) @geircodes
+- **Code inside a COMPILE or OMIT block that does not compile is not checked.** With a project switch off, a module's code under that switch was still warned about, for example for a class whose INCLUDE sits under the same switch. A block whose condition cannot be decided is still checked. [#866](https://github.com/msarson/Clarion-Extension/pull/866) @geircodes
+
+#### Performance
+
+- **Find All References on a field of a structure is about twice as fast.** Each module it searched read the same INCLUDE files from disk again, and each searched file was tokenized twice. An access whose owner cannot be resolved is now listed from the field's uses as well as from its declaration, so a rename misses no use. [#890](https://github.com/msarson/Clarion-Extension/issues/890)
+
+#### Configuration and build
+
+- **The project page sets or clears a source's Generated mark.** The Sources tab's Generated column is now a checkbox. A hand-written module left marked as generated, which Rename refuses, no longer needs the .cwproj edited by hand. [#880](https://github.com/msarson/Clarion-Extension/issues/880)
+- **Add Source File, Add Module and Remove Source File in the Solution view change only the file's own line in the .cwproj.** They rewrote the whole project file, dropping its BOM, changing its line endings and adding an XML declaration, and Add Source File marked the new hand-written file as generated. [#885](https://github.com/msarson/Clarion-Extension/issues/885)
+- **The build compiles with the Clarion version chosen for the solution.** It named the settings folder and the version's bin but not the version itself, so with two versions registered on one bin, MSBuild could build with a different one from the version used for navigation and diagnostics. The chosen version is now passed when the properties file registers it for the bin being built with. [#863](https://github.com/msarson/Clarion-Extension/issues/863)
+
+---
+
 ### [1.0.10] - 2026-11-03
 
 ![44 fixes](https://img.shields.io/badge/fixes-44-1f6feb?style=flat-square) ![19 new](https://img.shields.io/badge/new-19-2da44e?style=flat-square)
@@ -167,18 +222,13 @@ Fifty changes. Hover cards for controls, for WINDOW, APPLICATION and REPORT head
 
 ### [1.0.8] - 2026-10-04
 
-![1 fix](https://img.shields.io/badge/fixes-1-1f6feb?style=flat-square) ![2 performance](https://img.shields.io/badge/performance-2-8250df?style=flat-square)
+**Highlights**
 
-A follow-up to 1.0.7 for large generated modules. Diagnostics after an edit are ready in about a third of the time — on a 61,000-line generated module, about 2.3 s instead of about 7 s on the same machine — and a warning no longer keeps a variable's old type after you change its declaration. Hover, completion and Go to Definition also stop waiting behind the background check, which removes the occasional multi-second hover.
+- Diagnostics after an edit are ready in about a third of the time in a large generated module: about 2.3 s instead of about 7 s on a 61,000-line module.
+- Hover, completion and Go to Definition run ahead of the background check instead of waiting behind it.
+- A discarded-return-value warning no longer keeps a variable's old type after its declaration changes.
 
-#### Performance
-
-- **Diagnostics after an edit are ready much sooner in a large module.** The check for discarded return values worked out the type of every object it calls a method on, and every class's members, again after each edit, even though an edit to code cannot change them; it now does that again only when a declaration changes. [#715](https://github.com/msarson/Clarion-Extension/issues/715)
-- **Hover, completion and Go to Definition no longer wait behind the background check.** The check that runs after an edit, or when a module is opened, took turns with them, so a hover that needed a lot of work could take several seconds, or time out, while it ran. They now go first, and the check still gets its turn at least every quarter of a second. [#715](https://github.com/msarson/Clarion-Extension/issues/715)
-
-#### Diagnostics
-
-- **A discarded-return-value warning no longer keeps a variable's old type after its declaration changes.** Changing a declaration such as `obj  LongClass` to `obj  ProcClass` could leave the warning judging `obj.Method()` by the old class, when the change kept the file the same length. [#715](https://github.com/msarson/Clarion-Extension/issues/715)
+[**→ Full details**](dev/docs-internal/changelogs/CHANGELOG-1.0.8.md)
 
 ---
 

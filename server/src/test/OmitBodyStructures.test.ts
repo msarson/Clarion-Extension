@@ -105,3 +105,84 @@ suite('The body of an OMIT block is not code to the structure parser', () => {
         assert.strictEqual(structureAt(code, 11).finishesAt, 14, 'the conditional body IF takes the `.`, as before');
     });
 });
+
+/**
+ * The same holds for branch keywords: an OF / OROF / ELSIF / ELSE in an OMIT body is a branch only
+ * of a CASE or IF opened in that body. A CASE around the block listed a stray omitted ELSE among
+ * its branches (on the CASE, OF and END hover cards).
+ */
+suite('A branch keyword in an OMIT body is not a branch of the structure around it', () => {
+
+    let docVersion = 0;
+    const createDocument = (code: string) =>
+        TextDocument.create('file:///omit-body-branches.clw', 'clarion', ++docVersion, code);
+
+    const procedure = (body: string[]) => ['  PROGRAM', '  MAP', '  END', '  CODE', ...body, '  RETURN'].join('\r\n');
+
+    /** The 0-based lines of the branch keywords of the CASE/IF opened on `line`. */
+    const branchLines = (code: string, line: number): number[] => {
+        const doc = createDocument(code);
+        const tokens = TokenCache.getInstance().getTokens(doc);
+        const opener = tokens.find(t => t.type === TokenType.Structure && t.line === line)!;
+        return TokenCache.getInstance().getStructure(doc).getBranches(opener).map(b => b.keywordToken.line);
+    };
+
+    const messages = (code: string) =>
+        DiagnosticProvider.validateDocument(createDocument(code)).map(d => `${d.range.start.line}: ${d.message}`);
+
+    // A CASE whose OMIT body holds a stray OF and ELSE, one END too many, and a CASE and an IF of its own.
+    const CASE_AROUND = procedure([
+        '  CASE pKind',                     // 4
+        "  OF 'A'",                         // 5
+        "  OMIT('***')",                    // 6
+        "  OF 'Z'  ! omitted",              // 7
+        '    IF pKind = 1',                 // 8
+        '    ELSE',                         // 9
+        '    END',                          // 10
+        '    CASE pKind',                   // 11
+        '    OF 1',                         // 12
+        '    END',                          // 13
+        '  ELSE  ! omitted',                // 14
+        '  END',                            // 15
+        '  !***',                           // 16
+        "  OF 'B'",                         // 17
+        '  ELSE',                           // 18
+        '  END',                            // 19
+    ]);
+
+    test('the CASE around the block keeps only its live branches', () => {
+        assert.deepStrictEqual(branchLines(CASE_AROUND, 4), [5, 17, 18]);
+    });
+
+    test('a CASE or IF written in the body keeps its own branches', () => {
+        assert.deepStrictEqual(branchLines(CASE_AROUND, 11), [12], 'omitted CASE');
+        assert.deepStrictEqual(branchLines(CASE_AROUND, 8), [9], 'omitted IF');
+    });
+
+    test('an IF around the block does not take an omitted ELSIF or ELSE', () => {
+        const code = procedure([
+            '  IF pKind = 1',               // 4
+            '    pKind = 2',                // 5
+            "  OMIT('***')",                // 6
+            '  ELSIF pKind = 3  ! omitted', // 7
+            '  ELSE  ! omitted',            // 8
+            '  !***',                       // 9
+            '  ELSE',                       // 10
+            '    pKind = 4',                // 11
+            '  END',                        // 12
+        ]);
+        assert.deepStrictEqual(branchLines(code, 4), [10]);
+    });
+
+    test('an omitted OF no longer stands in for the OF a live OROF needs', () => {
+        const code = procedure([
+            '  CASE pKind',                 // 4
+            "  OMIT('***')",                // 5
+            '  OF 9',                       // 6
+            '  !***',                       // 7
+            '  OROF 2',                     // 8
+            '  END',                        // 9
+        ]);
+        assert.ok(messages(code).includes('8: OROF must be preceded by an OF clause in CASE structure'), messages(code).join('\n'));
+    });
+});

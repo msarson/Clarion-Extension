@@ -116,11 +116,6 @@
       "readOnly": false
     },
     {
-      "name": "PROP:Break",
-      "description": "Not declared in PROPERTY.CLW. A REPORT's BREAK structure is reached at runtime through PROP:BreakVar, which sets or returns the variable whose change starts a new group.",
-      "readOnly": false
-    },
-    {
       "name": "PROP:BreakVar",
       "description": "Sets the variable for a BREAK structure within a REPORT.",
       "readOnly": false
@@ -971,6 +966,11 @@
       "readOnly": false
     },
     {
+      "name": "PROP:NoTicks",
+      "description": "The NOTICKS attribute of a SLIDER: when set, the slider draws no tick marks. Without it the ticks are drawn, below or to the right by default; ABOVE, BELOW, LEFT, RIGHT and BOTH say where, and STEP (PROP:Step) sets their spacing.",
+      "readOnly": false
+    },
+    {
       "name": "PROP:NoTips",
       "description": "Disables (when set to 1) or re-enables (when set to 0) tooltip display (TIP attribute) for the SYSTEM, window, or control.",
       "readOnly": false
@@ -1146,6 +1146,16 @@
       "readOnly": true
     },
     {
+      "name": "PROP:RangeHigh",
+      "description": "The upper limit of a control's RANGE, the same value as PROP:Range[2]. On a SLIDER, SPIN or PROGRESS control it sets or returns the highest value the control can take.",
+      "readOnly": false
+    },
+    {
+      "name": "PROP:RangeLow",
+      "description": "The lower limit of a control's RANGE, the same value as PROP:Range[1]. On a SLIDER, SPIN or PROGRESS control it sets or returns the lowest value the control can take.",
+      "readOnly": false
+    },
+    {
       "name": "PROP:Readonly",
       "description": "The READONLY attribute (PROP:READONLY) specifies a display-only COMBO, ENTRY, SPIN or TEXT control. The control may receive input focus with the mouse, but may not enter data. If the user attempts to change the displayed value, a beep warns the user that data entry is not allowed.",
       "readOnly": false
@@ -1206,11 +1216,6 @@
       "readOnly": false
     },
     {
-      "name": "PROP:Select",
-      "description": "Not declared in PROPERTY.CLW. SELECT is a procedure that moves focus to a control (and can set its selected text); at runtime PROP:SelStart and PROP:SelEnd set and return the selected text, and PROP:Selected the selected item.",
-      "readOnly": false
-    },
-    {
       "name": "PROP:Selected",
       "description": "PROP:SelStart (also named PROP:Selected) sets or retrieves the beginning (inclusive) character to mark as a block in an ENTRY or TEXT control. It positions the data entry cursor left of the character, and sets PROP:SelEnd to zero (0) to indicate no block is marked. It also identifies the currently highlighted entry in a LIST or COMBO control (usually coded as PROP:Selected for this purpose). For COMBO controls, PROP:Selected should be applied to the PROP:ListFeq of the COMBO, and not to the combo FEQ directly.",
       "readOnly": false
@@ -1251,8 +1256,8 @@
       "readOnly": false
     },
     {
-      "name": "PROP:Slider",
-      "description": "Not declared in PROPERTY.CLW. SLIDER is a control (CREATE:Slider for CREATE); its position is set and returned through PROP:SliderPos, and its range, steps and ticks through PROP:Range, PROP:Step and PROP:NoTicks.",
+      "name": "PROP:SliderPos",
+      "description": "The current position of a SLIDER, within its RANGE. Runtime only: it reads where the slider is now, or moves it there, whether or not the control has a USE variable.",
       "readOnly": false
     },
     {
@@ -1478,11 +1483,6 @@
     {
       "name": "PROP:Threading",
       "description": "Property of the SYSTEM built-in variable which, when set to zero (0), disables all MDI behavior and turns the application into an SDI application.",
-      "readOnly": false
-    },
-    {
-      "name": "PROP:Ticks",
-      "description": "Not declared in PROPERTY.CLW. The tick marks of a SLIDER are set by its NOTICKS attribute (PROP:NoTicks) and by ABOVE, BELOW, LEFT, RIGHT or BOTH for where they are drawn; STEP (PROP:Step) sets their spacing.",
       "readOnly": false
     },
     {

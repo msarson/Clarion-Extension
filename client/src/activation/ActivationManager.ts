@@ -19,6 +19,7 @@ import { startLanguageServer } from '../server/LanguageServerManager';
 import { SettingsStorageManager } from '../utils/SettingsStorageManager'; // #563
 import { isAlreadyApplied } from '../utils/SolutionSettingsScope'; // #563
 import { applyActiveConfiguration } from '../config/ConfigurationManager'; // #563
+import { affectsClarionFilesEncoding, clarionFilesEncoding } from '../config/SourceEncoding'; // #879
 
 const logger = LoggerManager.getLogger("ActivationManager");
 logger.setLevel("error");
@@ -241,6 +242,25 @@ export async function setupFolderDependentFeatures(
                 );
                 client.sendNotification('clarion/updateDiagnosticSettings', payload);
                 logger.info(`🔄 Diagnostics settings changed — sent to the server: ${JSON.stringify(payload)}`);
+            })
+        );
+
+        // #879 — `files.encoding` for Clarion files reaches the server as it changes, so the
+        // sources it reads from disk keep decoding as the editor does. Startup sends it in
+        // the initialize request.
+        context.subscriptions.push(
+            workspace.onDidChangeConfiguration((event) => {
+                if (!affectsClarionFilesEncoding((section, scope) => event.affectsConfiguration(section, scope))) return;
+                const client = getLanguageClient();
+                if (!client || !isClientReady()) return;
+                const encoding = clarionFilesEncoding();
+                client.sendNotification('clarion/updateSourceEncoding', { encoding });
+                logger.info(`🔄 files.encoding for Clarion changed — sent to the server: ${encoding}`);
+                // The solution's index was read with the old encoding; a reload reads it again.
+                void window.showInformationMessage(
+                    `Clarion files are now read as ${encoding}. Reload the window so the solution's index reads them again.`,
+                    'Reload Window'
+                ).then(choice => { if (choice) void commands.executeCommand('workbench.action.reloadWindow'); });
             })
         );
 

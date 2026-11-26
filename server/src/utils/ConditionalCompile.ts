@@ -85,6 +85,23 @@ function code(line: string): string {
     return line;
 }
 
+/**
+ * Whether a line holds a COMPILE/OMIT terminator. The compiler reads a block's end two ways
+ * (checked on Clarion 11.1 and 12):
+ * - `skipping` (an OMIT, a COMPILE whose condition is false): it searches the raw text, so the
+ *   terminator counts anywhere on the line, in a string (`S = '***'`) or inside a word too.
+ * - otherwise (the block is compiled): it reads through string literals, so a terminator inside
+ *   a string does not count (`MESSAGE('***')`), one in code or in a comment does (`!'***'` too).
+ * The match is case-sensitive either way. Shared with OmitCompileDetector, so both read a block's
+ * end the same way.
+ */
+export function terminatorOnLine(text: string, terminator: string, skipping: boolean): boolean {
+    if (skipping) return text.includes(terminator);
+    const live = code(text);
+    // A string becomes '' rather than nothing, so the text either side of it does not join up.
+    return live.replace(/'(?:[^']|'')*'/g, "''").includes(terminator) || text.slice(live.length).includes(terminator);
+}
+
 export function scanConditionalCompile(lines: string[], context: ConditionalContext = {}): ConditionalScan {
     const equates = new Map<string, number>();
     const pragmas = new Map<string, number>();
@@ -118,8 +135,7 @@ export function scanConditionalCompile(lines: string[], context: ConditionalCont
     // Open blocks, innermost last; `omits` when decided not to compile, `undecided` when not decided.
     const stack: { terminator: string; omits: boolean; undecided: boolean }[] = [];
     const omitting = () => stack.length > 0 && stack[stack.length - 1].omits;
-    // A terminator counts outside strings, as the directive detector reads it (a comment counts).
-    const closes = (text: string, terminator: string) => text.replace(/'(?:[^']|'')*'/g, '').includes(terminator);
+    const closes = terminatorOnLine;
     // EQUATEs are switches in the global data only: not a procedure's local data, not an ITEMIZE's
     // members (they are `Pre:Name`).
     let globalData = true;
@@ -131,7 +147,7 @@ export function scanConditionalCompile(lines: string[], context: ConditionalCont
             // Nothing is read inside an omitted block but its own terminator.
             inactive[line] = 1;
             const top = stack[stack.length - 1];
-            if (closes(text, top.terminator)) stack.pop();
+            if (closes(text, top.terminator, true)) stack.pop();
             const m = INCLUDE.exec(code(text));
             if (m) includes.push({ file: m[1], line, active: false });
             continue;
@@ -149,11 +165,15 @@ export function scanConditionalCompile(lines: string[], context: ConditionalCont
             const holds = condition ? evaluateCondition(condition, value) : true;
             // Undecided: compiled, as before. Otherwise COMPILE omits when false, OMIT when true.
             const omits = holds === undefined ? false : isCompile ? !holds : holds;
-            stack.push({ terminator, omits, undecided: holds === undefined });
             if (omits) inactive[line] = 1;
+            // The rest of the directive's own line can hold the terminator (`COMPILE('**',X); F() !**`):
+            // the block opens and closes on that line. An undecided block is read as compiled.
+            if (closes(text.slice(directive[0].length), terminator, omits)) continue;
+            stack.push({ terminator, omits, undecided: holds === undefined });
             continue;
         }
-        if (open && closes(text, open.terminator)) {
+        // Not omitting here, so the open block is compiled (or undecided, read as compiled).
+        if (open && closes(text, open.terminator, false)) {
             stack.pop();
             continue;
         }

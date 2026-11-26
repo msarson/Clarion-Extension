@@ -39,6 +39,8 @@ import { DefinitionProvider } from './DefinitionProvider';
 import { cooperativeCheckpoint } from '../utils/cooperativeScan';
 import * as fs from 'fs';
 import * as path from 'path';
+import { resolveMemberHeaderTokenForUri } from '../utils/MemberHeaderResolver';
+import { readSourceText } from '../utils/SourceText'; // #879
 
 const logger = LoggerManager.getLogger("ImplementationProvider");
 logger.setLevel("error"); // Production: Only log errors
@@ -267,7 +269,7 @@ export class ImplementationProvider {
         // If no MAP declaration found in current file, check if this file has MEMBER
         // and search the parent file
         logger.info(`No MAP declaration found in current file, checking for MEMBER parent`);
-        const memberToken = TokenHelper.findMemberHeaderToken(tokens);
+        const memberToken = resolveMemberHeaderTokenForUri(tokens, document.uri);
 
         if (memberToken?.referencedFile) {
             logger.info(`File has MEMBER('${memberToken.referencedFile}'), checking parent for ${word}`);
@@ -967,7 +969,7 @@ export class ImplementationProvider {
 
         // Disk fallback (also used when file not in cache, or multi-overload needing signatures)
         try {
-            const content = fs.readFileSync(fullPath, 'utf8');
+            const content = readSourceText(fullPath);
             const lines = content.split(/\r?\n/);
 
             // Collect all matching candidates

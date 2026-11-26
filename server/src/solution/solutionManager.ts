@@ -8,6 +8,18 @@ import { Token, ClarionTokenizer } from '../ClarionTokenizer';
 import { TokenCache } from '../TokenCache';
 import { solutionOperationInProgress } from '../server';
 import { DirectoryFileIndex } from './DirectoryFileIndex';
+import { readSourceText } from '../utils/SourceText'; // #879
+import { getCrossFileEpoch } from '../utils/crossFileEpoch'; // #890
+
+/**
+ * #890 — bumped whenever a SolutionManager's projects are (re)assigned, so a memo of anything
+ * that depends on the loaded projects (MemberLocatorService's INCLUDE resolution) can tell.
+ * Module-level: a new instance (discardInstance) must not reuse an old generation.
+ */
+let projectsGeneration = 0;
+export function getProjectsGeneration(): number {
+    return projectsGeneration;
+}
 
 const logger = LoggerManager.getLogger("SolutionManager");
 logger.setLevel("error");
@@ -38,6 +50,17 @@ export class SolutionManager {
     // solution, so memoize positive lookups by normalized path; cleared on every solution
     // (re)assignment below.
     private projectForFileCache: Map<string, ClarionProjectServer> = new Map();
+    // #890: paths no project holds, for the same loaded set of projects. A miss can become a hit
+    // only when the projects change, and projectsChanged drops these with the hits.
+    private projectForFileMisses: Set<string> = new Set();
+    private projectForFileMissesEpoch = -1;
+
+    /** #890 — the solution's projects were (re)assigned: drop the path→project memos. */
+    private projectsChanged(): void {
+        this.projectForFileCache?.clear();
+        this.projectForFileMisses?.clear();
+        projectsGeneration++;
+    }
 
     // Static in-memory cache to store solution data by file path (similar to client-side implementation)
     private static inMemoryCache: Map<string, {
@@ -175,7 +198,7 @@ export class SolutionManager {
             
             this.solution = await this.parseSolution();
             this.equatesTokens = null; // reset so equates.clw is re-resolved with new project paths
-            this.projectForFileCache?.clear(); // #365: new projects → drop the path→project memo
+            this.projectsChanged(); // #365 / #890: new projects → drop the path→project memos
             this.equatesPath = null;
             
             // Log memory usage after parsing
@@ -327,7 +350,7 @@ export class SolutionManager {
 
                 // Save the parsed solution to cache
                 this.solution = solution;
-                this.projectForFileCache?.clear(); // #365: new projects → drop the path→project memo
+                this.projectsChanged(); // #365 / #890: new projects → drop the path→project memos
                 const saveCacheStart = performance.now();
                 await this.saveToCache();
                 mark('saveToCache', saveCacheStart);
@@ -420,6 +443,14 @@ export class SolutionManager {
         const cache = (this.projectForFileCache ??= new Map());
         const cached = cache.get(normalizedPath);
         if (cached) return cached;
+        // A project also changes its source list in place (Add Source File, a .cwproj reload);
+        // the .cwproj write is a watched-file change, which bumps the cross-file epoch.
+        const misses = (this.projectForFileMisses ??= new Set());
+        if (this.projectForFileMissesEpoch !== getCrossFileEpoch()) {
+            misses.clear();
+            this.projectForFileMissesEpoch = getCrossFileEpoch();
+        }
+        if (misses.has(normalizedPath)) return undefined;
 
         const baseName = path.basename(normalizedPath);
 
@@ -438,9 +469,12 @@ export class SolutionManager {
         const byBaseName = this.solution.projects.find(project =>
             project.sourceFiles.some(f => f.name.toLowerCase() === baseName)
         );
-        // Only positive results are memoized — a miss may become a hit once the solution
-        // finishes loading, so misses must re-scan rather than cache a stale negative.
+        // A miss may become a hit once the solution finishes loading: every step that assigns
+        // projects goes through projectsChanged, which drops the misses (#890). Before, misses
+        // were never remembered, and an INCLUDE'd file no project lists re-stat'ed every
+        // project's sources on each lookup.
         if (byBaseName) cache.set(normalizedPath, byBaseName);
+        else if (this.solution?.projects?.length) misses.add(normalizedPath);
         return byBaseName;
     }
 
@@ -486,7 +520,7 @@ export class SolutionManager {
 
     private loadEquatesFrom(filePath: string): boolean {
         try {
-            const content = fs.readFileSync(filePath, 'utf8');
+            const content = readSourceText(filePath);
             this.equatesTokens = new ClarionTokenizer(content).tokenize();
             this.equatesPath = filePath;
             logger.info(`✅ equates.clw resolved at ${filePath} (${this.equatesTokens.length} tokens)`);
@@ -1043,7 +1077,7 @@ export class SolutionManager {
                 // Cache is valid, use it
                 logger.info(`✅ Using solution from in-memory cache`);
                 this.solution = cache.solution;
-                this.projectForFileCache?.clear(); // #365: new projects → drop the path→project memo
+                this.projectsChanged(); // #365 / #890: new projects → drop the path→project memos
                 return true;
             } catch (error) {
                 logger.error(`❌ Error checking file timestamps: ${error instanceof Error ? error.message : String(error)}`);

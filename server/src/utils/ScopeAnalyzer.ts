@@ -14,6 +14,7 @@ import { resolvePrefixedName, prefixedNameStartsLine } from './PrefixChain';
 import { isPrototypeName, MAP_STRUCTURE_KEYWORD } from './MapPrototypeRules';
 import { isAttributeKeyword } from './AttributeKeywords';
 import * as fs from 'fs';
+import { readSourceText } from './SourceText'; // #879
 
 const logger = LoggerManager.getLogger("ScopeAnalyzer");
 logger.setLevel("error"); // Production: Only log errors
@@ -711,7 +712,7 @@ export class ScopeAnalyzer {
             }
             
             // Read file content
-            const content = fs.readFileSync(filePath, 'utf-8');
+            const content = readSourceText(filePath);
             logger.info(`         📖 Read ${content.length} characters from file`);
             
             // Create a TextDocument for tokenization

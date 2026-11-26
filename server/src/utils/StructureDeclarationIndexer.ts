@@ -8,6 +8,7 @@ import { SolutionManager } from '../solution/solutionManager';
 import LoggerManager from '../logger';
 import { serverSettings } from '../serverSettings';
 import { resolutionEnvironmentKey } from '../solution/resolutionEnvironmentKey'; // #568
+import { readSourceTextAsync } from './SourceText'; // #879
 
 const logger = LoggerManager.getLogger('StructureDeclarationIndexer');
 logger.setLevel('error');
@@ -52,7 +53,7 @@ const perfLogger = LoggerManager.getLogger('StructureDeclarationIndexer.Perf', '
 // v10: a labelled ITEMIZE with an empty prefix (`Label ITEMIZE,PRE` / `,PRE()`) names its
 // members `Label:Name` (they were bare), and a member already spelled `Pre:Name` is no
 // longer prefixed a second time.
-const DISK_CACHE_VERSION = 10;
+const DISK_CACHE_VERSION = 11; // #879 — sources decoded as the editor decodes them (names, line content)
 
 interface SdiDiskCacheEntry {
     mtimeMs: number;
@@ -1220,7 +1221,7 @@ export class StructureDeclarationIndexer implements IStructureDeclarationIndex {
     /** #362 — scan a file for both structure declarations and procedure declarations. */
     private async scanFile(filePath: string): Promise<{ decls: StructureDeclarationInfo[]; procs: ProcedureDeclarationInfo[] }> {
         try {
-            const source = await fs.promises.readFile(filePath, 'utf-8');
+            const source = await readSourceTextAsync(filePath);
             return {
                 decls: scanSourceForDeclarations(source, filePath),
                 procs: scanSourceForProcedures(source, filePath)

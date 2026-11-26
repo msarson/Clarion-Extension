@@ -1,6 +1,6 @@
 import * as assert from 'assert';
 import { folderAddition, isProjectNodeData, projectFolders, referenceCandidates } from '../views/ProjectFolders';
-import { listItems } from '../project/CwprojItems';
+import { listItems } from '../../../common/CwprojItems';
 
 /**
  * #803 — the Solution View shows a project as the Clarion IDE's Solution Explorer does: File

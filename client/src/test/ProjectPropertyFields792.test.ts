@@ -1,5 +1,5 @@
 import * as assert from 'assert';
-import { PROJECT_PROPERTY_FIELDS, PROJECT_PROPERTY_TABS, fieldAvailability, targetsProperties } from '../project/ProjectPropertyFields';
+import { PROJECT_PROPERTY_FIELDS, PROJECT_PROPERTY_TABS, fieldAvailability, targetsProperties } from '../../../common/ProjectPropertyFields';
 
 /**
  * #792 — the fields of the Project Properties page: the Clarion IDE's four pages, each field the

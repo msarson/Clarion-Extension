@@ -1,10 +1,10 @@
 import { TextDocument } from 'vscode-languageserver-textdocument';
 import { Diagnostic, DiagnosticSeverity } from 'vscode-languageserver/node';
 import { Token, TokenType } from '../../ClarionTokenizer';
-import { extractReturnType, isDataType } from '../../utils/AttributeKeywords';
+import { isDataType } from '../../utils/AttributeKeywords';
 import { ProcedureSignatureUtils } from '../../utils/ProcedureSignatureUtils';
 import { MemberLocatorService } from '../../services/MemberLocatorService';
-import { selectBestMemberOverload, overloadAcceptsArgs, OverloadCandidate } from '../../utils/ClassMemberScan';
+import { selectBestMemberOverload, overloadAcceptsArgs, OverloadCandidate, logicalLine } from '../../utils/ClassMemberScan';
 import { chainTargetClass, extractClassName, nearestClassLabel } from '../../utils/ClassNameUtils';
 import { TokenCache } from '../../TokenCache';
 import { TokenHelper } from '../../utils/TokenHelper';
@@ -557,6 +557,16 @@ export function validateReturnStatements(tokens: Token[], document: TextDocument
         line: number;
         signature: string;
     }> = [];
+    // A MAP or CLASS prototype that returns a value (no PROC or DERIVED), read across its `|`
+    // continuation lines (#853: the `)` closing its parameters was looked for on the first line
+    // only, so a continued prototype was never recorded and its procedure never checked).
+    // With or without a parameter list: `Foo PROCEDURE,LONG` declares a return too (the old walk
+    // took the first `(` for the parameters, so it recorded `Foo PROCEDURE,NAME('x'),LONG` but not that).
+    const recordPrototype = (j: number, name: string, line: number): void => {
+        const ret = declarationReturn(tokens, j);
+        if (ret.proc || !ret.returnType) return;
+        declarationsWithReturnTypes.push({ name, returnType: ret.returnType, line, signature: logicalLine(docLines, tokens[j].line) });
+    };
 
     for (let i = 0; i < tokens.length; i++) {
         const token = tokens[i];
@@ -580,33 +590,7 @@ export function validateReturnStatements(tokens: Token[], document: TextDocument
                         t.start === 0 && t.type === TokenType.Label
                     );
                     if (!procNameToken) continue;
-
-                    let parenDepth = 0;
-                    for (let k = j + 1; k < tokens.length && tokens[k].line === tokens[j].line; k++) {
-                        if (tokens[k].value === '(') parenDepth++;
-                        else if (tokens[k].value === ')') {
-                            parenDepth--;
-                            if (parenDepth === 0) {
-                                if (k + 1 < tokens.length && tokens[k + 1].line === tokens[j].line) {
-                                    const lineTokens = byLine.get(tokens[j].line) ?? [];
-                                    const hasProc = lineTokens.some(t => t.value.toUpperCase() === 'PROC');
-                                    const hasDerived = lineTokens.some(t => t.value.toUpperCase() === 'DERIVED');
-                                    if (!hasProc && !hasDerived) {
-                                        const returnType = extractReturnType(tokens, k + 1, true);
-                                        if (returnType) {
-                                            declarationsWithReturnTypes.push({
-                                                name: procNameToken.value,
-                                                returnType,
-                                                line: procNameToken.line,
-                                                signature: docLines[tokens[j].line] || ''
-                                            });
-                                        }
-                                    }
-                                }
-                                break;
-                            }
-                        }
-                    }
+                    recordPrototype(j, procNameToken.value, procNameToken.line);
                 }
             }
         }
@@ -636,33 +620,7 @@ export function validateReturnStatements(tokens: Token[], document: TextDocument
                         t.start === 0 && t.type === TokenType.Label
                     );
                     if (!methodNameToken) continue;
-
-                    let parenDepth = 0;
-                    for (let k = j + 1; k < tokens.length && tokens[k].line === tokens[j].line; k++) {
-                        if (tokens[k].value === '(') parenDepth++;
-                        else if (tokens[k].value === ')') {
-                            parenDepth--;
-                            if (parenDepth === 0) {
-                                if (k + 1 < tokens.length && tokens[k + 1].line === tokens[j].line) {
-                                    const lineTokens = byLine.get(tokens[j].line) ?? [];
-                                    const hasProc = lineTokens.some(t => t.value.toUpperCase() === 'PROC');
-                                    const hasDerived = lineTokens.some(t => t.value.toUpperCase() === 'DERIVED');
-                                    if (!hasProc && !hasDerived) {
-                                        const returnType = extractReturnType(tokens, k + 1, true);
-                                        if (returnType) {
-                                            declarationsWithReturnTypes.push({
-                                                name: className + '.' + methodNameToken.value,
-                                                returnType,
-                                                line: methodNameToken.line,
-                                                signature: docLines[tokens[j].line] || ''
-                                            });
-                                        }
-                                    }
-                                }
-                                break;
-                            }
-                        }
-                    }
+                    recordPrototype(j, className + '.' + methodNameToken.value, methodNameToken.line);
                 }
             }
         }
@@ -706,7 +664,7 @@ export function validateReturnStatements(tokens: Token[], document: TextDocument
             const token = tokens[i];
             {
                 {
-                    const implLine = docLines[token.line] || '';
+                    const implLine = logicalLine(docLines, token.line); // #853: a continued header whole
                     const declParams = ProcedureSignatureUtils.extractParameterTypes(decl.signature);
                     // #793: an overloaded procedure (several implementations of one name) must carry its types.
                     const implParams = ProcedureSignatureUtils.extractImplementationParameterTypes(implLine, (implementationsByName.get(decl.name.toLowerCase())?.length ?? 0) > 1);
