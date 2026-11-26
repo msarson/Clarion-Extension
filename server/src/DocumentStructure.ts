@@ -10,6 +10,7 @@ import { ViewDescriptor, ViewDescriptorParser } from './tokenizer/ViewDescriptor
 import { ControlService } from './utils/ControlService';
 import { ScopeResolver } from './scope/ScopeResolver';
 import { firstTokenAfterLine } from './utils/TokenLineIndex';
+import { isBareExecutionMarker } from './utils/ExecutionMarker';
 import { OmitCompileDetector } from './utils/OmitCompileDetector';
 
 /**
@@ -771,7 +772,7 @@ export class DocumentStructure {
                     case "DATA":
                         // #855: `Code = 1` in a procedure body is an assignment to a
                         // variable labelled Code, not a second CODE statement.
-                        if (this.isBareExecutionMarker(token)) this.handleExecutionMarker(token);
+                        if (this.isCodeOrDataStatement(token)) this.handleExecutionMarker(token);
                         break;
                     case "WHILE":
                     case "UNTIL":
@@ -794,7 +795,7 @@ export class DocumentStructure {
                 // is a field or variable labelled Code (compiler-verified legal on C10
                 // and C12) and belongs to its structure like any other label.
                 if ((token.type === TokenType.Label && token.start === 0) && (upperValue === 'CODE' || upperValue === 'DATA') &&
-                    this.isBareExecutionMarker(token)) {
+                    this.isCodeOrDataStatement(token)) {
                     if (DOCSTRUCT_TRACE) logger.info(`🔧 [ROUTINE-DATA-FIX] Handling CODE/DATA as execution marker: "${token.value}" at line ${token.line}`);
                     if (DOCSTRUCT_TRACE) logger.debug(`🔧 [ROUTINE-DATA-FIX] Handling CODE/DATA as execution marker: "${token.value}" at line ${token.line}`);
                     this.handleExecutionMarker(token);
@@ -1477,12 +1478,9 @@ export class DocumentStructure {
         return false;
     }
 
-    /** #855 — a CODE or DATA statement stands alone on its line (a comment may follow).
-     *  Anything else after it makes the word a label (`Code  LONG`) or a variable
-     *  reference (`Code = 1`), not the execution marker. */
-    private isBareExecutionMarker(token: Token): boolean {
-        const lineTokens = this.tokensByLine.get(token.line) ?? [];
-        return lineTokens.every(t => t === token || t.start < token.start || t.type === TokenType.Comment);
+    /** #855 — a CODE or DATA statement stands alone on its line (see utils/ExecutionMarker). */
+    private isCodeOrDataStatement(token: Token): boolean {
+        return isBareExecutionMarker(token, line => this.tokensByLine.get(line) ?? []);
     }
 
     private handleExecutionMarker(token: Token): void {
@@ -1521,7 +1519,7 @@ export class DocumentStructure {
             // A CODE or DATA statement written at column 0 (the compiler accepts it) stays the
             // execution marker: the outline and the diagnostics only look for ExecutionMarker.
             // `Code  LONG` is not bare and still becomes a Label (#855).
-            if (token.type === TokenType.ExecutionMarker && this.isBareExecutionMarker(token)) continue;
+            if (token.type === TokenType.ExecutionMarker && this.isCodeOrDataStatement(token)) continue;
 
             if (!insideExecutionCode && token.start === 0 && 
                 token.type !== TokenType.Comment && 
@@ -2853,7 +2851,7 @@ export class DocumentStructure {
                 const upperValue = token.value.toUpperCase();
                 
                 // Skip keywords that might be tokenized as labels (DATA, CODE)
-                if ((upperValue === 'DATA' || upperValue === 'CODE') && this.isBareExecutionMarker(token)) {
+                if ((upperValue === 'DATA' || upperValue === 'CODE') && this.isCodeOrDataStatement(token)) {
                     continue;
                 }
                 
@@ -2893,7 +2891,7 @@ export class DocumentStructure {
                 // #856: an indented CODE is an ExecutionMarker token, a column-0 one a Label.
                 (token.type === TokenType.ExecutionMarker || token.type === TokenType.Keyword ||
                  token.type === TokenType.Label) &&
-                this.isBareExecutionMarker(token)) {   // #855: not a global `Code  LONG`
+                this.isCodeOrDataStatement(token)) {   // #855: not a global `Code  LONG`
                 return token;
             }
         }

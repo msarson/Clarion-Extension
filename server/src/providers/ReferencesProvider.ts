@@ -45,6 +45,8 @@ import { cooperativeCheckpoint } from '../utils/cooperativeScan';
 import { ReferenceCountIndex } from '../services/ReferenceCountIndex';
 import { resolvePrefixedName } from '../utils/PrefixChain';
 import { resolveFieldEquate } from '../utils/FieldEquateResolver';
+import { isBareExecutionMarker } from '../utils/ExecutionMarker';
+import { tokensOnLine } from '../utils/TokenLineIndex';
 import { onDiskSpelling, pathToCanonicalUri, toCanonicalUri } from '../utils/UriUtils';
 import LoggerManager from '../logger';
 import { resolveMemberHeaderTokenForUri } from '../utils/MemberHeaderResolver';
@@ -3755,6 +3757,12 @@ export class ReferencesProvider {
                 let matchLength = token.value.length;
 
                 if (token.value.toLowerCase() === searchWordLower) {
+                    // A structure keyword (`Window WINDOW(...)`, a MAP block) is the keyword, not a
+                    // reference to a variable spelled like it: the structure's name is its own Label.
+                    // Nor is a CODE or DATA statement standing alone on its line; `Code = 1` is a reference.
+                    if (token.type === TokenType.Structure) continue;
+                    if (token.type === TokenType.ExecutionMarker &&
+                        isBareExecutionMarker(token, line => tokensOnLine(tokens, line))) continue;
                     // Exact match — for field scope, skip other structure field declarations
                     // (col-0 Label with a parent Structure) that are not the declaration line itself
                     if (scopeType === 'field' &&
