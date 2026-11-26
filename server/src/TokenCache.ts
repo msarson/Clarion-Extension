@@ -62,9 +62,11 @@ export class TokenCache {
      *  hits re-insert (LRU), overflow evicts the oldest. Mutable for tests. */
     public static closedFileCacheMax = 512;
 
-    /** #484 — extensions that are never Clarion source; getTokensForClosedFile returns [] for them. */
+    /** #484 — extensions that are never Clarion source; getTokensForClosedFile returns [] for them.
+     *  Besides binaries, the sources of other languages a project may compile and a MODULE may
+     *  name: assembler (`MODULE('x.a')`), C and C++ (`MODULE('x.cpp')`, a .cwproj Compile item). */
     public static readonly NON_SOURCE_EXTENSION =
-        /\.(dll|lib|exe|obj|res|pdb|ico|bmp|png|jpg|jpeg|gif|cur|app|dct|tps|tpsx|zip|7z|rar|msi|chm|pdf)$/i;
+        /\.(dll|lib|exe|obj|res|pdb|ico|bmp|png|jpg|jpeg|gif|cur|app|dct|tps|tpsx|zip|7z|rar|msi|chm|pdf|a|c|cpp|h)$/i;
 
     /** #260 — test/diagnostics visibility into the closed-file cache size. */
     public get closedFileCacheSize(): number {
