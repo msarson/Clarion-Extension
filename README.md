@@ -94,17 +94,17 @@ Install from the Marketplace: open Extensions (`Ctrl+Shift+X`), search for **Cla
 
 ## What's new
 
-### 1.0.10 (2026-11-03)
+### 1.0.11 (2026-11-26)
 
-Projects and solutions managed in VS Code as in the Clarion IDE, and code read the way the compiler reads it.
+Find All References made precise, and hover cards that fit where they are used.
 
-- Project Properties and Solution Properties show a project's and a solution's options as the Clarion IDE's pages do; projects can be added, sources, references and pragmas edited, and the Solution View shows each project's IDE folders.
-- New Solution asks everything on one page and builds a project for each program already in a folder, with its references and export files, following a legacy .prj where one compiles the program.
-- An INCLUDE inside a COMPILE or OMIT block that does not compile is no longer followed, decided from the equates before it and the project's defines.
-- Prototypes and headers continued with `|`, LIKE declarations and the attributes of CLASS, QUEUE and variable lines read correctly in hover, the Outline, Find All References and the diagnostics; BREAK and CYCLE show the loop they act on, and EXPORT has a card.
-- TXA files are highlighted.
+- Find All References keeps apart fields, class members, parameters and keywords that share a name, and finds accesses through colon-named objects, `Group.Field`, `?Name` controls and modules that take their MEMBER from an INCLUDEd file. On a structure's field it is about twice as fast.
+- The hover on a CASE, OF or END lists the CASE's branches, attribute cards such as IMM describe the attribute where it is used, and the hover on an overloaded call shows the prototype its arguments pick.
+- The project page sets or clears a source's Generated mark, and Add Source File, Add Module and Remove Source File change only the file's own line in the .cwproj.
+- The build compiles with the Clarion version chosen for the solution, and text from a file that is not open reads in the editor's encoding.
+- COMPILE and OMIT blocks end where the compiler ends them, and a word CODE or DATA that is not a section marker no longer upsets the Structure view or the diagnostics.
 
-**Earlier:** 1.0.9 (2026-10-24) added hover cards that list and edit a declaration's attributes and resolved solutions with custom-named versions and redirection layouts; 1.0.8 (2026-10-04) made diagnostics after an edit about three times quicker on large modules and let hover, completion and Go to Definition run ahead of the background check. [Full changelog](CHANGELOG.md).
+**Earlier:** 1.0.10 (2026-11-03) added project and solution property pages like the Clarion IDE's, built New Solution projects from the programs already in a folder and decided COMPILE and OMIT blocks by the equates and project defines in force; 1.0.9 (2026-10-24) added hover cards that list and edit a declaration's attributes and resolved solutions with custom-named versions and redirection layouts. [Full changelog](CHANGELOG.md).
 
 ---
 
