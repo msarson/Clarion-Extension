@@ -2,7 +2,7 @@
 
 [← Back to Documentation Home](../../README.md)
 
-Complete reference for all Clarion Extension settings, generated from the extension manifest for **v1.0.11**.
+Complete reference for all Clarion Extension settings, generated from the extension manifest for **v1.0.12**.
 
 Open settings with `Ctrl+,` and search for `clarion`, or edit `settings.json` directly.
 
