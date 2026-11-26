@@ -2588,7 +2588,7 @@ export class ReferencesProvider {
                 if (!textLines) {
                     try {
                         const filePath = decodeURIComponent(fileUri.replace(/^file:\/\/\//, '')).replace(/\//g, '\\');
-                        textLines = fs.readFileSync(filePath, 'utf8').split(/\r?\n/);
+                        textLines = readSourceText(filePath).split(/\r?\n/);
                     } catch { textLines = null; }
                 }
             }
