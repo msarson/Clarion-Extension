@@ -547,7 +547,12 @@ export class ReferencesProvider {
             t.label !== undefined &&
             t.line === position.line
         );
-        if (methodImplToken?.label) {
+        // #844 — only the method's own name: a word in the parameter list is a parameter.
+        const onImplLabel = (label: string): boolean => {
+            const at = fullLine.toLowerCase().indexOf(label.toLowerCase());
+            return at >= 0 && position.character <= at + label.length;
+        };
+        if (methodImplToken?.label && onImplLabel(methodImplToken.label)) {
             const dotIdx = methodImplToken.label.indexOf('.');
             const implClassName = dotIdx > 0 ? methodImplToken.label.substring(0, dotIdx) : null;
             if (implClassName && this.isClassDeclaredInDocument(implClassName, document)) {
