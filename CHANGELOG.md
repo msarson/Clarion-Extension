@@ -33,6 +33,7 @@ All notable changes to the Clarion Extension are documented here.
 - **Dot completion offers the members hover and Go to Definition find.** After `SELF.G.` for an inline GROUP, or a dot after a typed GROUP or QUEUE, the list was empty or short. Completion now walks the same owners as hover and F12. [#875](https://github.com/msarson/Clarion-Extension/pull/875) @geircodes
 - **Find All References keeps a class member apart from a same-named field of the class's inline GROUP.** References on either one listed the other's uses too, so a rename changed both. [#877](https://github.com/msarson/Clarion-Extension/pull/877) [#846](https://github.com/msarson/Clarion-Extension/issues/846) @geircodes
 - **Find All References from a field's declaration lists only that field's accesses.** When two structures declare a field with the same name, references from one declaration listed accesses of the other. An access whose owner cannot be resolved is still kept, so a rename misses no use. [#886](https://github.com/msarson/Clarion-Extension/pull/886) @geircodes
+- **Find All References on a field of a PRE() structure lists only that field.** It listed every word spelled like the field, in any case, such as another procedure's parameter or local. Such a field is only reached as `Pre:Field` or `Group.Field`. [#845](https://github.com/msarson/Clarion-Extension/issues/845)
 
 #### Diagnostics
 

@@ -4039,6 +4039,8 @@ export class ReferencesProvider {
 
             const declarationLine = symbolInfo.location.line;
             const declarationUri = symbolInfo.location.uri;
+            const fieldOwnPrefix = scopeType === 'field' &&
+                !!(symbolInfo.token.structurePrefix || symbolInfo.scope.token?.structurePrefix);
 
             // #268 — lazily-built per-file classifier context for call-site
             // overload filtering (only when this file actually contains a call).
@@ -4066,6 +4068,14 @@ export class ReferencesProvider {
                         token.start === 0 &&
                         token.parent !== undefined &&
                         !(fileUri === declarationUri && token.line === declarationLine)) {
+                        continue;
+                    }
+                    // #845 — a field of a PRE()'d structure is reached only as `Pre:Field` or
+                    // `Struct.Field`, so a bare word spelled like it is some other variable. A prefix
+                    // the tokenizer split off (`LONGPREFIX` `:` `Answer`, #600) is still the field's.
+                    if (fieldOwnPrefix &&
+                        !(fileUri === declarationUri && token.line === declarationLine) &&
+                        !this.isOwnQualifiedTail(tokens, i, fieldPrefixes)) {
                         continue;
                     }
                     // #487 — and for a NON-field symbol (a local, module or global), a col-0
@@ -4292,6 +4302,24 @@ export class ReferencesProvider {
      *
      * Returns a Set of lowercase prefix strings (e.g. {"qdir", "qzipf"}).
      */
+    /**
+     * #845 — whether `tokens[index]`, a bare field name, is the tail of a qualified name: one of
+     * the field's own prefixes split off by the tokenizer (`LONGPREFIX` `:` `Answer`), or a
+     * `.` right before it (`Struct` `.` `Field`). Either way it is the field, not a namesake.
+     */
+    private isOwnQualifiedTail(tokens: Token[], index: number, fieldPrefixes?: Set<string>): boolean {
+        const token = tokens[index];
+        const before = tokens[index - 1];
+        if (before && before.line === token.line && before.value === '.' &&
+            before.start + 1 === token.start) {
+            return true;
+        }
+        const prefixed = resolvePrefixedName(tokens, index);
+        if (prefixed.startIndex === index) return false;
+        const prefix = prefixed.name.substring(0, prefixed.name.length - token.value.length - 1).toLowerCase();
+        return !!fieldPrefixes?.has(prefix);
+    }
+
     private collectFieldPrefixes(symbolInfo: SymbolInfo, document: TextDocument): Set<string> {
         const prefixes = new Set<string>();
 
