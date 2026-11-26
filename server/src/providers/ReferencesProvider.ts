@@ -2434,6 +2434,18 @@ export class ReferencesProvider {
             const structure = this.tokenCache.getStructure(doc);
             const tokens = this.tokenCache.getTokens(doc);
             const verdicts = new Map<string, boolean | undefined>();
+            // #890: the file's tokens by line, built on its first match (was a scan of every token per match).
+            let byLine: Map<number, Token[]> | undefined;
+            const tokensOn = (line: number): Token[] => {
+                if (!byLine) {
+                    byLine = new Map();
+                    for (const t of tokens) {
+                        const row = byLine.get(t.line);
+                        if (row) row.push(t); else byLine.set(t.line, [t]);
+                    }
+                }
+                return byLine.get(line) ?? [];
+            };
 
             for (let line = 0; line < lines.length; line++) {
                 const lineText = lines[line];
@@ -2442,7 +2454,7 @@ export class ReferencesProvider {
                 for (let m = access.exec(lineText); m; m = access.exec(lineText)) {
                     const memberStart = m.index + 1;
                     // Code only: the name sits in an access token, not a comment or a string.
-                    const covering = tokens.find(t => t.line === line && t.start <= memberStart && memberStart < t.start + t.value.length);
+                    const covering = tokensOn(line).find(t => t.start <= memberStart && memberStart < t.start + t.value.length);
                     if (!covering || covering.type === TokenType.Comment || covering.type === TokenType.String) continue;
                     const receiver = ReferencesProvider.fieldAccessReceiver(lineText, m.index);
                     if (!receiver) continue;
@@ -2451,7 +2463,7 @@ export class ReferencesProvider {
 
                     if (await this.yieldIfNeeded(steps++, token)) return null;
                     const keep = await this.fieldAccessVerdict(receiver, memberName, doc, structure, line, target, verdicts, true);
-                    if (keep === true) {
+                    if (keep !== false) {
                         locations.push(Location.create(fileUri,
                             Range.create(line, memberStart, line, memberStart + memberName.length)));
                     }
