@@ -36,25 +36,25 @@ suite('Hover on a keyword-named label in a QUEUE or a CLASS (#891)', () => {
     ];
 
     test('a QUEUE field named Code shows the field, not the CODE keyword card', async () => {
-        const text = await hoverAt('file:///kw891-q.clw', SRC, 4, 1);
+        const text = await hoverAt('file:///kw891.clw', SRC, 4, 1);
         assert.ok(!/Begins the executable code section/.test(text), text);
         assert.ok(/\bCode\b/.test(text) && /LONG/.test(text), text || '(no hover)');
     });
 
     test('a QUEUE field named Map shows the field, not the MAP keyword card', async () => {
-        const text = await hoverAt('file:///kw891-q.clw', SRC, 5, 1);
+        const text = await hoverAt('file:///kw891.clw', SRC, 5, 1);
         assert.ok(!/external procedure prototypes/i.test(text), text);
         assert.ok(/\bMap\b/.test(text) && /STRING/.test(text), text || '(no hover)');
     });
 
     test('a CLASS property named Code shows the property, not the CODE keyword card', async () => {
-        const text = await hoverAt('file:///kw891-q.clw', SRC, 8, 1);
+        const text = await hoverAt('file:///kw891.clw', SRC, 8, 1);
         assert.ok(!/Begins the executable code section/.test(text), text);
         assert.ok(/\bCode\b/.test(text) && /LONG/.test(text), text || '(no hover)');
     });
 
     test('the CODE statement still shows the keyword card', async () => {
-        const text = await hoverAt('file:///kw891-q.clw', SRC, 10, 3);
+        const text = await hoverAt('file:///kw891.clw', SRC, 10, 3);
         assert.ok(/Begins the executable code section/.test(text), text || '(no hover)');
     });
 });

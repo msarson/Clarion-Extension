@@ -8,8 +8,8 @@ import { ClarionTokenizer } from '../ClarionTokenizer';
 /**
  * #891 (from #884's review) — #884 leaves out structure keywords and bare CODE / DATA statements
  * as references of a name spelled like a keyword. These pin the forms that must stay references
- * of a WINDOW named Window (a property access, an argument; LIKE takes no WINDOW), and that #884's tightened
- * execution-marker rule still opens the code section only where a CODE statement stands alone.
+ * of a WINDOW named Window (a property access, an argument), and that #884's tightened
+ * execution-marker rule opens the code section only where a CODE statement stands alone.
  */
 suite('A name spelled like a keyword keeps its other reference forms (#891)', () => {
     setup(() => { setServerInitialized(true); TokenCache.getInstance().clearAllTokens(); });
