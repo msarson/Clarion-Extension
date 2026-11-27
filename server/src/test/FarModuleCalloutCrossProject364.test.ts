@@ -1,15 +1,15 @@
 /**
  * #364 — the #322 module-callout FAR, but in the REAL cross-project shape that
- * under-counts to 2 on Mark's solution: `AppendText` exists as a self-contained
+ * under-counts to 2 on Mark's solution: `LogText` exists as a self-contained
  * module-callout family in BOTH ProjData and ProjSetup. Each project
- * has its own callout INC (`APPENDTEXT_<proj>.INC` → `MODULE('APPENDTEXT_<proj>.CLW')`),
+ * has its own callout INC (`LOGTEXT_<proj>.INC` → `MODULE('LOGTEXT_<proj>.CLW')`),
  * its own MEMBER implementation, and its own callers that `INCLUDE` the INC.
  *
  * Two real-world traits the passing #322 fixture lacks and that are reproduced
  * here from a real generated solution:
  *   1. Two independent projects carrying the same procedure name.
  *   2. The MODULE('…CLW') reference is UPPER-case while the implementation file
- *      is mixed-case (`AppendText_SQL.clw`) — a case mismatch.
+ *      is mixed-case (`LogText_SQL.clw`) — a case mismatch.
  *
  * FAR from any SQL position must return the SQL callout family (INC prototype +
  * implementation + every SQL call site) and must NOT leak ProjData's same-named
@@ -43,70 +43,70 @@ suite('FAR module-callout cross-project (#364)', () => {
         'sqlmain.clw': [
             '  PROGRAM',
             '  MAP',
-            "    INCLUDE('APPENDTEXT_SQL.INC'),ONCE",
+            "    INCLUDE('LOGTEXT_SQL.INC'),ONCE",
             '  END',
             '  CODE',
             '  RETURN',
         ].join('\r\n'),
-        'APPENDTEXT_SQL.INC': [
-            "  MODULE('APPENDTEXT_SQL.CLW')",
-            'AppendText PROCEDURE(SIGNED feq, STRING txt)',
+        'LOGTEXT_SQL.INC': [
+            "  MODULE('LOGTEXT_SQL.CLW')",
+            'LogText PROCEDURE(SIGNED feq, STRING txt)',
             '  END',
         ].join('\r\n'),
-        'AppendText_SQL.clw': [
+        'LogText_SQL.clw': [
             "  MEMBER('sqlmain.clw')",                        // 0
             '  MAP',                                          // 1
-            "    INCLUDE('APPENDTEXT_SQL.INC'),ONCE",         // 2
+            "    INCLUDE('LOGTEXT_SQL.INC'),ONCE",         // 2
             '  END',                                          // 3
-            'AppendText PROCEDURE(SIGNED feq, STRING txt)',   // 4 — implementation
+            'LogText PROCEDURE(SIGNED feq, STRING txt)',   // 4 — implementation
             '  CODE',                                         // 5
             '  RETURN',                                       // 6
         ].join('\r\n'),
         'CheckDB_SQL.clw': [
             "  MEMBER('sqlmain.clw')",                        // 0
             '  MAP',                                          // 1
-            "    INCLUDE('APPENDTEXT_SQL.INC'),ONCE",         // 2
+            "    INCLUDE('LOGTEXT_SQL.INC'),ONCE",         // 2
             '  END',                                          // 3
             'CheckDB PROCEDURE',                              // 4
             '  CODE',                                         // 5
-            "  AppendText(1, 'a')",                           // 6 — call site
-            "  AppendText(2, 'b')",                           // 7 — call site
+            "  LogText(1, 'a')",                           // 6 — call site
+            "  LogText(2, 'b')",                           // 7 — call site
             '  RETURN',                                       // 8
         ].join('\r\n'),
     };
 
     // ProjData project — its own same-named callout family (must never leak in).
-    const prvFiles: { [rel: string]: string } = {
-        'prvmain.clw': [
+    const dataFiles: { [rel: string]: string } = {
+        'datamain.clw': [
             '  PROGRAM',
             '  MAP',
-            "    INCLUDE('APPENDTEXT_PRV.INC'),ONCE",
+            "    INCLUDE('LOGTEXT_DATA.INC'),ONCE",
             '  END',
             '  CODE',
             '  RETURN',
         ].join('\r\n'),
-        'APPENDTEXT_PRV.INC': [
-            "  MODULE('APPENDTEXT_PRV.CLW')",
-            'AppendText PROCEDURE(SIGNED feq, STRING txt)',
+        'LOGTEXT_DATA.INC': [
+            "  MODULE('LOGTEXT_DATA.CLW')",
+            'LogText PROCEDURE(SIGNED feq, STRING txt)',
             '  END',
         ].join('\r\n'),
-        'AppendText_PRV.clw': [
-            "  MEMBER('prvmain.clw')",
+        'LogText_DATA.clw': [
+            "  MEMBER('datamain.clw')",
             '  MAP',
-            "    INCLUDE('APPENDTEXT_PRV.INC'),ONCE",
+            "    INCLUDE('LOGTEXT_DATA.INC'),ONCE",
             '  END',
-            'AppendText PROCEDURE(SIGNED feq, STRING txt)',
+            'LogText PROCEDURE(SIGNED feq, STRING txt)',
             '  CODE',
             '  RETURN',
         ].join('\r\n'),
-        'GetJob_PRV.clw': [
-            "  MEMBER('prvmain.clw')",
+        'GetJob_DATA.clw': [
+            "  MEMBER('datamain.clw')",
             '  MAP',
-            "    INCLUDE('APPENDTEXT_PRV.INC'),ONCE",
+            "    INCLUDE('LOGTEXT_DATA.INC'),ONCE",
             '  END',
             'GetJob PROCEDURE',
             '  CODE',
-            "  AppendText(9, 'prv')",                          // 6 — PRV call site (decoy)
+            "  LogText(9, 'data')",                          // 6 — DATA call site (decoy)
             '  RETURN',
         ].join('\r\n'),
     };
@@ -116,9 +116,9 @@ suite('FAR module-callout cross-project (#364)', () => {
         savedSm = (SolutionManager as unknown as { instance: SolutionManager | null }).instance;
         root = fs.mkdtempSync(path.join(os.tmpdir(), 'far364cp-'));
         const sqlDir = path.join(root, 'ProjSetup');
-        const prvDir = path.join(root, 'ProjData');
+        const dataDir = path.join(root, 'ProjData');
         fs.mkdirSync(sqlDir, { recursive: true });
-        fs.mkdirSync(prvDir, { recursive: true });
+        fs.mkdirSync(dataDir, { recursive: true });
 
         const tc = TokenCache.getInstance();
         tc.clearAllTokens();
@@ -135,14 +135,14 @@ suite('FAR module-callout cross-project (#364)', () => {
             }
         };
         write(sqlDir, sqlFiles);
-        write(prvDir, prvFiles);
+        write(dataDir, dataFiles);
 
         // Two-project solution — ProjData FIRST so any first-match hunt resolves wrong.
-        const pPrv = new ClarionProjectServer('ProjData', 'app', prvDir, '{DATA-364}');
-        for (const rel of Object.keys(prvFiles)) pPrv.sourceFiles.push(new ClarionSourcerFileServer(rel, rel, pPrv));
+        const pData = new ClarionProjectServer('ProjData', 'app', dataDir, '{DATA-364}');
+        for (const rel of Object.keys(dataFiles)) pData.sourceFiles.push(new ClarionSourcerFileServer(rel, rel, pData));
         const pSql = new ClarionProjectServer('ProjSetup', 'app', sqlDir, '{SETUP-364}');
         for (const rel of Object.keys(sqlFiles)) pSql.sourceFiles.push(new ClarionSourcerFileServer(rel, rel, pSql));
-        const projects = [pPrv, pSql];
+        const projects = [pData, pSql];
         const findProjectForFile = (fp: string) => {
             const norm = path.normalize(fp).toLowerCase();
             const byPath = projects.find(p => norm.startsWith(path.normalize(p.path).toLowerCase() + path.sep));
@@ -167,10 +167,10 @@ suite('FAR module-callout cross-project (#364)', () => {
         // #362 — build the SDI procedure index so findProcedureViaIndex fires,
         // matching the REAL resolution path (proc index → INC) that the lens uses.
         savedLibsrc = serverSettings.libsrcPaths;
-        serverSettings.libsrcPaths = [sqlDir, prvDir];
+        serverSettings.libsrcPaths = [sqlDir, dataDir];
         StructureDeclarationIndexer.getInstance().clearCache();
         await StructureDeclarationIndexer.getInstance().buildIndex(sqlDir);
-        await StructureDeclarationIndexer.getInstance().buildIndex(prvDir);
+        await StructureDeclarationIndexer.getInstance().buildIndex(dataDir);
     });
 
     teardown(() => {
@@ -190,13 +190,13 @@ suite('FAR module-callout cross-project (#364)', () => {
 
     test('FAR from the SQL implementation reaches every SQL call site, not just 2', async () => {
         const refs = await new ReferencesProvider().provideReferences(
-            docs.get('AppendText_SQL.clw')!, { line: 4, character: 2 }, { includeDeclaration: true });
+            docs.get('LogText_SQL.clw')!, { line: 4, character: 2 }, { includeDeclaration: true });
         const got = keyed(refs);
 
         assert.ok(got.includes('checkdb_sql.clw:6') && got.includes('checkdb_sql.clw:7'),
             `SQL call sites must be found (the "only 2" bug); got [${got.join(', ')}]`);
-        assert.ok(got.includes('appendtext_sql.clw:4'), `SQL implementation label; got [${got.join(', ')}]`);
-        assert.ok(!got.some(k => k.includes('_prv')),
+        assert.ok(got.includes('logtext_sql.clw:4'), `SQL implementation label; got [${got.join(', ')}]`);
+        assert.ok(!got.some(k => k.includes('_data')),
             `ProjData's same-named family must NOT leak in; got [${got.join(', ')}]`);
     });
 
@@ -207,8 +207,8 @@ suite('FAR module-callout cross-project (#364)', () => {
 
         assert.ok(got.includes('checkdb_sql.clw:6') && got.includes('checkdb_sql.clw:7'),
             `both SQL call sites; got [${got.join(', ')}]`);
-        assert.ok(got.includes('appendtext_sql.clw:4'), `SQL implementation reachable; got [${got.join(', ')}]`);
-        assert.ok(!got.some(k => k.includes('_prv')),
+        assert.ok(got.includes('logtext_sql.clw:4'), `SQL implementation reachable; got [${got.join(', ')}]`);
+        assert.ok(!got.some(k => k.includes('_data')),
             `no ProjData leak; got [${got.join(', ')}]`);
     });
 });

@@ -223,8 +223,8 @@ export class ReferencesProvider {
             }
             const rawLocations = await this.provideReferencesUnfiltered(document, position, context, token, opts?.crossProjectDll !== false);
             // #322: dedup by NORMALIZED path — the cursor document's URI casing can
-            // differ from the file-walk casing (CloneScript.clw:196 AND
-            // clonescript.clw:196 in the same result set). Same discipline as the
+            // differ from the file-walk casing (Module.clw:196 AND
+            // module.clw:196 in the same result set). Same discipline as the
             // #196/#252 rename-edit dedup: the key is the decoded lowercased path.
             const locations = rawLocations && this.restoreOnDiskSpelling(this.dedupeByNormalizedLocation(rawLocations));
             if (!locations || opts?.includeOmitted) {
@@ -4576,7 +4576,7 @@ export class ReferencesProvider {
                 const solutionManager = SolutionManager.getInstance();
                 if (solutionManager?.solution?.projects?.length) {
                     // #364 — hunt the CURRENT document's project FIRST. A procedure
-                    // name that also exists in another project (e.g. AppendText in
+                    // name that also exists in another project (e.g. LogText in
                     // both ProjData and ProjSetup) must resolve to the
                     // declaration in the project the user is actually in. Without
                     // this, a same-named declaration in an earlier-listed project

@@ -11,8 +11,8 @@
  *    and getFilesToSearch's module-PROCEDURE branch searched only
  *    declaring-file + MODULE targets.
  *  - FAR from a CALL site found everything but DUPLICATED the current
- *    document's hits as case-variant URIs (CloneScript.clw:196 AND
- *    clonescript.clw:196).
+ *    document's hits as case-variant URIs (Module.clw:196 AND
+ *    module.clw:196).
  *
  * Fix under test: (1) the module-PROCEDURE candidate set expands through the
  * FileRelationshipGraph's reverse INCLUDE edges — every file whose MAP
@@ -145,7 +145,7 @@ suite('ModuleCallout FAR #322', () => {
 
     test('results contain no case-variant duplicate locations', async () => {
         // Model the real repro: the client's document URI casing differs from
-        // the file-walk casing (CloneScript.clw:196 AND clonescript.clw:196).
+        // the file-walk casing (Module.clw:196 AND module.clw:196).
         const rel = 'consumer.clw';
         const p = path.join(dir, rel);
         const upperUri = `file:///${p.replace(/\\/g, '/').replace(/consumer\.clw$/, 'CONSUMER.CLW')}`;

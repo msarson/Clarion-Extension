@@ -2207,7 +2207,7 @@ export class SymbolFinderService {
         // MODULE prototype, but we resolve on the FIRST hit regardless: a stale
         // column is a cosmetic cursor offset; a 15s freeze is the bug.
         const wordLower = word.toLowerCase();
-        // #364 — when the name exists in more than one project (AppendText in both
+        // #364 — when the name exists in more than one project (LogText in both
         // ProjData and ProjSetup), prefer the hit in the CURRENT document's
         // project so F12/hover/FAR resolve within the project the cursor is in rather
         // than whichever the index lists first.
