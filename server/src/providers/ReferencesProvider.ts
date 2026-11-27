@@ -4577,7 +4577,7 @@ export class ReferencesProvider {
                 if (solutionManager?.solution?.projects?.length) {
                     // #364 — hunt the CURRENT document's project FIRST. A procedure
                     // name that also exists in another project (e.g. AppendText in
-                    // both PRVData and SQLInstallAndUpgrade) must resolve to the
+                    // both ProjData and ProjSetup) must resolve to the
                     // declaration in the project the user is actually in. Without
                     // this, a same-named declaration in an earlier-listed project
                     // wins, and getFilesToSearch then scopes the whole search to

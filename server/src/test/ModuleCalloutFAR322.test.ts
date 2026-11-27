@@ -4,7 +4,7 @@
  * calls the procedure INCLUDEs that INC into its own MAP. Visibility is
  * textual inclusion: every including module can call it.
  *
- * Verified against the real app (AppendText_SQLInstallAndUpgrade):
+ * Verified against a real app:
  *  - FAR from the IMPLEMENTATION label returned 2 refs (own label + INC
  *    prototype) — ALL ~120 call sites across consumer modules missed. The
  *    symbol resolves to the INC's MODULE declaration with scope='module',

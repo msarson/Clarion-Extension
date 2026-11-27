@@ -47,8 +47,8 @@ suite('Solution and project files for a folder of sources (#763)', () => {
     });
 
     test('file names are escaped for MSBuild and XML', () => {
-        const p = buildCwprojContent({ name: 'A&B', guid: A, compile: ["IBSC$TAG.clw", "50%_R&D's.clw"], kind: 'exe' });
-        assert.ok(p.includes('<Compile Include="IBSC%24TAG.clw" />'));
+        const p = buildCwprojContent({ name: 'A&B', guid: A, compile: ["ACMC$TAG.clw", "50%_R&D's.clw"], kind: 'exe' });
+        assert.ok(p.includes('<Compile Include="ACMC%24TAG.clw" />'));
         assert.ok(p.includes('<Compile Include="50%25_R&amp;D%27s.clw" />'));
         assert.ok(p.includes('<OutputName>A&amp;B</OutputName>'));
     });

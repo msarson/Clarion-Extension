@@ -66,12 +66,12 @@ suite('New solution from a folder of sources (#763)', () => {
 
     test('a bare MEMBER() named after a program joins it; the longest program name wins', () => {
         const r = inferProjects([
-            f('IBS.clw', exe), f('IBS_Tools.clw', exe),
-            f('IBS_FC0.clw', '  MEMBER()'), f('IBS_Tools_BC0.clw', '  MEMBER()'),
+            f('ACM.clw', exe), f('ACM_Tools.clw', exe),
+            f('ACM_FC0.clw', '  MEMBER()'), f('ACM_Tools_BC0.clw', '  MEMBER()'),
         ]);
         assert.deepStrictEqual(r.projects.map(p => [p.name, p.compile]), [
-            ['IBS', ['IBS.clw', 'IBS_FC0.clw']],
-            ['IBS_Tools', ['IBS_Tools.clw', 'IBS_Tools_BC0.clw']],
+            ['ACM', ['ACM.clw', 'ACM_FC0.clw']],
+            ['ACM_Tools', ['ACM_Tools.clw', 'ACM_Tools_BC0.clw']],
         ]);
         assert.deepStrictEqual(r.unassigned, []);
     });

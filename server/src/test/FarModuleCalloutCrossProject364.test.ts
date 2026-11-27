@@ -1,7 +1,7 @@
 /**
  * #364 — the #322 module-callout FAR, but in the REAL cross-project shape that
  * under-counts to 2 on Mark's solution: `AppendText` exists as a self-contained
- * module-callout family in BOTH PRVData and SQLInstallAndUpgrade. Each project
+ * module-callout family in BOTH ProjData and ProjSetup. Each project
  * has its own callout INC (`APPENDTEXT_<proj>.INC` → `MODULE('APPENDTEXT_<proj>.CLW')`),
  * its own MEMBER implementation, and its own callers that `INCLUDE` the INC.
  *
@@ -12,7 +12,7 @@
  *      is mixed-case (`AppendText_SQL.clw`) — a case mismatch.
  *
  * FAR from any SQL position must return the SQL callout family (INC prototype +
- * implementation + every SQL call site) and must NOT leak PRVData's same-named
+ * implementation + every SQL call site) and must NOT leak ProjData's same-named
  * family — and must not stop at 2.
  */
 
@@ -75,7 +75,7 @@ suite('FAR module-callout cross-project (#364)', () => {
         ].join('\r\n'),
     };
 
-    // PRVData project — its own same-named callout family (must never leak in).
+    // ProjData project — its own same-named callout family (must never leak in).
     const prvFiles: { [rel: string]: string } = {
         'prvmain.clw': [
             '  PROGRAM',
@@ -115,8 +115,8 @@ suite('FAR module-callout cross-project (#364)', () => {
         setServerInitialized(true);
         savedSm = (SolutionManager as unknown as { instance: SolutionManager | null }).instance;
         root = fs.mkdtempSync(path.join(os.tmpdir(), 'far364cp-'));
-        const sqlDir = path.join(root, 'SQLInstallAndUpgrade');
-        const prvDir = path.join(root, 'PRVData');
+        const sqlDir = path.join(root, 'ProjSetup');
+        const prvDir = path.join(root, 'ProjData');
         fs.mkdirSync(sqlDir, { recursive: true });
         fs.mkdirSync(prvDir, { recursive: true });
 
@@ -137,10 +137,10 @@ suite('FAR module-callout cross-project (#364)', () => {
         write(sqlDir, sqlFiles);
         write(prvDir, prvFiles);
 
-        // Two-project solution — PRVData FIRST so any first-match hunt resolves wrong.
-        const pPrv = new ClarionProjectServer('PRVData', 'app', prvDir, '{PRV-364}');
+        // Two-project solution — ProjData FIRST so any first-match hunt resolves wrong.
+        const pPrv = new ClarionProjectServer('ProjData', 'app', prvDir, '{DATA-364}');
         for (const rel of Object.keys(prvFiles)) pPrv.sourceFiles.push(new ClarionSourcerFileServer(rel, rel, pPrv));
-        const pSql = new ClarionProjectServer('SQLInstallAndUpgrade', 'app', sqlDir, '{SQL-364}');
+        const pSql = new ClarionProjectServer('ProjSetup', 'app', sqlDir, '{SETUP-364}');
         for (const rel of Object.keys(sqlFiles)) pSql.sourceFiles.push(new ClarionSourcerFileServer(rel, rel, pSql));
         const projects = [pPrv, pSql];
         const findProjectForFile = (fp: string) => {
@@ -197,10 +197,10 @@ suite('FAR module-callout cross-project (#364)', () => {
             `SQL call sites must be found (the "only 2" bug); got [${got.join(', ')}]`);
         assert.ok(got.includes('appendtext_sql.clw:4'), `SQL implementation label; got [${got.join(', ')}]`);
         assert.ok(!got.some(k => k.includes('_prv')),
-            `PRVData's same-named family must NOT leak in; got [${got.join(', ')}]`);
+            `ProjData's same-named family must NOT leak in; got [${got.join(', ')}]`);
     });
 
-    test('FAR from a SQL call site returns the SQL family, not PRVData', async () => {
+    test('FAR from a SQL call site returns the SQL family, not ProjData', async () => {
         const refs = await new ReferencesProvider().provideReferences(
             docs.get('CheckDB_SQL.clw')!, { line: 6, character: 4 }, { includeDeclaration: true });
         const got = keyed(refs);
@@ -209,6 +209,6 @@ suite('FAR module-callout cross-project (#364)', () => {
             `both SQL call sites; got [${got.join(', ')}]`);
         assert.ok(got.includes('appendtext_sql.clw:4'), `SQL implementation reachable; got [${got.join(', ')}]`);
         assert.ok(!got.some(k => k.includes('_prv')),
-            `no PRVData leak; got [${got.join(', ')}]`);
+            `no ProjData leak; got [${got.join(', ')}]`);
     });
 });
