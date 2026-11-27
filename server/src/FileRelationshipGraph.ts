@@ -1085,15 +1085,29 @@ export class FileRelationshipGraph {
     }
 
     /**
-     * Returns all MEMBER file paths belonging to the given PROGRAM file.
+     * Returns the modules of the given PROGRAM file: the files with a MEMBER edge to it, plus the
+     * files that INCLUDE one of those (modules headed by a MEMBER shim). Empty for a file that is
+     * not a program, so `length > 0` still answers "is this a program".
      * Used by FAR to widen `filesToSearch` for local classes — sibling MEMBER
      * files of the cursor's file may contain cross-procedure callers (P2b,
      * task 10ea5a80 track-(a) widening).
+     *
+     * A module headed by an INCLUDEd shim (`INCLUDE('member.clw')` in place of its own MEMBER)
+     * has no MEMBER edge: the graph records it on the shim, which is listed too. Such a module
+     * belongs to the program all the same; without it a module of that shape was never searched
+     * for a use of the program's global data. One INCLUDE hop, the reverse of
+     * programViaIncludedShim: a shim reached through a second shim is not followed.
      */
     public getMemberFiles(programFilePath: string): string[] {
-        return this.reverseEdges.get(this.normalizePath(programFilePath))
+        const members = this.reverseEdges.get(this.normalizePath(programFilePath))
             ?.filter(e => e.type === 'MEMBER')
             .map(e => e.fromFile) ?? [];
+        if (members.length === 0) return members;
+        const modules = new Set(members);
+        for (const member of members) {
+            for (const includer of this.getIncludingFiles(member)) modules.add(includer);
+        }
+        return [...modules];
     }
 
     /**
