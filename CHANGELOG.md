@@ -8,6 +8,10 @@ All notable changes to the Clarion Extension are documented here.
 
 ### [1.0.12] - Unreleased
 
+#### Navigation and hover
+
+- **Find All References on a program's global data reaches modules that take their MEMBER from an INCLUDEd file.** Started from the global's declaration, from a call in the PROGRAM or from a class method's implementation, the search left out every use in such a module. [#892](https://github.com/msarson/Clarion-Extension/pull/892) @geircodes
+
 ---
 
 ### [1.0.11] - 2026-11-26

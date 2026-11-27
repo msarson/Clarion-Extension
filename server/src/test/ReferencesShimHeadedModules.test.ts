@@ -92,6 +92,38 @@ suite('References reach modules headed by an INCLUDEd MEMBER shim', () => {
             '  Obj.Method()',                             // 5
             '  Counter += 2',                             // 6
         ].join('\r\n'),
+        // A second program in the same project, with its own shim and its own global Counter:
+        // none of its modules is a module of app1, and app1's searches must not reach them.
+        'app2.clw': [
+            '  PROGRAM',                                  // 0
+            '  MAP',                                      // 1
+            "    MODULE('report.clw')",                   // 2
+            '      Report PROCEDURE()',                   // 3
+            '    END',                                    // 4
+            '  END',                                      // 5
+            'Counter  LONG',                              // 6
+            '  CODE',                                     // 7
+            '  Counter = 5',                              // 8
+        ].join('\r\n'),
+        'member2.clw': [
+            "  MEMBER('app2.clw')",                       // 0
+        ].join('\r\n'),
+        'report.clw': [
+            "  INCLUDE('member2.clw')",                   // 0
+            '  MAP',                                      // 1
+            '  END',                                      // 2
+            'Report PROCEDURE()',                         // 3
+            '  CODE',                                     // 4
+            '  Counter += 10',                            // 5
+        ].join('\r\n'),
+        'plain2.clw': [
+            "  MEMBER('app2.clw')",                       // 0
+            '  MAP',                                      // 1
+            '  END',                                      // 2
+            'Plain PROCEDURE()',                          // 3
+            '  CODE',                                     // 4
+            '  Counter += 20',                            // 5
+        ].join('\r\n'),
     };
 
     setup(async () => {
@@ -108,19 +140,25 @@ suite('References reach modules headed by an INCLUDEd MEMBER shim', () => {
         ExpExportIndex.getInstance().reset();
         docs.clear();
         const project = new ClarionProjectServer('app1', 'app', dir, '{APP1-SHIM}');
+        // app2 is its own project in the same folder, as two programs of one solution often are.
+        const project2 = new ClarionProjectServer('app2', 'app', dir, '{APP2-SHIM}');
+        const ofApp2 = new Set(['app2.clw', 'member2.clw', 'report.clw', 'plain2.clw']);
+        const projectOf = (file: string): ClarionProjectServer =>
+            ofApp2.has(path.basename(file).toLowerCase()) ? project2 : project;
         const seedPaths: string[] = [];
         for (const [rel, content] of Object.entries(files)) {
             const p = path.join(dir, rel);
             fs.writeFileSync(p, content);
-            if (rel !== 'member.clw') project.sourceFiles.push(new ClarionSourcerFileServer(rel, rel, project));
+            const owner = projectOf(rel);
+            if (rel !== 'member.clw' && rel !== 'member2.clw') owner.sourceFiles.push(new ClarionSourcerFileServer(rel, rel, owner));
             seedPaths.push(p);
             const doc = TextDocument.create(`file:///${p.replace(/\\/g, '/')}`, 'clarion', 1, content);
             tc.getTokens(doc);
             docs.set(rel, doc);
         }
         (SolutionManager as unknown as { instance: SolutionManager | null }).instance = {
-            solution: { projects: [project] },
-            findProjectForFile: () => project,
+            solution: { projects: [project, project2] },
+            findProjectForFile: (file: string) => projectOf(file),
             getProjectPathForFile: () => dir,
             getEquatesTokens: () => [],
             getEquatesPath: () => undefined,
@@ -158,6 +196,20 @@ suite('References reach modules headed by an INCLUDEd MEMBER shim', () => {
         const modules = FileRelationshipGraph.getInstance().getMemberFiles(path.join(dir, 'app1.clw'))
             .map(f => path.basename(f).toLowerCase()).sort();
         assert.deepStrictEqual(modules, ['browse.clw', 'ctthing.clw', 'member.clw', 'other.clw']);
+    });
+
+    test('a second program\'s modules, shim-headed or not, are its own and not the first\'s', () => {
+        const modulesOf = (program: string): string[] => FileRelationshipGraph.getInstance()
+            .getMemberFiles(path.join(dir, program)).map(f => path.basename(f).toLowerCase()).sort();
+        assert.deepStrictEqual(modulesOf('app2.clw'), ['member2.clw', 'plain2.clw', 'report.clw']);
+        for (const m of modulesOf('app1.clw')) assert.ok(!modulesOf('app2.clw').includes(m), `${m} is in both programs`);
+    });
+
+    test('a second program\'s global of the same name gets only its own modules\' uses', async () => {
+        const COUNTER2 = ['app2.clw:6', 'app2.clw:8', 'plain2.clw:5', 'report.clw:5'];
+        assert.deepStrictEqual(await hits('app2.clw', 6, 'Counter'), COUNTER2);
+        assert.deepStrictEqual(await hits('report.clw', 5, 'Counter'), COUNTER2);
+        assert.deepStrictEqual(await hits('plain2.clw', 5, 'Counter'), COUNTER2);
     });
 
     test('control: from the call in the shim-headed module, every site is found', async () => {

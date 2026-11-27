@@ -1088,9 +1088,12 @@ export class FileRelationshipGraph {
      * Returns the modules of the given PROGRAM file: the files with a MEMBER edge to it, plus the
      * files that INCLUDE one of those (modules headed by a MEMBER shim). Empty for a file that is
      * not a program, so `length > 0` still answers "is this a program".
-     * Used by FAR to widen `filesToSearch` for local classes — sibling MEMBER
-     * files of the cursor's file may contain cross-procedure callers (P2b,
-     * task 10ea5a80 track-(a) widening).
+     * The list is a search set, not an exact module list: it can also hold a file that is not a
+     * module (an .inc that includes the shim, the shim itself). That is harmless for every caller,
+     * which only searches or counts these files.
+     * Used by FAR's search sets for the program's data and local classes (sibling MEMBER files
+     * may contain cross-procedure callers, P2b), the code-lens estimate and the sibling label
+     * index.
      *
      * A module headed by an INCLUDEd shim (`INCLUDE('member.clw')` in place of its own MEMBER)
      * has no MEMBER edge: the graph records it on the shim, which is listed too. Such a module
