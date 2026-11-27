@@ -1090,7 +1090,7 @@ export class FileRelationshipGraph {
      * not a program, so `length > 0` still answers "is this a program".
      * The list is a search set, not an exact module list: it can also hold a file that is not a
      * module (an .inc that includes the shim, the shim itself). That is harmless for every caller,
-     * which only searches or counts these files.
+     * which only searches these files, counts in them or tests the list for emptiness.
      * Used by FAR's search sets for the program's data and local classes (sibling MEMBER files
      * may contain cross-procedure callers, P2b), the code-lens estimate and the sibling label
      * index.
